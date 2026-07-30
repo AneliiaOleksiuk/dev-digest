@@ -25,7 +25,13 @@ _(to be filled in)_
 
 ## Codebase Patterns
 
-_(to be filled in)_
+- **`SeverityBadge` (`src/vendor/ui/primitives/Badge.tsx`) already accepts a
+  `count` prop** — before building a new component for any "N findings by
+  severity" UI (a PR-list column, a run-timeline line, a stat tile), reuse
+  `<SeverityBadge severity="CRITICAL" count={n} compact />` per non-zero
+  severity rather than inventing a bespoke icon+count element. It was
+  previously only ever used per-finding (`FindingCard.tsx`, no `count`
+  prop passed) — passing `count` and reusing it for aggregates just works.
 
 ## Tool & Library Notes
 
@@ -42,6 +48,13 @@ _(to be filled in)_
   `RunTraceDrawer/TraceBody`, a tokens+cost line in `RunHistory`'s
   timeline (always rendered, collapses to `"—"` when no data), and a new
   COST column in the PR list (`constants.ts`/`PRRow.tsx`/`styles.ts`).
+- 2026-07-30: Findings counter (L01) — same 2-screen pattern as the cost
+  badge: a FINDINGS column in the PR list (`PRRow.tsx`/`constants.ts`/
+  `styles.ts`, `SeverityBadge` per non-zero severity) and per-severity
+  badges replacing the plain-text findings line in `RunHistory.tsx`'s
+  timeline. Removed the dead `PrRowView` type from `src/lib/types.ts` — it
+  anticipated this exact `{CRITICAL,WARNING,SUGGESTION}` shape but was
+  unused; the real fields now live directly on `PrMeta`.
 
 ## Open Questions
 

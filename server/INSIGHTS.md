@@ -12,6 +12,20 @@ guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
 
 ## What Works
 
+- **Findings severity breakdown (critical/warning/suggestion counts) needed
+  zero DB migration.** `server/src/modules/pulls/status.ts` already had a
+  tested-but-unused `rollupSeverities(rows: {severity}[])` /
+  `SeverityCounts` helper from an earlier, abandoned pass at this feature.
+  Reused it as-is (no changes to it or its test
+  `server/test/pulls-status.test.ts`) by adding one more `IN`-query against
+  `t.findings` in both `modules/pulls/routes.ts` (PR list, keyed by the
+  latest review's `reviewId`) and `modules/reviews/repository/run.repo.ts`'s
+  `listRunsForPull` (per-run, keyed by `reviews.runId` joined to
+  `findings.reviewId`) — mirrors the existing `costByRunId` "one more
+  IN-query + JS grouping" pattern already in `pulls/routes.ts`. Unlike
+  `findings_count`/`blockers` on `agent_runs`, these counts are **not**
+  denormalized at run completion — computed live on every read instead,
+  since the query is cheap at this list size and it avoided a schema change.
 - **Re-adding per-run `cost_usd` needs zero `reviewer-core`/LLM-adapter
   changes.** `reviewer-core`'s `reviewPullRequest()`
   (`reviewer-core/src/review/run.ts`) and the server's `PriceBook`/
@@ -43,7 +57,10 @@ _(to be filled in)_
   per-PR aggregate field on this endpoint should follow this same
   "latest-review's-linked-run" semantics for consistency, unless a
   product decision explicitly asks for a different rollup (e.g. sum across
-  all runs).
+  all runs). The same "latest-review's-linked-run" semantics were used for
+  the new `critical_count`/`warning_count`/`suggestion_count` fields added
+  2026-07-30 — they're the severity breakdown of that SAME latest review,
+  not summed across every agent/run on the PR.
 
 ## Tool & Library Notes
 
@@ -73,6 +90,12 @@ _(to be filled in)_
   `cost_usd` to `RunStats`/`RunSummary`/`PrMeta` contracts (both vendor
   copies), and extended the pulls-list route to resolve cost via the same
   `reviews.runId` link already used for `score`.
+- 2026-07-30: Findings counter (L01) — wired up the previously-dead
+  `rollupSeverities`/`SeverityCounts` (no migration; see What Works above),
+  added `critical_count`/`warning_count`/`suggestion_count` to `PrMeta` and
+  `RunSummary` (both vendor copies), removed the dead client `PrRowView`
+  type it was blocking, and extended `reviews.it.test.ts` to assert both
+  endpoints return the grounded severity breakdown.
 
 ## Open Questions
 

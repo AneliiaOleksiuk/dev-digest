@@ -31,6 +31,9 @@ function run(o: Partial<RunSummary>): RunSummary {
     ran_at: "2026-06-11T18:44:34.000Z",
     score: null,
     blockers: null,
+    critical_count: null,
+    warning_count: null,
+    suggestion_count: null,
     ...o,
   };
 }
@@ -62,6 +65,22 @@ describe("RunHistory — outcome badge", () => {
     renderRuns([run({ status: "done", findings_count: 3, blockers: 0, score: 72 })]);
     expect(screen.getByText("reviewed")).toBeInTheDocument();
     expect(screen.queryByText(/blockers/)).not.toBeInTheDocument();
+  });
+
+  it("shows one severity badge per non-zero count for a run with mixed findings", () => {
+    renderRuns([
+      run({
+        status: "done",
+        findings_count: 3,
+        blockers: 1,
+        score: 61,
+        critical_count: 1,
+        warning_count: 1,
+        suggestion_count: 1,
+      }),
+    ]);
+    expect(screen.getAllByText("1")).toHaveLength(3); // one count per severity badge
+    expect(screen.getByText(/1 blockers/)).toBeInTheDocument();
   });
 
   it("a failed run reads 'error'", () => {

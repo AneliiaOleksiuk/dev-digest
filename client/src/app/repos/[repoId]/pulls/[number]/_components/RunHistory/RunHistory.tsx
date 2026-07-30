@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
+import { Badge, Icon, CircularScore, SeverityBadge, type IconName } from "@devdigest/ui";
 import type { RunSummary, PrCommit } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
 
@@ -150,6 +150,7 @@ export function RunHistory({
         const r = item.run;
         const o = outcomeOf(r);
         const settled = r.status === "done";
+        const { critical_count, warning_count, suggestion_count, blockers } = r;
         return (
           <div key={`run:${r.run_id}`} style={rowStyle}>
             <Badge color={o.color} bg={o.bg} icon={o.icon}>
@@ -190,9 +191,17 @@ export function RunHistory({
                 </div>
               )}
               {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
-                  {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                  {critical_count || warning_count || suggestion_count ? (
+                    <>
+                      {!!critical_count && <SeverityBadge severity="CRITICAL" count={critical_count} compact />}
+                      {!!warning_count && <SeverityBadge severity="WARNING" count={warning_count} compact />}
+                      {!!suggestion_count && <SeverityBadge severity="SUGGESTION" count={suggestion_count} compact />}
+                    </>
+                  ) : (
+                    t("runStatus.findings", { count: 0 })
+                  )}
+                  {(blockers ?? 0) > 0 ? t("runStatus.blockers", { count: blockers ?? 0 }) : ""}
                 </div>
               )}
             </div>

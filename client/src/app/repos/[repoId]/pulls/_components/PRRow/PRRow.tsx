@@ -4,7 +4,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
+import { Icon, Avatar, Badge, CircularScore, SeverityBadge } from "@devdigest/ui";
 import type { PrMeta } from "@/lib/types";
 import { formatCost } from "@/helpers/format";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
@@ -17,6 +17,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const [h, setH] = React.useState(false);
   const st = STATUS_META[pr.status] ?? STATUS_META.needs_review!;
   const { size, lines } = sizeOf(pr);
+  const { critical_count, warning_count, suggestion_count } = pr;
   const reviewed = pr.score != null; // null score ⇒ PR has never been reviewed
   return (
     <div
@@ -50,6 +51,17 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
       <div style={s.scoreCell}>
         {reviewed ? (
           <CircularScore score={pr.score!} size={34} stroke={3} />
+        ) : (
+          <span style={s.muted}>—</span>
+        )}
+      </div>
+      <div style={s.findingsCell}>
+        {critical_count || warning_count || suggestion_count ? (
+          <>
+            {!!critical_count && <SeverityBadge severity="CRITICAL" count={critical_count} compact />}
+            {!!warning_count && <SeverityBadge severity="WARNING" count={warning_count} compact />}
+            {!!suggestion_count && <SeverityBadge severity="SUGGESTION" count={suggestion_count} compact />}
+          </>
         ) : (
           <span style={s.muted}>—</span>
         )}

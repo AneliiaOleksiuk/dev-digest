@@ -4,12 +4,13 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Icon, Avatar, Badge, CircularScore, SeverityBadge } from "@devdigest/ui";
+import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
 import type { PrMeta } from "@/lib/types";
 import { formatCost } from "@/helpers/format";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { relativeTime, sizeOf } from "../../helpers";
 import { s } from "../../styles";
+import { FindingsPreview } from "./_components/FindingsPreview";
 
 export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const t = useTranslations("prReview");
@@ -57,11 +58,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
       </div>
       <div style={s.findingsCell}>
         {critical_count || warning_count || suggestion_count ? (
-          <>
-            {!!critical_count && <SeverityBadge severity="CRITICAL" count={critical_count} compact />}
-            {!!warning_count && <SeverityBadge severity="WARNING" count={warning_count} compact />}
-            {!!suggestion_count && <SeverityBadge severity="SUGGESTION" count={suggestion_count} compact />}
-          </>
+          <FindingsPreview pullRequest={pr} repoId={repoId} />
         ) : (
           <span style={s.muted}>—</span>
         )}

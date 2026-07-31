@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { PrMeta } from "@/lib/types";
 import messages from "../../../../../../../messages/en/prReview.json";
 
@@ -37,10 +38,13 @@ function pr(o: Partial<PrMeta>): PrMeta {
 }
 
 function renderWithIntl(ui: React.ReactElement) {
+  const queryClient = new QueryClient();
   return render(
-    <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
-      {ui}
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={queryClient}>
+      <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+        {ui}
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 

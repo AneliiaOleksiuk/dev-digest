@@ -1,11 +1,12 @@
 import type { CSSProperties } from "react";
-import { GRID } from "./constants";
+import { GRID, MIN_ROW_WIDTH } from "./constants";
 
 /** Co-located styles for the PR list page (extracted from inline styles). */
 export const s = {
   row: (hover: boolean): CSSProperties => ({
     display: "grid",
     gridTemplateColumns: GRID,
+    minWidth: MIN_ROW_WIDTH,
     alignItems: "center",
     gap: 14,
     padding: "12px 20px",
@@ -44,7 +45,7 @@ export const s = {
     display: "flex",
     alignItems: "center",
     gap: 4,
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
   } satisfies CSSProperties,
   updatedCell: {
     fontSize: 12,
@@ -98,12 +99,14 @@ export const s = {
     margin: "14px 32px 44px",
     border: "1px solid var(--border)",
     borderRadius: 10,
-    overflow: "hidden",
+    overflowX: "auto",
+    overflowY: "hidden",
     background: "var(--bg-elevated)",
   } satisfies CSSProperties,
   headRow: {
     display: "grid",
     gridTemplateColumns: GRID,
+    minWidth: MIN_ROW_WIDTH,
     gap: 14,
     padding: "10px 20px",
     borderBottom: "1px solid var(--border)",

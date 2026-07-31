@@ -68,6 +68,36 @@ _(to be filled in)_
 
 ## Recurring Errors & Fixes
 
+- **A review run that completes instantly with `findings_count: 0` and a
+  summary literally saying "The diff is empty — no code changes were
+  introduced"/"no files were changed", even though the PR clearly has a
+  non-empty diff, means the reviewer's local git diff failed silently, not
+  that the PR is actually empty.** `loadDiff()`
+  (`src/modules/reviews/diff-loader.ts`) runs `git diff base...head`
+  against the **local clone** at `server/clones/<owner>/<repo>`
+  (`src/adapters/git/simple-git.ts:94-95`), and that clone's
+  `remote.origin.fetch` refspec is hardcoded to
+  `+refs/heads/main:refs/remotes/origin/main` (set wherever the clone is
+  first created) — it **only ever fetches `main`**, never other branches.
+  So for any PR whose head commit isn't reachable from `main` in that local
+  clone (e.g. a brand-new PR branch just pushed/opened, or a fork branch
+  the clone never fetched), `git diff` throws/returns nothing, and
+  `loadDiff()`'s fallback to `diffFromPrFiles()` (reconstructing from
+  persisted `pr_files` patches) *also* comes up empty — because
+  `POST /repos/:id/poll` (`src/modules/polling/routes.ts`), the endpoint
+  that syncs new PRs from GitHub, only upserts PR metadata into
+  `pull_requests`; it never persists file patches into whatever table
+  `ReviewRepository.getPrFiles()` reads. Net effect: **both the primary
+  diff source and its fallback are empty for any PR synced via `/poll`
+  whose branch was never locally fetched**, and the reviewer silently
+  "reviews" nothing while reporting success. Fix: `cd` into the repo's
+  clone dir and manually fetch the specific branch/SHA (e.g.
+  `git fetch origin <branch>`) before (re-)triggering the review —
+  `POST /repos/:id/refresh` does NOT help here, it re-fetches only `main`
+  too. Confirmed via `git cat-file -t <sha>` in the clone dir before/after.
+  Delete the empty-diff run(s) (`DELETE /runs/:id`) and re-trigger
+  (`POST /pulls/:id/review`) once the SHA is fetchable.
+
 - **`pnpm db:migrate` / `pnpm db:seed` silently do nothing on Windows,
   leaving an empty DB** (symptom: app errors like `relation "users" does
   not exist` or "No default workspace found" even right after running
@@ -96,6 +126,16 @@ _(to be filled in)_
   `RunSummary` (both vendor copies), removed the dead client `PrRowView`
   type it was blocking, and extended `reviews.it.test.ts` to assert both
   endpoints return the grounded severity breakdown.
+- 2026-07-31: Verified the client-side findings-counter interactivity work
+  (hover popover, clickable badges, in-diff markers) against a real PR —
+  pushed `demo/findings-ui-verification` (PR #2) to `AneliiaOleksiuk/dev-
+  digest` with planted CRITICAL/WARNING/SUGGESTION issues under
+  `qa/review-bait/`, synced via `/poll`, hit the local-clone-fetch gap
+  above, worked around it, then got real mixed-severity findings from all
+  3 configured agents. See Recurring Errors & Fixes for the root cause —
+  worth fixing properly (e.g. `/poll` or `/review` fetching the specific
+  PR branch before diffing) so this doesn't surprise the next person who
+  reviews a freshly-opened PR.
 
 ## Open Questions
 

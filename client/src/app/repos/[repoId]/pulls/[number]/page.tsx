@@ -59,13 +59,30 @@ export default function PRDetailPage() {
 
   const tab = search.get("tab") ?? "overview";
   const traceRunId = search.get("trace");
-  const setParam = (key: string, val: string | null) => {
+  // Findings deep-link: which run/severity/finding the Findings tab should
+  // focus, driven entirely by the URL so it's shareable/reload-safe (set from
+  // the PR list hover preview, the Timeline, or a Review-runs header badge).
+  const focusRunId = search.get("run");
+  const focusSeverity = search.get("severity");
+  const focusFindingId = search.get("finding");
+  const setParams = (patch: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
-    if (val == null) sp.delete(key);
-    else sp.set(key, val);
+    for (const [key, val] of Object.entries(patch)) {
+      if (val == null) sp.delete(key);
+      else sp.set(key, val);
+    }
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
+  const setParam = (key: string, val: string | null) => setParams({ [key]: val });
   const setTab = (t: string) => setParam("tab", t);
+  const focusFindings = (opts: { runId?: string | null; severity?: string | null; findingId?: string | null }) =>
+    setParams({
+      tab: "findings",
+      run: opts.runId ?? null,
+      severity: opts.severity ?? null,
+      finding: opts.findingId ?? null,
+    });
+  const clearFocus = () => focusFindings({});
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -148,6 +165,11 @@ export default function PRDetailPage() {
             repoFullName={repoFullName}
             headSha={pr.head_sha}
             cancelMutation={cancel}
+            focusRunId={focusRunId}
+            focusSeverity={focusSeverity}
+            focusFindingId={focusFindingId}
+            onFocusFindings={focusFindings}
+            onClearFocus={clearFocus}
             onOpenTrace={(id) => setParam("trace", id)}
             onDelete={(id) => {
               if (window.confirm("Delete this run from history? (its logs are removed too)"))
@@ -167,6 +189,8 @@ export default function PRDetailPage() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            findings={allFindings}
+            onFocusFindings={focusFindings}
           />
         )}
       </div>

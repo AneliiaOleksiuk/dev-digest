@@ -6,11 +6,14 @@
 "use client";
 
 import React from "react";
-import { Icon, Badge } from "@devdigest/ui";
+import { useTranslations } from "next-intl";
+import { Icon, Badge, type Severity } from "@devdigest/ui";
 import type { ReviewRecord, Verdict } from "@devdigest/shared";
 import { FindingsPanel } from "../FindingsPanel";
 import { VerdictBanner } from "../VerdictBanner";
 import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
+import { SeverityBadgeRow, unstyledButtonStyle } from "@/components/severity-badge-button";
+import { summarizeFindings } from "./helpers";
 
 const VERDICT_COLOR: Record<string, string> = {
   request_changes: "var(--crit)",
@@ -30,7 +33,11 @@ export function ReviewRunAccordion({
   repoFullName,
   headSha,
   targetRunId = null,
+  targetSeverity = null,
+  targetFindingId = null,
   targetNonce = 0,
+  onSeverityClick,
+  onClearFilter,
 }: {
   review: ReviewRecord;
   prId: string;
@@ -40,26 +47,44 @@ export function ReviewRunAccordion({
   /** When this matches review.run_id, the accordion opens and scrolls into view
    *  (driven from the Timeline: clicking an agent name navigates here). */
   targetRunId?: string | null;
+  /** Findings severity to filter/highlight to (driven by a clicked findings
+   *  counter). With no targetRunId, every run containing this severity opens
+   *  (a PR-list entry point isn't scoped to one run); with a targetRunId, only
+   *  that run reacts. */
+  targetSeverity?: string | null;
+  /** A single finding to scroll to + highlight within this run's panel. */
+  targetFindingId?: string | null;
   targetNonce?: number;
+  /** Clicking one of this run's own header count badges. */
+  onSeverityClick?: (severity: Severity) => void;
+  /** Clear an active severity/finding filter. */
+  onClearFilter?: () => void;
 }) {
+  const t = useTranslations("prReview");
+  const { run_id, findings, verdict, score, agent_name, created_at, id, summary } = review;
+  const { counts: severityCounts, blockers } = summarizeFindings(findings);
+  const verdictColor = verdict ? VERDICT_COLOR[verdict] ?? "var(--text-muted)" : "var(--text-muted)";
+
+  const isTargetedRun = !!run_id && run_id === targetRunId;
+  const isTargetedSeverity = !targetRunId && !!targetSeverity && findings.some((f) => f.severity === targetSeverity);
+  const isFiltered = isTargetedRun || isTargetedSeverity;
+
   const [open, setOpen] = React.useState(defaultOpen);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
-    if (review.run_id && review.run_id === targetRunId) {
+    if (isTargetedRun || isTargetedSeverity) {
       setOpen(true);
-      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (isTargetedRun) rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRunId, targetNonce, review.run_id]);
+  }, [targetRunId, targetSeverity, targetNonce, run_id]);
+
   const del = useDeleteReview(prId);
-  const findings = review.findings;
-  const blockers = findings.filter((f) => f.severity === "CRITICAL" && !f.dismissed_at).length;
-  const verdictColor = review.verdict ? VERDICT_COLOR[review.verdict] ?? "var(--text-muted)" : "var(--text-muted)";
 
   return (
     <div
       ref={rootRef}
-      id={review.run_id ? `review-run-${review.run_id}` : undefined}
+      id={run_id ? `review-run-${run_id}` : undefined}
       style={{
         border: "1px solid var(--border)",
         borderRadius: 10,
@@ -87,30 +112,49 @@ export function ReviewRunAccordion({
         }}
       >
         <Icon.Cpu size={15} style={{ color: "var(--text-muted)" }} />
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{review.agent_name ?? "Agent"}</span>
-        {review.verdict && (
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{agent_name ?? "Agent"}</span>
+        {verdict && (
           <Badge color={verdictColor} bg="transparent">
-            {review.verdict.replace("_", " ")}
+            {verdict.replace("_", " ")}
           </Badge>
         )}
-        <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-          {findings.length} finding{findings.length === 1 ? "" : "s"}
-          {blockers > 0 ? ` · ${blockers} blocker${blockers === 1 ? "" : "s"}` : ""}
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-muted)" }}>
+          {findings.length > 0 ? (
+            <SeverityBadgeRow
+              counts={severityCounts}
+              labelFor={(severity) => t("timeline.filterBySeverity", { severity })}
+              onClick={(severity) => onSeverityClick?.(severity)}
+            />
+          ) : (
+            "0 findings"
+          )}
+          {blockers > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSeverityClick?.("CRITICAL");
+              }}
+              style={unstyledButtonStyle}
+            >
+              {blockers} blocker{blockers === 1 ? "" : "s"}
+            </button>
+          )}
         </span>
         <span style={{ flex: 1 }} />
-        {review.score != null && (
+        {score != null && (
           <Badge mono color="var(--text-secondary)">
-            {review.score}
+            {score}
           </Badge>
         )}
         <span className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {formatWhen(review.created_at)}
+          {formatWhen(created_at)}
         </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm(`Delete this "${review.agent_name ?? "agent"}" review run and its findings?`)) {
-              del.mutate(review.id);
+            if (window.confirm(`Delete this "${agent_name ?? "agent"}" review run and its findings?`)) {
+              del.mutate(id);
             }
           }}
           disabled={del.isPending}
@@ -135,15 +179,15 @@ export function ReviewRunAccordion({
 
       {open && (
         <div style={{ padding: "0 16px 16px" }}>
-          {review.verdict && (
+          {verdict && (
             <div style={{ marginBottom: 16 }}>
               <VerdictBanner
-                verdict={review.verdict as Verdict}
-                summary={review.summary}
-                score={review.score}
+                verdict={verdict as Verdict}
+                summary={summary}
+                score={score}
                 findingsCount={findings.length}
                 blockers={blockers}
-                agentName={review.agent_name}
+                agentName={agent_name}
               />
             </div>
           )}
@@ -152,6 +196,9 @@ export function ReviewRunAccordion({
             prId={prId}
             repoFullName={repoFullName}
             headSha={headSha}
+            severityFilter={isFiltered ? targetSeverity : null}
+            targetFindingId={isFiltered ? targetFindingId : null}
+            onClearFilter={onClearFilter}
           />
         </div>
       )}

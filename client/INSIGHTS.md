@@ -21,7 +21,21 @@ guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
 
 ## What Doesn't Work
 
-_(to be filled in)_
+- **`pnpm test run` is not "run the tests"** — `test` is already
+  `vitest run`, so the extra `run` arg gets passed to vitest as a filename
+  filter, silently narrowing the suite to files whose path contains "run"
+  (e.g. 4/13 files: `RunHistory`, `RunStatus`, `RunReviewDropdown`,
+  `RunTraceDrawer`) with a clean "all passed" exit — no warning that most
+  of the suite didn't execute. Always run bare `pnpm test` for the full
+  suite; only append a filter when you actually want one.
+- **PR-list `tableCard` cannot host an in-tree absolute popover.** It needs
+  `overflowX: "auto"` (horizontal scroll for `MIN_ROW_WIDTH`) which, paired
+  with `overflowY: "hidden"`, clips anything that paints past the card's
+  bottom edge — exactly the findings-preview cut-off above the scrollbar.
+  You also can't "fix" this by setting `overflowY: "visible"` while
+  keeping `overflowX: "auto"`: CSS computes the visible axis to `auto`.
+  Fix is `Popover` portaling to `document.body` with `position: fixed`
+  (viewport coords), not relaxing `tableCard` overflow.
 
 ## Codebase Patterns
 
@@ -32,6 +46,41 @@ _(to be filled in)_
   severity rather than inventing a bespoke icon+count element. It was
   previously only ever used per-finding (`FindingCard.tsx`, no `count`
   prop passed) — passing `count` and reusing it for aggregates just works.
+- **New reusable UI primitives do NOT go in `src/vendor/ui/**`** (it's
+  do-not-touch, hand-mirrored per `client/CLAUDE.md`). They go in
+  `client/src/components/<name>/` instead — the same tier `diff-viewer`
+  already lives in. Established this with `components/popover/Popover.tsx`
+  (generic hover-triggered floating panel — `Dropdown` in `vendor/ui/kit`
+  is the closest existing thing but is click-triggered and its panel body
+  only accepts a typed `items` list, not arbitrary children) and
+  `components/severity-badge-button/` (`SeverityBadgeButton` +
+  `SeverityBadgeRow`, wrapping `SeverityBadge` as a real clickable button —
+  reused across `PRRow`, `RunHistory`, and `ReviewRunAccordion` so the
+  three-badge-per-severity JSX block exists exactly once).
+- **PR-detail findings deep-link contract**: `[number]/page.tsx` exposes
+  `?tab=&run=&severity=&finding=` as one URL-driven focus state, via a
+  `focusFindings({runId?, severity?, findingId?})` helper built on a new
+  `setParams(patch)` (multi-key version of the pre-existing `setParam`,
+  needed because setting `tab`+`run`+`severity` via three sequential
+  single-key `setParam` calls races — each snapshots `search` before the
+  previous write commits). `FindingsTab` → `ReviewRunAccordion` →
+  `FindingsPanel` thread these down as `targetRunId`/`targetSeverity`/
+  `targetFindingId`; a run match scrolls, a bare-severity match (no run —
+  the PR-list entry point) opens every matching run without scrolling.
+- **`FindingCard`'s `data-finding-id={f.id}` attribute was dead scaffolding**
+  until this session — added earlier but nothing read it. `FindingsPanel`
+  now uses it directly via `document.querySelector('[data-finding-id="…"]')
+  .scrollIntoView(...)` in a `targetFindingId` effect — simpler than
+  threading a ref map through the list, and safe because ids are unique
+  across the whole document even when several `ReviewRunAccordion`s are
+  open at once (matching bare-severity case) and all run the same effect.
+- **`usePrLatestFindings(prId, {enabled})` in `lib/hooks/reviews.ts`
+  intentionally reuses `usePrReviews`'s exact query key** (`["reviews",
+  prId]`) — it's the same endpoint (`GET /pulls/:id/reviews`), just gated
+  by an `enabled` flag for lazy (hover-triggered) fetching from the PR
+  list. Reusing the key means hovering a PR-list row and later opening
+  that PR's detail page (or vice versa) shares one react-query cache entry
+  instead of double-fetching.
 
 ## Tool & Library Notes
 
@@ -55,7 +104,37 @@ _(to be filled in)_
   timeline. Removed the dead `PrRowView` type from `src/lib/types.ts` — it
   anticipated this exact `{CRITICAL,WARNING,SUGGESTION}` shape but was
   unused; the real fields now live directly on `PrMeta`.
+- 2026-07-31: Made the L01 findings counters interactive end-to-end: a
+  hover popover on the PR list (`PRRow/_components/FindingsPreview`, lazy
+  `usePrLatestFindings`), clickable severity badges everywhere they appear
+  (PR list, Timeline, `ReviewRunAccordion` header — converted from plain
+  text to real `SeverityBadge`s), all landing on the Findings tab
+  URL-deep-linked (`?tab=findings&run=&severity=&finding=`) with a
+  filter chip + scroll/flash-highlight to the exact card. Also threaded
+  findings into the "Files changed" diff (`diff-viewer/findings.ts` —
+  `findingsForLine`/`severityCountsForFile`/`mostSevereFinding`): a
+  severity color bar + hover-tag per covered line, a per-file badge row.
+  Deliberately did NOT build the Core/Wiring/Boilerplate "Smart Diff"
+  grouping shown in the reference screenshots — see Open Questions.
 
 ## Open Questions
 
-_(to be filled in)_
+- **Smart Diff (Core logic / Wiring / Boilerplate grouping + per-file "what
+  this does" AI summary) is unwired scaffolding, not a built feature.**
+  The Zod contract (`SmartDiff`/`SmartDiffGroup`/`SmartDiffFile` incl.
+  `pseudocode_summary`, `client/src/vendor/shared/contracts/brief.ts:80-113`)
+  and i18n keys (`smartDiff.*` in `messages/en/prReview.json`) exist, but
+  no server endpoint, no client hook, and no component reads either —
+  confirmed via full-repo grep, zero hits outside the contract file. Don't
+  assume it's implemented anywhere; building it needs a new LLM-backed
+  server endpoint (something has to generate the per-file summary + role
+  classification), which is a materially different scope than wiring
+  existing `FindingRecord` data through existing components.
+- **No browser-automation tool is set up for this Windows dev environment**
+  — `agent-browser` (which `e2e/run.ts` expects on `PATH`) and
+  `chromium-cli` are both absent. UI-behavior changes here could only be
+  verified via `tsc --noEmit` + the Vitest/RTL suite (including
+  fireEvent+fake-timers coverage of hover/click/navigation) plus a
+  curl-level 200-status check against the live `pnpm dev` server — not an
+  actual interactive click-through. If this comes up again, either install
+  `agent-browser` for the `e2e` package or set up Playwright directly.

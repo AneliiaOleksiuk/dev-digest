@@ -24,51 +24,61 @@ import { githubBlobUrl } from "../../../../../../../lib/github-urls";
 import { s } from "./styles";
 
 export function FindingCard({
-  f,
+  finding,
   focused,
   defaultExpanded,
+  forceExpanded,
+  highlighted,
   onAction,
   pending,
   repoFullName,
   headSha,
 }: {
-  f: FindingRecord;
+  finding: FindingRecord;
   focused?: boolean;
   defaultExpanded?: boolean;
+  /** Force this card open — used to land on a specific finding from a deep link.
+   *  Only forces open on change; a later manual collapse by the user sticks. */
+  forceExpanded?: boolean;
+  /** Briefly emphasized border/shadow — the deep-linked finding among others. */
+  highlighted?: boolean;
   onAction?: (action: FindingActionKind, reply?: string) => void;
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
 }) {
   const t = useTranslations("prReview");
+  const { id, severity, title, category, file, confidence, rationale, suggestion } = finding;
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
-  const sevColor = SEV_COLOR[f.severity] ?? SEV_COLOR_FALLBACK;
+  React.useEffect(() => {
+    if (forceExpanded) setExpanded(true);
+  }, [forceExpanded, id]);
+
+  const sevColor = SEV_COLOR[severity] ?? SEV_COLOR_FALLBACK;
   const fileHref =
-    repoFullName && headSha
-      ? githubBlobUrl(repoFullName, headSha, f.file, f.start_line, f.end_line)
-      : undefined;
-  const accepted = !!f.accepted_at;
-  const dismissed = !!f.dismissed_at;
+    repoFullName && headSha ? githubBlobUrl(repoFullName, headSha, file, finding.start_line, finding.end_line) : undefined;
+  const accepted = !!finding.accepted_at;
+  const dismissed = !!finding.dismissed_at;
   const muted = accepted || dismissed;
 
   return (
-    <div data-finding-id={f.id} style={s.card(!!focused, sevColor, muted)}>
+    <div data-finding-id={id} style={s.card(!!focused, sevColor, muted, !!highlighted)}>
       <div onClick={() => setExpanded((e) => !e)} style={s.header}>
         <div style={s.badgeWrap}>
-          <SeverityBadge severity={f.severity as Severity} compact />
+          <SeverityBadge severity={severity as Severity} compact />
         </div>
         <div style={s.headerMain}>
           <div style={s.titleRow}>
-            <span style={s.title(muted, dismissed)}>{f.title}</span>
-            <CategoryTag category={f.category as Category} />
+            <span style={s.title(muted, dismissed)}>{title}</span>
+            <CategoryTag category={category as Category} />
             {accepted && <span style={s.acceptedTag}>{t("finding.accepted")}</span>}
             {dismissed && <span style={s.dismissedTag}>{t("finding.dismissed")}</span>}
           </div>
           <div style={s.metaRow}>
             <MonoLink href={fileHref}>
-              {f.file}:{lineLabel(f)}
+              {file}:{lineLabel(finding)}
             </MonoLink>
-            <ConfidenceNum value={f.confidence} />
+            <ConfidenceNum value={confidence} />
           </div>
         </div>
         <Icon.ChevronDown size={16} style={s.chevron(expanded)} />
@@ -77,13 +87,13 @@ export function FindingCard({
       {expanded && (
         <div style={s.body}>
           <div style={s.prose}>
-            <Markdown>{f.rationale}</Markdown>
+            <Markdown>{rationale}</Markdown>
           </div>
-          {f.suggestion && (
+          {suggestion && (
             <div style={s.suggestionWrap}>
               <div style={s.suggestionLabel}>{t("finding.suggestedFix")}</div>
               <div style={s.prose}>
-                <Markdown>{f.suggestion}</Markdown>
+                <Markdown>{suggestion}</Markdown>
               </div>
             </div>
           )}

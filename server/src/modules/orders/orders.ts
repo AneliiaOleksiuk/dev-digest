@@ -1,4 +1,4 @@
-import { db } from '../../server/src/db/client';
+import { db } from '../../db/client';
 
 class InvalidStatusError extends Error {
   constructor(status: string) {

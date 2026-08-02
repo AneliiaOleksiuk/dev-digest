@@ -131,6 +131,17 @@ export const Skill = z.object({
 });
 export type Skill = z.infer<typeof Skill>;
 
+// The immutable body snapshot captured in `skill_versions` whenever a skill's
+// body (its "configuration text") changes. Only `body` is versioned — name,
+// description, and type are not part of what a skill "does" in the prompt.
+export const SkillVersion = z.object({
+  skill_id: z.string(),
+  version: z.number().int(),
+  body: z.string(),
+  created_at: z.string(),
+});
+export type SkillVersion = z.infer<typeof SkillVersion>;
+
 export const CommunitySkill = z.object({
   name: z.string(),
   repo: z.string(),

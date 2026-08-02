@@ -184,6 +184,19 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Skills — linked via the Agent Editor's Skills tab, ordered. Only
+      // *enabled* skills reach the prompt: linking ≠ trusting (imported_url/
+      // community skills land disabled until a human vets them).
+      const linkedSkills = await this.agents.linkedSkills(agent.id);
+      const enabledSkills = linkedSkills.filter((link) => link.skill.enabled);
+      if (enabledSkills.length > 0) {
+        runLog.info(`${enabledSkills.length} skill(s) linked and enabled — added to prompt`);
+      }
+      const skills =
+        enabledSkills.length > 0
+          ? enabledSkills.map((link) => `### ${link.skill.name}\n${link.skill.body}`)
+          : undefined;
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -201,6 +214,8 @@ export class ReviewRunExecutor {
         ...(callersDigest ? { callers: callersDigest } : {}),
         // T3 — repo skeleton, same omit-when-empty contract.
         ...(repoMap ? { repoMap } : {}),
+        // Linked + enabled skills, same omit-when-empty contract.
+        ...(skills ? { skills } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),

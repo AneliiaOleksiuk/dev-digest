@@ -8,7 +8,7 @@ import React from "react";
 import type { Severity } from "@devdigest/ui";
 import { SeverityBadgeButton } from "./SeverityBadgeButton";
 
-const SEVERITY_ORDER: Severity[] = ["CRITICAL", "WARNING", "SUGGESTION"];
+const SEVERITY_ORDER: Severity[] = ["CRITICAL", "WARNING", "SUGGESTION", "INFO"];
 
 export type SeverityCounts = Partial<Record<Severity, number | null | undefined>>;
 

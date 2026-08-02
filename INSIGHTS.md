@@ -2,11 +2,11 @@
 
 Accumulated engineering knowledge for this repo: what worked, what didn't,
 codebase-specific patterns, tool quirks, and open questions — kept OUT of
-[CLAUDE.md](CLAUDE.md) under the ≤100-line / map-not-documentation rule.
+[AGENTS.md](AGENTS.md) under the ≤100-line / map-not-documentation rule.
 
-Read at the start of every session per CLAUDE.md, and updated at the end via
+Read at the start of every session per AGENTS.md, and updated at the end via
 the `engineering-insights` skill — treat entries here as high-confidence
-guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
+guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 "cold read" test (actionable without re-investigation) — see
 [.claude/skills/engineering-insights/SKILL.md](.claude/skills/engineering-insights/SKILL.md).
 
@@ -39,7 +39,23 @@ _(to be filled in)_
 
 ## Session Notes
 
-_(to be filled in)_
+- 2026-08-02: Built the Skills feature end to end (spec at
+  `specs/skills-feature.md`) — reusable markdown prompt fragments linkable
+  to multiple review agents. Most of the data layer (`skills`/
+  `skill_versions`/`agent_skills` tables, `GET/POST /agents/:id/skills`,
+  the `parts.skills` prompt-assembly slot, the trace viewer's skills
+  block) already existed from an earlier lesson; this session added the
+  standalone `/skills` CRUD module, the client Skills page + Agent Editor
+  Skills tab, file/URL import, the `run-executor.ts` wiring that actually
+  populates the prompt, and a new "Test Quality Reviewer" agent + 4
+  skills (3 manual, 1 via the real import endpoint). See `server/
+  INSIGHTS.md` and `client/INSIGHTS.md` for the package-level details.
+  Community-catalog search/import deliberately deferred (no data source
+  exists yet). Verified live end-to-end via a real run (see `server/
+  INSIGHTS.md`), not just typecheck — the seeded demo repo's PR has an
+  unloadable diff locally (same file, Recurring Errors & Fixes), so the
+  live verification targeted the trace's prompt-assembly content/token
+  count rather than a findings diff on real code.
 
 ## Open Questions
 

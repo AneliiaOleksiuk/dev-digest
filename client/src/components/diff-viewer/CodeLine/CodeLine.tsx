@@ -14,6 +14,8 @@ import { s, lineRowFor, lineSignFor, findingRowAccent, findingTag } from "../sty
 import { CommentThreadView } from "../CommentThreadView";
 import { InlineComposer } from "../InlineComposer";
 import { Popover } from "@/components/popover";
+import { unstyledButtonStyle } from "@/components/severity-badge-button";
+import type { FocusFindingsOptions } from "@/lib/types";
 
 const LINE_TAG_LABEL: Record<string, string> = {
   CRITICAL: "blocker",
@@ -35,7 +37,7 @@ export function CodeLine({
   threads: CommentThread[];
   commenting?: DiffCommentApi;
   findings?: FindingRecord[];
-  onFocusFindings?: (opts: { severity?: string | null; findingId?: string | null }) => void;
+  onFocusFindings?: (opts: FocusFindingsOptions) => void;
 }) {
   const t = useTranslations("shell");
   const [hover, setHover] = React.useState(false);
@@ -87,7 +89,13 @@ export function CodeLine({
           <Popover
             panelStyle={s.findingPopoverPanel}
             trigger={
-              <span style={findingTag(primaryFinding.severity)}>{LINE_TAG_LABEL[primaryFinding.severity] ?? "finding"}</span>
+              <button
+                type="button"
+                aria-label={t("diffViewer.lineFindingsLabel")}
+                style={{ ...unstyledButtonStyle, ...findingTag(primaryFinding.severity) }}
+              >
+                {LINE_TAG_LABEL[primaryFinding.severity] ?? "finding"}
+              </button>
             }
           >
             <div style={s.findingPopoverList}>

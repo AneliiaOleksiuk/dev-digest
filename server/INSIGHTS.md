@@ -2,11 +2,11 @@
 
 Accumulated engineering knowledge for this package: what worked, what didn't,
 codebase-specific patterns, tool quirks, and open questions — kept OUT of
-[CLAUDE.md](CLAUDE.md) under the ≤100-line / map-not-documentation rule.
+[AGENTS.md](AGENTS.md) under the ≤100-line / map-not-documentation rule.
 
-Read at the start of every session per CLAUDE.md, and updated at the end via
+Read at the start of every session per AGENTS.md, and updated at the end via
 the `engineering-insights` skill — treat entries here as high-confidence
-guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
+guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 "cold read" test (actionable without re-investigation) — see
 [../.claude/skills/engineering-insights/SKILL.md](../.claude/skills/engineering-insights/SKILL.md).
 
@@ -64,10 +64,52 @@ _(to be filled in)_
 
 ## Tool & Library Notes
 
-_(to be filled in)_
+- **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
+  `e2e/`, or `reviewer-core/` (checked all four for `.eslint*`/`eslint.config.*`,
+  found none, and there's no root `package.json` either since this isn't a
+  monorepo). Before reaching for an ESLint plugin to enforce a convention
+  (e.g. `eslint-plugin-boundaries` for architecture rules), check whether a
+  zero-new-dependency alternative exists first — bootstrapping ESLint from
+  scratch just to get one plugin is a much bigger lift than it looks.
+- **`dependency-cruiser` (^17.4.3) is already a `server` runtime dependency**
+  — used programmatically by `adapters/depgraph/index.ts` (`DepCruiseGraph`)
+  to build the dep-graph for the repo-intel feature on *reviewed* repos. It
+  can also be run as a CLI against this repo's own `server/src` (added
+  2026-08-01: `server/.dependency-cruiser.cjs` + `pnpm arch:check`, see
+  `.claude/skills/onion-architecture/rules/enforcement.md`). Its
+  `forbidden` rules match individual import edges (`from.path` → `to.path`
+  regex) — there's no built-in way to express "two different kinds of
+  import in the same file" (e.g. "only `container.ts` may import both a
+  port and its concrete adapter") as a single rule; that has to stay a
+  code-review checklist item instead.
+- **`dependency-cruiser`'s resolved path for an npm dependency keeps the
+  `node_modules/` prefix** (e.g. `node_modules/drizzle-orm/index.js`) even
+  with `doNotFollow: { path: 'node_modules' }` set — confirmed by writing a
+  rule matching `to.path: 'node_modules/(drizzle-orm|postgres)/'` and seeing
+  it correctly flag a test import. `doNotFollow` stops it recursing *past*
+  that edge (for speed), it doesn't change how the edge itself is reported.
 
 ## Recurring Errors & Fixes
 
+- **`curl -d '{"...":"... — ..."}'` (em dash, U+2014, or other multi-byte
+  UTF-8 chars) from Git Bash on Windows can fail with `{"error":{"code":
+  "internal_error","message":"Request body size did not match
+  Content-Length"}}`** — observed testing `PUT /skills/:id` manually. Not a
+  server bug: Git Bash's `curl` under MSYS appears to miscompute
+  `Content-Length` for some multi-byte characters passed via `-d`/heredoc.
+  Fix: avoid non-ASCII punctuation (em dash, curly quotes) in ad hoc
+  `curl -d` test payloads on this platform, or use `--data-binary @file`
+  with a UTF-8 file instead of inline `-d`.
+- **The seeded demo repo `acme/payments-api` has `clone_path: null`** — it
+  was never git-cloned locally (it's a synthetic fixture, not a real
+  GitHub repo), so `loadDiff()` always returns an empty diff for its one
+  seeded PR (#482) regardless of branch-fetch state. This is a different
+  root cause from the "local clone only fetches `main`" issue documented
+  below — there `git fetch origin <branch>` fixes it; here there is no
+  clone to fetch into at all, so a real diff for this PR is not obtainable
+  locally. Don't spend time debugging this one as if it were the
+  fetch-refspec issue — pick a real, cloned repo/PR instead for any
+  diff-dependent verification.
 - **A review run that completes instantly with `findings_count: 0` and a
   summary literally saying "The diff is empty — no code changes were
   introduced"/"no files were changed", even though the PR clearly has a
@@ -114,6 +156,15 @@ _(to be filled in)_
 
 ## Session Notes
 
+- 2026-08-01: Added `.claude/skills/onion-architecture` skill (forces
+  routes→service→port←adapter on NEW `modules/*` code only — existing
+  modules are deliberately not retrofitted) plus a working
+  `server/.dependency-cruiser.cjs` + `pnpm arch:check` enforcing it. Verified
+  the check both passes clean on current code and actually catches a
+  violation (tested by temporarily adding a `service.ts` that imported
+  `db/client.ts` directly, confirmed it failed the check, then removed the
+  test file). See Tool & Library Notes above for the ESLint-vs-
+  dependency-cruiser reasoning and the `to.path` node_modules-prefix detail.
 - 2026-07-29: Re-added per-run cost end-to-end (Run Cost Badge feature):
   `agent_runs.cost_usd` column + migration `0010`, threaded `costUsd`
   through `run-executor.ts`/`repository.ts`/`run.repo.ts`, added
@@ -136,6 +187,29 @@ _(to be filled in)_
   worth fixing properly (e.g. `/poll` or `/review` fetching the specific
   PR branch before diffing) so this doesn't surprise the next person who
   reviews a freshly-opened PR.
+
+- 2026-08-02: Skills feature server side — new `modules/skills/` (onion-
+  architecture port/adapter split: `repository.ts`/`repository.drizzle.ts`,
+  `SkillsService` taking the repo interface directly rather than
+  `Container`), `/skills` CRUD + `/skills/:id/versions` (body-only
+  versioning — name/description/type edits don't bump version, only
+  `body` changes do, since body is the actual prompt content), and
+  `/skills/import/file` + `/skills/import/url` (new `SkillUrlFetcher`
+  port/adapter, minimal SSRF guard: https-only, 8s timeout, 200KB
+  streamed cap — no private-IP/DNS blocking yet). Wired
+  `run-executor.ts` to pull an agent's enabled+ordered linked skills
+  (`this.agents.linkedSkills()`, already existed) into
+  `reviewPullRequest({skills})` — `reviewer-core` already supported this
+  end to end (`ReviewInput.skills` → `assemblePrompt` → trace
+  `prompt_assembly.skills`), so this was pure plumbing, no reviewer-core
+  changes. Verified live against a real run (see `Recurring Errors &
+  Fixes` for why PR #482's diff itself is empty): trace's
+  `prompt_assembly.skills` went `null` → all 4 linked skill bodies when
+  linked, tokens_in 446 → 1117; disabling one linked skill (`enabled:
+  false`) correctly dropped only that skill's body from the next run's
+  trace while the other three stayed. Community-catalog search/import
+  (`GET /skills/community`) intentionally left unbuilt — no catalog data
+  source exists yet, deferred as a separate pass per the spec.
 
 ## Open Questions
 

@@ -8,6 +8,7 @@ import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
 import type { FindingRecord, ReviewRecord, RunSummary, PrCommit } from "@devdigest/shared";
 import type { UseMutationResult } from "@tanstack/react-query";
+import type { FocusFindingsOptions } from "@/lib/types";
 
 interface FindingsTabProps {
   prId: string | null;
@@ -22,10 +23,8 @@ interface FindingsTabProps {
   repoFullName?: string | null;
   headSha?: string | null;
   /** Findings deep-link, driven by the page's URL (?run=&severity=&finding=). */
-  focusRunId?: string | null;
-  focusSeverity?: string | null;
-  focusFindingId?: string | null;
-  onFocusFindings: (opts: { runId?: string | null; severity?: string | null; findingId?: string | null }) => void;
+  focus?: FocusFindingsOptions;
+  onFocusFindings: (opts: FocusFindingsOptions) => void;
   onClearFocus: () => void;
   onOpenTrace: (id: string) => void;
   onDelete: (id: string) => void;
@@ -43,15 +42,14 @@ export function FindingsTab({
   cancelMutation,
   repoFullName,
   headSha,
-  focusRunId = null,
-  focusSeverity = null,
-  focusFindingId = null,
+  focus,
   onFocusFindings,
   onClearFocus,
   onOpenTrace,
   onDelete,
   onRunDone,
 }: FindingsTabProps) {
+  const { runId: focusRunId = null, severity: focusSeverity = null, findingId: focusFindingId = null } = focus ?? {};
   const handleCancelAll = useCallback(() => {
     liveRunIds.forEach((id) => cancelMutation.mutate(id));
   }, [liveRunIds, cancelMutation]);
@@ -187,9 +185,7 @@ export function FindingsTab({
             defaultOpen={i === 0}
             repoFullName={repoFullName}
             headSha={headSha}
-            targetRunId={focusRunId}
-            targetSeverity={focusSeverity}
-            targetFindingId={focusFindingId}
+            target={{ runId: focusRunId, severity: focusSeverity, findingId: focusFindingId }}
             targetNonce={clickToken}
             onSeverityClick={(severity) => handleSeverityClick(review.run_id, severity)}
             onClearFilter={onClearFocus}

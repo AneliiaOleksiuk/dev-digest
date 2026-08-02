@@ -2,11 +2,11 @@
 
 Accumulated engineering knowledge for this package: what worked, what didn't,
 codebase-specific patterns, tool quirks, and open questions — kept OUT of
-[CLAUDE.md](CLAUDE.md) under the ≤100-line / map-not-documentation rule.
+[AGENTS.md](AGENTS.md) under the ≤100-line / map-not-documentation rule.
 
-Read at the start of every session per CLAUDE.md, and updated at the end via
+Read at the start of every session per AGENTS.md, and updated at the end via
 the `engineering-insights` skill — treat entries here as high-confidence
-guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
+guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 "cold read" test (actionable without re-investigation) — see
 [../.claude/skills/engineering-insights/SKILL.md](../.claude/skills/engineering-insights/SKILL.md).
 
@@ -47,7 +47,7 @@ guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
   previously only ever used per-finding (`FindingCard.tsx`, no `count`
   prop passed) — passing `count` and reusing it for aggregates just works.
 - **New reusable UI primitives do NOT go in `src/vendor/ui/**`** (it's
-  do-not-touch, hand-mirrored per `client/CLAUDE.md`). They go in
+  do-not-touch, hand-mirrored per `client/AGENTS.md`). They go in
   `client/src/components/<name>/` instead — the same tier `diff-viewer`
   already lives in. Established this with `components/popover/Popover.tsx`
   (generic hover-triggered floating panel — `Dropdown` in `vendor/ui/kit`
@@ -81,6 +81,19 @@ guidance unless CLAUDE.md says otherwise. Append-only; entries must pass the
   list. Reusing the key means hovering a PR-list row and later opening
   that PR's detail page (or vice versa) shares one react-query cache entry
   instead of double-fetching.
+- **A route's `client/messages/en/<feature>.json` can already encode the
+  intended UX before any component exists** — building the Skills feature
+  (2026-08-02), `messages/en/skills.json` was fully authored (page/detail/
+  drawer/file/url/community/listItem/preview sections) while
+  `client/src/app/skills/` didn't exist yet. It specified a materially
+  different flow than the plan drafted from the written requirements alone
+  (three import paths — file/URL/community — with NO "create from
+  scratch" option, `name` optional and derived from the first markdown
+  `#` heading, no `type`/`description` fields collected at import time).
+  Always grep `messages/en/*.json` for the feature's namespace before
+  designing new UI — it's pre-existing course scaffolding, not aspirational
+  filler, and is more authoritative than a spec inferred from a prose
+  requirements doc.
 
 ## Tool & Library Notes
 
@@ -117,6 +130,19 @@ _(to be filled in)_
   Deliberately did NOT build the Core/Wiring/Boilerplate "Smart Diff"
   grouping shown in the reference screenshots — see Open Questions.
 
+- 2026-08-02: Skills feature client side — `client/src/app/skills/` (list +
+  master-detail preview via `?skill=` query param, `SkillCard`,
+  `SkillPreview` with view/edit toggle, `ImportSkillDrawer` with file/URL
+  tabs) and the Agent Editor's previously-stubbed Skills tab (`SkillsTab` +
+  `SkillRow` sub-component, drag-to-reorder over the full skill list,
+  checkbox = link/unlink via `agent_skills`, distinct from a skill's own
+  `enabled` field). New hooks in `lib/hooks/skills.ts` and additions to
+  `lib/hooks/agents.ts` (`useAgentSkills`/`useSetAgentSkills`). Added a
+  `skills` nav entry to `src/vendor/ui/nav.ts` despite its do-not-touch
+  vendor marking — it's app config, not generated/mirrored design-system
+  code, and it's the only place nav items are declared. Community-catalog
+  import tab intentionally left unbuilt (no backend catalog exists yet).
+
 ## Open Questions
 
 - **Smart Diff (Core logic / Wiring / Boilerplate grouping + per-file "what
@@ -138,3 +164,6 @@ _(to be filled in)_
   curl-level 200-status check against the live `pnpm dev` server — not an
   actual interactive click-through. If this comes up again, either install
   `agent-browser` for the `e2e` package or set up Playwright directly.
+  **Resolved 2026-08-02**: installed globally (`npm i -g agent-browser &&
+  agent-browser install`) — see `e2e/INSIGHTS.md` Session Notes/Tool notes
+  for the install step and the click-automation quirks hit using it.

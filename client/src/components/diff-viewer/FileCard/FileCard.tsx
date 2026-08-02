@@ -18,6 +18,7 @@ import {
 } from "../comments";
 import { severityCountsForFile } from "../findings";
 import { SeverityBadgeRow } from "@/components/severity-badge-button";
+import type { FocusFindingsOptions } from "@/lib/types";
 import { s, chevronFor } from "../styles";
 import { CodeLine } from "../CodeLine";
 import { OutdatedComments } from "../OutdatedComments";
@@ -42,7 +43,7 @@ export function FileCard({
   file: PrFile;
   commenting?: DiffCommentApi;
   findings?: FindingRecord[];
-  onFocusFindings?: (opts: { severity?: string | null; findingId?: string | null }) => void;
+  onFocusFindings?: (opts: FocusFindingsOptions) => void;
 }) {
   const t = useTranslations("shell");
   const [open, setOpen] = React.useState(
@@ -91,7 +92,11 @@ export function FileCard({
           </span>
         )}
         {fileFindings.length > 0 && onFocusFindings && (
-          <SeverityBadgeRow counts={severityCounts} onClick={(severity) => onFocusFindings({ severity })} />
+          <SeverityBadgeRow
+            counts={severityCounts}
+            labelFor={(severity) => t("diffViewer.filterBySeverity", { severity })}
+            onClick={(severity) => onFocusFindings({ severity })}
+          />
         )}
       </div>
       {open && (

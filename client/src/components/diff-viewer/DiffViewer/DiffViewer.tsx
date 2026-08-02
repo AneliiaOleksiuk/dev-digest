@@ -9,6 +9,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import type { PrFile, FindingRecord } from "@devdigest/shared";
+import type { FocusFindingsOptions } from "@/lib/types";
 import { type DiffCommentApi } from "../comments";
 import { s } from "../styles";
 import { FileCard } from "../FileCard";
@@ -22,7 +23,7 @@ export function DiffViewer({
   files: PrFile[];
   commenting?: DiffCommentApi;
   findings?: FindingRecord[];
-  onFocusFindings?: (opts: { severity?: string | null; findingId?: string | null }) => void;
+  onFocusFindings?: (opts: FocusFindingsOptions) => void;
 }) {
   const t = useTranslations("shell");
   if (!files || files.length === 0) {

@@ -13,6 +13,7 @@ import { FindingsPanel } from "../FindingsPanel";
 import { VerdictBanner } from "../VerdictBanner";
 import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
 import { SeverityBadgeRow, unstyledButtonStyle } from "@/components/severity-badge-button";
+import type { FocusFindingsOptions } from "@/lib/types";
 import { summarizeFindings } from "./helpers";
 
 const VERDICT_COLOR: Record<string, string> = {
@@ -32,9 +33,7 @@ export function ReviewRunAccordion({
   defaultOpen = false,
   repoFullName,
   headSha,
-  targetRunId = null,
-  targetSeverity = null,
-  targetFindingId = null,
+  target,
   targetNonce = 0,
   onSeverityClick,
   onClearFilter,
@@ -44,16 +43,12 @@ export function ReviewRunAccordion({
   defaultOpen?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
-  /** When this matches review.run_id, the accordion opens and scrolls into view
-   *  (driven from the Timeline: clicking an agent name navigates here). */
-  targetRunId?: string | null;
-  /** Findings severity to filter/highlight to (driven by a clicked findings
-   *  counter). With no targetRunId, every run containing this severity opens
-   *  (a PR-list entry point isn't scoped to one run); with a targetRunId, only
-   *  that run reacts. */
-  targetSeverity?: string | null;
-  /** A single finding to scroll to + highlight within this run's panel. */
-  targetFindingId?: string | null;
+  /** What to focus within this run: a run id (opens + scrolls into view,
+   *  driven from the Timeline), a severity to filter/highlight to (with no
+   *  runId, every run containing this severity opens — a PR-list entry
+   *  point isn't scoped to one run), and/or a single finding to scroll to +
+   *  highlight within this run's panel. */
+  target?: FocusFindingsOptions;
   targetNonce?: number;
   /** Clicking one of this run's own header count badges. */
   onSeverityClick?: (severity: Severity) => void;
@@ -61,6 +56,7 @@ export function ReviewRunAccordion({
   onClearFilter?: () => void;
 }) {
   const t = useTranslations("prReview");
+  const { runId: targetRunId = null, severity: targetSeverity = null, findingId: targetFindingId = null } = target ?? {};
   const { run_id, findings, verdict, score, agent_name, created_at, id, summary } = review;
   const { counts: severityCounts, blockers } = summarizeFindings(findings);
   const verdictColor = verdict ? VERDICT_COLOR[verdict] ?? "var(--text-muted)" : "var(--text-muted)";
@@ -77,7 +73,7 @@ export function ReviewRunAccordion({
       if (isTargetedRun) rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRunId, targetSeverity, targetNonce, run_id]);
+  }, [targetRunId, targetSeverity, targetNonce, run_id, isTargetedRun, isTargetedSeverity]);
 
   const del = useDeleteReview(prId);
 

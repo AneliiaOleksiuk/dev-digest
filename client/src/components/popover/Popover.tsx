@@ -115,6 +115,34 @@ export function Popover({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [open]);
 
+  // Keyboard equivalent of the outside-click handler above: Tab-ing focus
+  // away from the trigger/panel closes the popover the same way clicking
+  // away does.
+  React.useEffect(() => {
+    if (!open) return;
+    const handleFocusOut = (event: FocusEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
+      setPosition(null);
+    };
+    document.addEventListener("focusin", handleFocusOut);
+    return () => document.removeEventListener("focusin", handleFocusOut);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        setPosition(null);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
   React.useEffect(() => clearTimers, []);
 
   return (
@@ -124,6 +152,7 @@ export function Popover({
         style={{ display: "inline-block" }}
         onMouseEnter={scheduleOpen}
         onMouseLeave={scheduleClose}
+        onFocus={scheduleOpen}
       >
         {trigger}
       </div>

@@ -21,6 +21,7 @@ import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } 
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
+import type { FocusFindingsOptions } from "../../../../../lib/types";
 import type { FindingRecord } from "@devdigest/shared";
 
 export default function PRDetailPage() {
@@ -75,7 +76,7 @@ export default function PRDetailPage() {
   };
   const setParam = (key: string, val: string | null) => setParams({ [key]: val });
   const setTab = (t: string) => setParam("tab", t);
-  const focusFindings = (opts: { runId?: string | null; severity?: string | null; findingId?: string | null }) =>
+  const focusFindings = (opts: FocusFindingsOptions) =>
     setParams({
       tab: "findings",
       run: opts.runId ?? null,
@@ -165,9 +166,7 @@ export default function PRDetailPage() {
             repoFullName={repoFullName}
             headSha={pr.head_sha}
             cancelMutation={cancel}
-            focusRunId={focusRunId}
-            focusSeverity={focusSeverity}
-            focusFindingId={focusFindingId}
+            focus={{ runId: focusRunId, severity: focusSeverity, findingId: focusFindingId }}
             onFocusFindings={focusFindings}
             onClearFocus={clearFocus}
             onOpenTrace={(id) => setParam("trace", id)}

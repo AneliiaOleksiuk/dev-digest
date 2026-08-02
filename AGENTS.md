@@ -20,7 +20,7 @@ on the host via `pnpm dev`).
 | `e2e/` | `@devdigest/e2e` | deterministic browser e2e | — |
 
 Cross-package sharing goes through **tsconfig path aliases**, not npm/workspace
-deps — see each package's CLAUDE.md.
+deps — see each package's AGENTS.md.
 
 ## Cross-cutting conventions
 
@@ -53,8 +53,9 @@ deps — see each package's CLAUDE.md.
 - [docs/agent-prompts/README.md](docs/agent-prompts/README.md) — how a
   reviewer agent's system prompt becomes the assembled LLM prompt; read this
   before touching anything prompt- or grounding-related.
-- `./specs` — **planned, doesn't exist yet** (L05 Project Context Folder).
-  Once created, per-feature specs will be linked from here.
+- `./specs` — per-feature specs (L05 Project Context Folder).
+  [specs/skills-feature.md](specs/skills-feature.md) — reusable skills for
+  review agents.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.
 - Package maps: [server/README.md](server/README.md) ·
   [client/README.md](client/README.md) ·

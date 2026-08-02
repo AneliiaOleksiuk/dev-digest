@@ -33,3 +33,12 @@ export type {
 
 export type { Review, Finding, Severity, Verdict } from "@devdigest/shared";
 export type { PrBrief, SmartDiff } from "@devdigest/shared";
+
+/** What a findings-deep-link click should focus: a run, a severity, a
+ *  single finding, or any combination — driven from the PR list hover
+ *  preview, the Timeline, a Review-runs header badge, or a diff-line tag. */
+export interface FocusFindingsOptions {
+  runId?: string | null;
+  severity?: string | null;
+  findingId?: string | null;
+}

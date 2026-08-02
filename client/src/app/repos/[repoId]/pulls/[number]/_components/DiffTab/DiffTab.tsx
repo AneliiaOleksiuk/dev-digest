@@ -5,6 +5,7 @@ import { SectionLabel, Button } from "@devdigest/ui";
 import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment } from "@/lib/hooks/reviews";
 import { notify } from "@/lib/toast";
+import type { FocusFindingsOptions } from "@/lib/types";
 import type { PrFile, FindingRecord } from "@devdigest/shared";
 
 interface DiffTabProps {
@@ -16,7 +17,7 @@ interface DiffTabProps {
   /** All of this PR's findings — matched to diff lines by file + line range. */
   findings: FindingRecord[];
   /** Deep-links a severity/finding into the Findings tab (shared with FindingsTab). */
-  onFocusFindings: (opts: { runId?: string | null; severity?: string | null; findingId?: string | null }) => void;
+  onFocusFindings: (opts: FocusFindingsOptions) => void;
 }
 
 export function DiffTab({ prId, filesCount, files, canComment, findings, onFocusFindings }: DiffTabProps) {

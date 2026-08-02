@@ -41,6 +41,8 @@
     "viewOnGitHub": "View on GitHub",
     "postedToGitHub": "Posts to GitHub immediately",
     "outdatedTitle": "{count} comment(s) on older revisions",
-    "jumpToFinding": "Jump to this finding →"
+    "jumpToFinding": "Jump to this finding →",
+    "filterBySeverity": "Show {severity} findings",
+    "lineFindingsLabel": "View findings on this line"
   }
 }

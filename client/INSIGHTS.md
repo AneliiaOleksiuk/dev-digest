@@ -28,6 +28,21 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `RunTraceDrawer`) with a clean "all passed" exit — no warning that most
   of the suite didn't execute. Always run bare `pnpm test` for the full
   suite; only append a filter when you actually want one.
+- **`ConventionCard`'s Reject button silently persisted `status: "rejected"`
+  with zero visual feedback** — `ConventionsListView.deselect()` did call
+  `PATCH /conventions/:id {status: "rejected"}`, but the card's style/actions
+  branched only on local `selected` (true/false), so "rejected" and "never
+  reviewed" rendered identically (same neutral card, same Accept/Reject
+  buttons) — clicking Reject looked like a no-op. Fixed 2026-08-02 by
+  branching on `candidate.status === "rejected"` directly (dim card +
+  "Rejected" badge + single Undo button that PATCHes back to `"pending"`).
+  Side effect discovered while fixing: repeated test clicks against the
+  *old* silently-broken button had already flipped 29/30 real rows in the
+  `conventions` table to `status='rejected'` — always check `SELECT status,
+  count(*) FROM conventions GROUP BY status` (via
+  `docker exec devdigest-postgres psql -U devdigest -d devdigest -c "..."`)
+  before assuming a status-toggle bug is purely cosmetic; the mutation may
+  have been firing correctly the whole time.
 - **PR-list `tableCard` cannot host an in-tree absolute popover.** It needs
   `overflowX: "auto"` (horizontal scroll for `MIN_ROW_WIDTH`) which, paired
   with `overflowY: "hidden"`, clips anything that paints past the card's
@@ -95,6 +110,42 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   filler, and is more authoritative than a spec inferred from a prose
   requirements doc.
 
+- **`src/vendor/ui/nav.ts` (the `NAV` sidebar array + `SHORTCUTS` registry)
+  is under the do-not-touch `src/vendor/ui/**` path per `AGENTS.md`, but is
+  a sanctioned exception in practice** — unlike the component files in that
+  tree, it's routing/config data, not visual-design-system code. Confirmed
+  necessary twice now (Skills nav entry 2026-08-02, session below; the
+  Conventions nav entry the same day): without an entry here, a new
+  top-level route is only reachable by typing the URL directly — the
+  sidebar has no link to it, and `activeKeyFor` in
+  `components/app-shell/helpers.ts` (already pre-wired for
+  `pathname.includes("/conventions")` before this session even added the
+  page) has nothing to highlight. Flag this exception to whoever's
+  reviewing before editing it, don't silently treat "do-not-touch" as
+  covering it.
+- **A pre-authored `client/messages/en/<feature>.json` namespace can cover
+  only *part* of a feature's flow, not the whole thing.** Extends the
+  pattern noted below for `skills.json` (list/detail/import were all
+  pre-authored ahead of the components) — for `conventions.json`, the
+  list-page and card copy (`page.*`, `card.*`) were pre-authored, but the
+  create-skill-from-conventions modal had NO corresponding namespace at
+  all (no `modal.*` keys existed). Don't assume "the JSON file exists, so
+  the copy for my whole feature is covered" — check that every screen/step
+  of the flow you're building has matching keys, and author the missing
+  ones following the existing file's tone/structure rather than guessing
+  at a different process.
+
+- **Conventions "Accept" is a two-step flow by design, not a shortcut to
+  auto-creating a skill** — confirmed with the user 2026-08-02. Clicking
+  Accept on a `ConventionCard` only sets `status: "accepted"` and adds the
+  candidate to the page-local `selectedIds` (green border, counts toward
+  "N of M accepted"). No skill is created until the separate "Create skill"
+  toolbar button is clicked, which opens
+  `CreateSkillFromConventionsModal` and bundles *all* currently-selected
+  accepted candidates into one draft skill. Don't "fix" Accept to
+  auto-promote a single candidate — that's a deliberate batch-then-promote
+  UX, not a missing feature.
+
 ## Tool & Library Notes
 
 _(to be filled in)_
@@ -142,6 +193,27 @@ _(to be filled in)_
   vendor marking — it's app config, not generated/mirrored design-system
   code, and it's the only place nav items are declared. Community-catalog
   import tab intentionally left unbuilt (no backend catalog exists yet).
+- 2026-08-02: Conventions Extractor (L02 homework) — new repo-scoped route
+  `client/src/app/repos/[repoId]/conventions/` (`ConventionsListView`,
+  `ConventionCard` with an accept/reject toggle driving `status` via
+  `PATCH`, `CreateSkillFromConventionsModal` that merges accepted
+  candidates into a draft skill body grouped by `category` and posts to
+  `POST /conventions/promote`), new `lib/hooks/conventions.ts`. Added the
+  `conventions` nav entry + `g c` shortcut to `src/vendor/ui/nav.ts` (see
+  Codebase Patterns above for why that vendor edit is sanctioned) and a
+  `modal` namespace to `messages/en/conventions.json` (see Codebase
+  Patterns above — the pre-authored file only covered the list page, not
+  the create-skill modal). Verified the route renders server-side via a
+  direct `curl` against the live `pnpm dev` client (empty-state copy and
+  breadcrumb present, no Next.js error) — same no-browser-automation
+  constraint noted in Open Questions below still applies.
+
+- 2026-08-02: Fixed the Conventions Reject button (see What Doesn't Work
+  above) and reset the 29 rows it had already silently flipped to
+  `status='rejected'` back to `pending` via a direct `docker exec ...
+  psql` `UPDATE`, per user confirmation. Also confirmed Accept-then-
+  Create-skill is an intentional two-step flow, not a bug (see Codebase
+  Patterns).
 
 ## Open Questions
 

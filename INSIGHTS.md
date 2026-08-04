@@ -57,6 +57,21 @@ _(to be filled in)_
   live verification targeted the trace's prompt-assembly content/token
   count rather than a findings diff on real code.
 
+- 2026-08-02: Built the Conventions Extractor + API Contract Reviewer
+  homework (spec at `specs/conventions-extractor.md`) — a repo-scanning
+  feature that proposes house-rule candidates with LLM-generated evidence,
+  grounds each candidate against the actual sampled file content before
+  persisting, and lets a user promote accepted ones into a real Skill; plus
+  a separate agent+skills demo showing the Skills feature's effect on
+  review precision. See `server/INSIGHTS.md` and `client/INSIGHTS.md` for
+  the package-level details. Cross-cutting takeaway: this local
+  environment's OpenAI and Anthropic API keys were both exhausted
+  (quota/credit) during this session — only OpenRouter worked — which is
+  exactly the scenario the platform's per-feature model override
+  (`Settings.feature_models`) exists to route around without a code
+  change; worth checking `POST /settings/test-connection` per provider
+  before assuming an LLM-backed feature that fails is a code bug.
+
 ## Open Questions
 
 - **`reviewer-core/` is on npm while everything else is on pnpm:** unclear

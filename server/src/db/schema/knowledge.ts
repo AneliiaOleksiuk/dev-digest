@@ -1,7 +1,8 @@
-import { pgTable, uuid, text, jsonb, timestamp, doublePrecision, boolean, vector, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, jsonb, timestamp, doublePrecision, integer, vector, index } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { repos } from './repos';
+import { skills } from './skills';
 
 // ============================================================ Knowledge / RAG
 
@@ -37,6 +38,11 @@ export const conventions = pgTable('conventions', {
   rule: text('rule').notNull(),
   evidencePath: text('evidence_path'),
   evidenceSnippet: text('evidence_snippet'),
+  evidenceLine: integer('evidence_line'),
   confidence: doublePrecision('confidence'),
-  accepted: boolean('accepted').notNull().default(false),
+  category: text('category'),
+  status: text('status', { enum: ['pending', 'accepted', 'rejected'] })
+    .notNull()
+    .default('accepted'),
+  skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'set null' }),
 });

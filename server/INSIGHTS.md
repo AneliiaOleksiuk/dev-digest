@@ -26,6 +26,19 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `findings_count`/`blockers` on `agent_runs`, these counts are **not**
   denormalized at run completion — computed live on every read instead,
   since the query is cheap at this list size and it avoided a schema change.
+- **A fully synthetic demo PR (no real GitHub repo, no git clone needed) is
+  a supported test path, not a hack.** `modules/reviews/diff-loader.ts`'s
+  `loadDiff()` falls back to `diffFromPrFiles()` whenever
+  `container.git.diff()` fails or returns no files — it reconstructs a
+  `UnifiedDiff` from persisted `pr_files.patch` text. To create a working
+  demo/eval PR against any repo (even one with `clone_path: null`, like the
+  seeded `acme/payments-api`): insert one `pull_requests` row + one
+  `pr_files` row whose `patch` column holds a hand-written unified-diff hunk
+  (start at `@@ -a,b +c,d @@`, no `diff --git`/`---`/`+++` header lines —
+  `diffFromPrFiles` adds those itself). `POST /pulls/:id/review` then works
+  against it end-to-end, findings citations included. Confirmed working
+  2026-08-02 for an API-contract-review experiment PR.
+
 - **Re-adding per-run `cost_usd` needs zero `reviewer-core`/LLM-adapter
   changes.** `reviewer-core`'s `reviewPullRequest()`
   (`reviewer-core/src/review/run.ts`) and the server's `PriceBook`/
@@ -42,7 +55,20 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 
 ## What Doesn't Work
 
-_(to be filled in)_
+- **"Skills-off will fully miss an obvious breaking API change" is not a
+  safe assumption for a skills-off/skills-on demo.** Built an `API Contract
+  Reviewer` agent (`openrouter`/`deepseek/deepseek-v4-flash`) with a
+  deliberately generic system prompt and ran it against a PR that renames a
+  JSON response field with no deprecation. Skills-off still flagged it
+  CRITICAL (score 65) with a correct rationale — the base model is already
+  competent enough to notice an obvious rename. Skills-on didn't newly
+  "catch" it; it got *more precise* (named the violated rule —
+  "breaking-change", "deprecation-policy" — by name, added a second
+  distinct finding for the response-schema angle, scored it harsher: 30 vs
+  65). If the goal is a hard miss/catch contrast rather than a
+  precision/detail contrast, pick a subtler scenario (e.g. a request-field
+  type narrowing, or a semver-bump-only violation with no field rename) —
+  an obvious field rename is too easy for a modern model to need the skill.
 
 ## Codebase Patterns
 
@@ -61,6 +87,22 @@ _(to be filled in)_
   the new `critical_count`/`warning_count`/`suggestion_count` fields added
   2026-07-30 — they're the severity breakdown of that SAME latest review,
   not summed across every agent/run on the PR.
+
+## Codebase Patterns
+
+- **`repoIntel.getConventionSamples(repoId, n)` (and `getTopFilesByRank`
+  underneath it) return paths relative to the repo root as tracked in
+  git** — confirmed live against the real cloned `devDigest` repo itself
+  (paths came back like `server/src/platform/prompt.ts`, since this repo
+  is a monorepo with no root `tsconfig.json`/`.eslintrc`). A consumer
+  building its own file sample (e.g. `modules/conventions/service.ts`)
+  must `path.join(repo.clonePath, path)` these directly — no re-rooting
+  needed — but a naive "read well-known config filenames from the repo
+  root" pass (`.eslintrc.json`, `tsconfig.json`, etc.) will legitimately
+  come back empty against a monorepo like this one, since those configs
+  live per-package (`server/tsconfig.json`, `client/tsconfig.json`), not
+  at the root. That's expected, not a bug — don't "fix" it by guessing at
+  package subfolders; it's a known limitation of a repo-root-only sample.
 
 ## Tool & Library Notes
 
@@ -88,6 +130,36 @@ _(to be filled in)_
   rule matching `to.path: 'node_modules/(drizzle-orm|postgres)/'` and seeing
   it correctly flag a test import. `doNotFollow` stops it recursing *past*
   that edge (for speed), it doesn't change how the edge itself is reported.
+
+- **A cheap/free OpenRouter model (`deepseek/deepseek-v4-flash`) can emit a
+  stray NUL byte (` `) inside a JSON string field of an otherwise-valid
+  structured output.** Postgres `text` columns reject NUL bytes outright
+  regardless of encoding — a Drizzle insert containing one fails with
+  `invalid byte sequence for encoding "UTF8": 0x00`, not a schema-validation
+  error (the JSON itself parses fine against the Zod schema; the byte only
+  breaks on the DB write). Fix at the repository/adapter boundary, not the
+  service layer, so it protects every caller: see
+  `modules/conventions/repository.drizzle.ts`'s `removeNulBytes()`,
+  applied to every LLM-derived string field in both `insertMany` and
+  `update`. **Tool gotcha hit while fixing this**: writing a literal
+  ` `/`\0` regex escape via the Edit/Write tools produced an actual
+  raw NUL byte in the source file instead of the four-character escape
+  text (broke the file, `Edit`'s `old_string` then couldn't match it
+  either). Use `String.fromCharCode(0)` in source instead of any NUL/`\0`
+  escape literal.
+- **Per-feature LLM provider/model overrides
+  (`resolveFeatureModel`/`Settings.feature_models`,
+  `modules/settings/feature-models.ts`) are the correct fix when one
+  provider's key is exhausted but you need a specific feature (e.g.
+  `'conventions'`) working right now** — `PUT /settings` with
+  `{"feature_models":{"<featureId>":{"provider":"openrouter","model":"..."}}}`
+  reroutes just that feature without touching code or the registry
+  default. Confirmed live 2026-08-02 that this local environment's OpenAI
+  key was over its billing quota (`429`) and the Anthropic key had
+  insufficient credit (`400`, low balance) — only `openrouter` worked;
+  `POST /settings/test-connection` is the fast way to check which
+  provider(s) are actually usable before debugging "why did my LLM call
+  fail" as if it were a code bug.
 
 ## Recurring Errors & Fixes
 
@@ -154,6 +226,20 @@ _(to be filled in)_
   sides then in native OS path form). If a similar `tsx`/ESM CLI script
   is added later, use the same comparison, not the raw URL-string one.
 
+- **`pnpm db:generate` prompts interactively ("Is X column created or
+  renamed from Y?") whenever one `drizzle-kit generate` run both drops a
+  column and adds new ones on the same table** — and that TUI prompt does
+  not work over this environment's non-interactive shell (hangs/exits
+  oddly, piping newlines via `printf '\n' | pnpm db:generate` does not
+  answer it). Workaround: split into two separate `db:generate` runs —
+  first add the new columns while temporarily keeping the old one (pure
+  ADD, no ambiguity, no prompt), run `db:generate`, then remove the old
+  column and run `db:generate` again (pure DROP, no prompt since there's
+  no candidate new-column to match it against). Produces two small
+  migration files instead of one; that's fine, don't try to force a single
+  migration file by fighting the prompt. Used for the `conventions` table's
+  `accepted` boolean → `category`/`status`/`skill_id` migration, 2026-08-02.
+
 ## Session Notes
 
 - 2026-08-01: Added `.claude/skills/onion-architecture` skill (forces
@@ -210,6 +296,28 @@ _(to be filled in)_
   trace while the other three stayed. Community-catalog search/import
   (`GET /skills/community`) intentionally left unbuilt — no catalog data
   source exists yet, deferred as a separate pass per the spec.
+- 2026-08-02: Conventions Extractor (L02 homework, spec at
+  `specs/conventions-extractor.md`) — extended `conventions` table
+  (`category`/`status` enum/`skill_id`, dropped `accepted`; see Recurring
+  Errors & Fixes for the 2-pass migration workaround), new
+  `modules/conventions/` (onion port/adapter, same shape as `modules/
+  skills/`): `POST /repos/:id/conventions/extract` (samples config files +
+  `repoIntel.getConventionSamples`, calls `completeStructured` via
+  `resolveFeatureModel(..., 'conventions')` — the first real caller of that
+  previously-unwired registry, see `modules/settings/feature-models.ts`),
+  code-grounds every LLM candidate against the actual sampled file content
+  before persisting (ungrounded candidates silently dropped, never reach
+  the DB), `PATCH /conventions/:id` (accept/reject/edit), `POST /
+  conventions/promote` (bundles accepted candidates into one real skill via
+  the existing `SkillsService.create`). Also built a second, independent
+  piece: an `API Contract Reviewer` agent + 4 skills (3 manual, 1 via
+  `/skills/import/file`) and ran the skills-off/skills-on control
+  experiment against a hand-seeded synthetic PR (see What Works above for
+  the `diffFromPrFiles` technique) — see What Doesn't Work above for the
+  experiment's actual (more nuanced than expected) result. Hit and fixed
+  the NUL-byte insert crash and the OpenAI/Anthropic billing exhaustion
+  live during this session — both documented in Tool & Library Notes
+  above.
 
 ## Open Questions
 

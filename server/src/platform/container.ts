@@ -25,6 +25,12 @@ import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
+import type { SkillsRepository } from '../modules/skills/repository.js';
+import { DrizzleSkillsRepository } from '../modules/skills/repository.drizzle.js';
+import type { SkillUrlFetcher } from '../modules/skills/url-fetcher.js';
+import { HttpSkillUrlFetcher } from '../modules/skills/url-fetcher.http.js';
+import type { ConventionsRepository } from '../modules/conventions/repository.js';
+import { DrizzleConventionsRepository } from '../modules/conventions/repository.drizzle.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -72,6 +78,9 @@ export class Container {
   // `container.agentsRepo` instead of reaching into another module's folder.
   private _agentsRepo?: AgentsRepository;
   private _reviewRepo?: ReviewRepository;
+  private _skillsRepo?: SkillsRepository;
+  private _skillUrlFetcher?: SkillUrlFetcher;
+  private _conventionsRepo?: ConventionsRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -94,6 +103,18 @@ export class Container {
 
   get agentsRepo(): AgentsRepository {
     return (this._agentsRepo ??= new AgentsRepository(this.db));
+  }
+
+  get skillsRepo(): SkillsRepository {
+    return (this._skillsRepo ??= new DrizzleSkillsRepository(this.db));
+  }
+
+  get skillUrlFetcher(): SkillUrlFetcher {
+    return (this._skillUrlFetcher ??= new HttpSkillUrlFetcher());
+  }
+
+  get conventionsRepo(): ConventionsRepository {
+    return (this._conventionsRepo ??= new DrizzleConventionsRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {

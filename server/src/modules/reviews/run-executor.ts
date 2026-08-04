@@ -80,6 +80,7 @@ export class ReviewRunExecutor {
             durationMs: 0,
             tokensIn: 0,
             tokensOut: 0,
+            costUsd: null,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
@@ -183,6 +184,19 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Skills — linked via the Agent Editor's Skills tab, ordered. Only
+      // *enabled* skills reach the prompt: linking ≠ trusting (imported_url/
+      // community skills land disabled until a human vets them).
+      const linkedSkills = await this.agents.linkedSkills(agent.id);
+      const enabledSkills = linkedSkills.filter((link) => link.skill.enabled);
+      if (enabledSkills.length > 0) {
+        runLog.info(`${enabledSkills.length} skill(s) linked and enabled — added to prompt`);
+      }
+      const skills =
+        enabledSkills.length > 0
+          ? enabledSkills.map((link) => `### ${link.skill.name}\n${link.skill.body}`)
+          : undefined;
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -200,6 +214,8 @@ export class ReviewRunExecutor {
         ...(callersDigest ? { callers: callersDigest } : {}),
         // T3 — repo skeleton, same omit-when-empty contract.
         ...(repoMap ? { repoMap } : {}),
+        // Linked + enabled skills, same omit-when-empty contract.
+        ...(skills ? { skills } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -210,7 +226,7 @@ export class ReviewRunExecutor {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
         },
       });
-      const { tokensIn, tokensOut, grounding } = outcome;
+      const { tokensIn, tokensOut, costUsd, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
 
@@ -245,6 +261,7 @@ export class ReviewRunExecutor {
         durationMs,
         tokensIn,
         tokensOut,
+        costUsd,
         findingsCount: findingRows.length,
         grounding,
         score: outcome.review.score,
@@ -265,6 +282,7 @@ export class ReviewRunExecutor {
           duration_ms: durationMs,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
+          cost_usd: costUsd,
           findings: findingRows.length,
           grounding,
         },
@@ -300,6 +318,7 @@ export class ReviewRunExecutor {
           durationMs: Date.now() - start,
           tokensIn: 0,
           tokensOut: 0,
+          costUsd: null,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
@@ -421,7 +440,7 @@ export class ReviewRunExecutor {
         pr: pull.number,
         source: 'local',
       },
-      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, findings: 0, grounding },
+      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
       tool_calls: [],
       raw_output: '',

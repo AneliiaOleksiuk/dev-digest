@@ -1,5 +1,11 @@
 import type { CSSProperties } from "react";
+import { SEV } from "@devdigest/ui";
 import type { Line } from "./helpers";
+
+/** Color for a finding's severity (falls back to muted for an unknown value). */
+function colorForSeverity(severity: string): string {
+  return SEV[severity as keyof typeof SEV]?.c ?? "var(--text-muted)";
+}
 
 /** Co-located styles for the DiffViewer (extracted from inline styles). */
 export const s = {
@@ -64,7 +70,60 @@ export const s = {
     color: "var(--text-primary)",
     paddingRight: 12,
   } satisfies CSSProperties,
+  findingPopoverPanel: { width: 320, padding: 6 } satisfies CSSProperties,
+  findingPopoverList: { display: "flex", flexDirection: "column", gap: 2 } satisfies CSSProperties,
+  findingPopoverRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+    width: "100%",
+    padding: 8,
+    borderRadius: 6,
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    cursor: "pointer",
+  } satisfies CSSProperties,
+  findingPopoverRowMain: { flex: 1, minWidth: 0 } satisfies CSSProperties,
+  findingPopoverTitle: { fontSize: 13, fontWeight: 600, color: "var(--text-primary)" } satisfies CSSProperties,
+  findingPopoverRationale: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 1.4,
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
+  findingPopoverJump: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: 600,
+    color: "var(--accent-text)",
+  } satisfies CSSProperties,
 } as const;
+
+/** Left-border accent on a diff line covered by a finding, colored by severity. */
+export function findingRowAccent(severity: string): CSSProperties {
+  const color = colorForSeverity(severity);
+  return { borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: color };
+}
+
+/** Small inline severity tag ("blocker"/"warning"/…) at the end of a covered line. */
+export function findingTag(severity: string): CSSProperties {
+  const color = colorForSeverity(severity);
+  return {
+    flexShrink: 0,
+    alignSelf: "center",
+    marginRight: 10,
+    padding: "2px 8px",
+    borderRadius: 5,
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    color,
+    background: "var(--bg-hover)",
+    cursor: "pointer",
+  };
+}
 
 /** Chevron rotates 90deg when the file card is open. */
 export function chevronFor(open: boolean): CSSProperties {

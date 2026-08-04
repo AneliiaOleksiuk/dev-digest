@@ -33,8 +33,11 @@ export async function runMigrations(databaseUrl: string): Promise<void> {
   }
 }
 
-// CLI entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+// CLI entrypoint. Compare resolved filesystem paths, not raw URL strings —
+// on Windows `import.meta.url` is `file:///C:/...` (forward slashes) while
+// `process.argv[1]` is `C:\...` (native backslashes), so `file://${argv[1]}`
+// never matches and this guard silently skips, leaving `db:migrate` a no-op.
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is required');

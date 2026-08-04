@@ -56,6 +56,18 @@ export function usePrReviews(prId: string | null | undefined) {
   });
 }
 
+/** Same data + cache key as usePrReviews, but only fetches once `enabled` is
+   true — used by the PR list's hover findings preview so scrolling past many
+   rows doesn't fire a request per row, and so a later visit to the PR detail
+   page (or an earlier hover) reuses the cache instead of refetching. */
+export function usePrLatestFindings(prId: string | null | undefined, { enabled }: { enabled: boolean }) {
+  return useQuery({
+    queryKey: ["reviews", prId],
+    queryFn: () => api.get<ReviewRecord[]>(`/pulls/${prId}/reviews`),
+    enabled: !!prId && enabled,
+  });
+}
+
 /** Delete one run from the PR's run history (+ its trace). */
 export function useDeleteRun(prId: string | null | undefined) {
   const qc = useQueryClient();

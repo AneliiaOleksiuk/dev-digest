@@ -62,6 +62,7 @@ export const RunStats = z.object({
   duration_ms: z.number().int(),
   tokens_in: z.number().int(),
   tokens_out: z.number().int(),
+  cost_usd: z.number().nullable(),
   findings: z.number().int(),
   grounding: z.string(),
 });
@@ -102,6 +103,7 @@ export const RunSummary = z.object({
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
+  cost_usd: z.number().nullable(),
   findings_count: z.number().int().nullable(),
   grounding: z.string().nullable(),
   ran_at: z.string().nullable(),
@@ -110,5 +112,10 @@ export const RunSummary = z.object({
   // findings that trip the agent's gate. Null on failed/cancelled runs.
   score: z.number().int().nullable(),
   blockers: z.number().int().nullable(),
+  // Findings severity breakdown for this run's review (computed on read from
+  // findings, not denormalized). Null on failed/cancelled runs.
+  critical_count: z.number().int().nullable(),
+  warning_count: z.number().int().nullable(),
+  suggestion_count: z.number().int().nullable(),
 });
 export type RunSummary = z.infer<typeof RunSummary>;

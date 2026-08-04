@@ -5,7 +5,8 @@ import { SectionLabel, Button } from "@devdigest/ui";
 import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment } from "@/lib/hooks/reviews";
 import { notify } from "@/lib/toast";
-import type { PrFile } from "@devdigest/shared";
+import type { FocusFindingsOptions } from "@/lib/types";
+import type { PrFile, FindingRecord } from "@devdigest/shared";
 
 interface DiffTabProps {
   prId: string | null;
@@ -13,9 +14,13 @@ interface DiffTabProps {
   files: PrFile[];
   /** Inline commenting is offered only on open PRs (GitHub rejects otherwise). */
   canComment?: boolean;
+  /** All of this PR's findings — matched to diff lines by file + line range. */
+  findings: FindingRecord[];
+  /** Deep-links a severity/finding into the Findings tab (shared with FindingsTab). */
+  onFocusFindings: (opts: FocusFindingsOptions) => void;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, findings, onFocusFindings }: DiffTabProps) {
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
   // Comments start hidden so the diff is clean by default — toggle to reveal.
@@ -59,7 +64,7 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
       >
         Files changed · {filesCount} files
       </SectionLabel>
-      <DiffViewer files={files} commenting={commenting} />
+      <DiffViewer files={files} commenting={commenting} findings={findings} onFocusFindings={onFocusFindings} />
     </section>
   );
 }

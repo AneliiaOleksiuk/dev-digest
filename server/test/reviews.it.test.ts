@@ -159,7 +159,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
   it('runs a review: map-reduce + grounding drops the hallucinated finding, keeps the valid one', async () => {
     const app = await appWith(REVIEW_FIXTURE);
-    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
 
     const agent = (
       await app.inject({
@@ -208,6 +208,16 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+
+    // findings severity breakdown: only the grounded CRITICAL survives, so
+    // both the run-history timeline and the PR-list rollup read {1, 0, 0}.
+    const runs = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    const runSummary = runs.find((r: { run_id: string }) => r.run_id === runId);
+    expect(runSummary).toMatchObject({ critical_count: 1, warning_count: 0, suggestion_count: 0 });
+
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const prMeta = pulls.find((p: { number: number }) => p.number === pr.number);
+    expect(prMeta).toMatchObject({ critical_count: 1, warning_count: 0, suggestion_count: 0 });
 
     await app.close();
   });

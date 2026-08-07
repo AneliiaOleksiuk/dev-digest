@@ -104,6 +104,36 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   at the root. That's expected, not a bug — don't "fix" it by guessing at
   package subfolders; it's a known limitation of a repo-root-only sample.
 
+- **Vendored `trace.ts` copies already have pre-existing comment drift — do
+  not "fix" it as part of unrelated work.** `server/src/vendor/shared/
+  contracts/trace.ts` labels the callers/repo-map fields with lesson tags
+  (`T1.3` / `T3`); `client/src/vendor/shared/contracts/trace.ts` labels the
+  same fields `repo-intel`. The two copies are otherwise meant to stay
+  byte-identical for contracts. Intent Layer added `PromptAssembly.intent`
+  identically on both sides and did **not** widen this drift — leave the
+  comment mismatch alone unless you're deliberately reconciling the whole
+  vendor mirror.
+
+- **`RunTrace.specs_read` must only list paths opened *this run*.** Intent
+  Layer reuses that field for intent-resolved spec paths (documented on the
+  contract: pipeline reads, not necessarily prompt-fed). On a head-SHA
+  cache hit, `getOrClassify` returns `{ reused: true }` and
+  `run-executor` leaves `specs_read: []` — the cached record's
+  `sources[].ref` still names those files, but this run did not open them.
+  Populate via `specPathsFrom(record)` only when `reused: false`.
+
+- **`PrIntentRecord` (`review-api.ts`) picks up new `Intent` fields for free
+  via `Intent.extend({...})`** — adding `risk_areas: z.array(z.string())
+  .default([])` to the base `Intent` schema in `brief.ts` required zero
+  changes to `PrIntentRecord`'s own definition; only the repository's manual
+  object-literal construction sites (`getIntent`/`getIntentRecord` in
+  `repository/pull.repo.ts`) needed the new field added by hand, since those
+  build a plain TS object rather than calling `.parse()` — a manually-typed
+  return object doesn't get Zod's `.default()` for free the way a real parse
+  call does. When extending a base contract like this, grep for every
+  hand-built object literal typed against the *extended* schema, not just
+  the base one.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -161,8 +191,41 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   provider(s) are actually usable before debugging "why did my LLM call
   fail" as if it were a code bug.
 
+- **`adapters/tokenizer` is DI-generic, not repo-intel-only.** Its docblock
+  previously said the adapter was "ONLY under modules/repo-intel". Intent
+  Layer's `IntentService` (`modules/reviews/intent-service.ts`) calls
+  `container.tokenizer.count(...)` for the classifier-call log line's token
+  estimate. That is a valid use — the port is DI-provided via
+  `Container.tokenizer` and swappable in tests; the old wording was a stale
+  scope comment, not an architectural boundary. The comment in
+  `server/src/adapters/tokenizer/index.ts` was widened accordingly; do not
+  re-narrow it or invent a reviews→repo-intel dependency to "fix" the call.
+
 ## Recurring Errors & Fixes
 
+- **`test/indexer-pipeline.test.ts` fails 6/11 tests with `ENOENT: no such
+  file or directory, open '...\repo-intel-{full,inc}-<rand>\src\...'`
+  on this Windows environment, unrelated to whatever you're actually
+  changing.** Confirmed 2026-08-07 (Intent Layer design fix-ups session,
+  `docs/plans/intent-layer.md` WI10–13): the file/module wasn't touched at
+  all this session (`git status --porcelain` clean on it) yet
+  `pnpm exec vitest run --exclude '**/*.it.test.ts'` still fails those 6
+  tests every run — the test's own `writeFileAt` helper (line ~144) can't
+  find the directory it just `mkdir(..., {recursive:true})`'d inside a
+  freshly `mkdtemp`'d Windows temp dir, a timing/path quirk of this shell
+  environment, not a real regression. Before treating a failure here as
+  something you broke, check `git status` on the file first — if it's
+  untouched, it's this pre-existing flake, and the rest of the suite (108+
+  tests) is the real signal.
+- **`server/src/modules/orders/orders.ts` fails `pnpm typecheck`
+  independent of any Intent Layer work** — `db` import (should be `Db`) and
+  two untyped handler params. Pre-existing as of commit `71fe1ed` ("Move
+  fixture endpoint to server/src/modules/orders"), confirmed via
+  `git log -1 -- <path>` + `git diff --stat` both showing no session
+  changes to it. `cd server && pnpm typecheck` will always show these 3
+  errors until that file is fixed separately — don't assume your own
+  change broke typecheck without first checking whether the errors are in
+  a file you actually touched.
 - **`curl -d '{"...":"... — ..."}'` (em dash, U+2014, or other multi-byte
   UTF-8 chars) from Git Bash on Windows can fail with `{"error":{"code":
   "internal_error","message":"Request body size did not match
@@ -318,6 +381,38 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the NUL-byte insert crash and the OpenAI/Anthropic billing exhaustion
   live during this session — both documented in Tool & Library Notes
   above.
+
+- 2026-08-07: Intent Layer (plan `docs/plans/intent-layer.md`) — server
+  side: `pr_intent` ADD-only columns, `intent-inputs`/`IntentService`,
+  run-executor best-effort classify, GET/POST `/pulls/:id/intent`,
+  tokenizer comment widened for reviews use (see Tool & Library Notes),
+  recorded pre-existing `trace.ts` vendor comment drift (see Codebase
+  Patterns). No further product edits in this follow-up — plan-verifier
+  required INSIGHTS notes only.
+- 2026-08-07: Architecture-reviewer follow-up — `specs_read` only on fresh
+  classify (`getOrClassify` returns `{ reused }`; `specPathsFrom`);
+  classifier spec header no longer embeds path in trusted position;
+  `specs_read` contract docblock widened in both vendor `trace.ts` copies.
+- 2026-08-07: Intent Layer design fix-ups (plan `docs/plans/intent-layer.md`
+  WI10–13, mock-parity pass after the functional WI1-9 build) — server side
+  (WI10 only): `risk_areas: z.array(z.string()).default([])` added to
+  `Intent` (both vendor `brief.ts` copies), `IntentClassifierOutput` +
+  `CLASSIFIER_SYSTEM_PROMPT` extended so the model authors short (≤5, ≤~12
+  words) risk bullets, ADD-only migration `0015_jazzy_dark_phoenix.sql`
+  (`risk_areas jsonb not null default '[]'`), `pull.repo.ts` persists/reads
+  it (NUL-scrubbed like every other LLM string field), `renderIntentBlock`
+  folds it into the reviewer-facing text block. `missing_context` prompt
+  instructions tightened to one short sentence per item. Verified live via
+  `reviews.it.test.ts`'s real-Postgres intent route test. Client-side design
+  work (WI11 IntentCard hierarchy, WI13 3-panel Overview) is `client/
+  INSIGHTS.md`'s entry for the same date.
+- 2026-08-07: Smart Diff (`modules/smart-diff/`) — new onion module (not a
+  fat `pulls/routes.ts` handler) with path-based `classifyPath` (boilerplate
+  → wiring → core), `GET /pulls/:id/smart-diff`, and
+  `container.smartDiffRepo`. Findings come from the single latest `reviews`
+  row only (same semantics as PR-list score). No LLM, no migration,
+  `pseudocode_summary` always null. `package.json` + tests are boilerplate
+  (mock parity); bootstrap basenames (`index.ts`, `server.ts`, …) are wiring.
 
 ## Open Questions
 

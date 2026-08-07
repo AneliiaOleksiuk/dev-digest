@@ -1,14 +1,14 @@
 /* CodeLine — one rendered diff line: gutter number, +/- sign, text, plus the
    hover "+" affordance, any anchored comment threads, an inline composer, and
-   (when findings cover this line) a severity marker + hover detail. */
+   (on the finding's trigger line only) a far-right severity label + row tint. */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import type { FindingRecord } from "@devdigest/shared";
-import { SeverityBadge, type Severity } from "@devdigest/ui";
+import { Icon, SeverityBadge, type Severity } from "@devdigest/ui";
 import { commentTargetFor, type CommentThread, type DiffCommentApi, cs } from "../comments";
-import { findingsForLine, mostSevereFinding } from "../findings";
+import { findingsCoveringLine, findingsForLine, mostSevereFinding } from "../findings";
 import { type Line } from "../helpers";
 import { s, lineRowFor, lineSignFor, findingRowAccent, findingTag } from "../styles";
 import { CommentThreadView } from "../CommentThreadView";
@@ -24,12 +24,22 @@ const LINE_TAG_LABEL: Record<string, string> = {
   INFO: "info",
 };
 
+function FindingIcon({ severity }: { severity: string }) {
+  const size = 13;
+  if (severity === "CRITICAL") return <Icon.AlertOctagon size={size} />;
+  if (severity === "WARNING") return <Icon.AlertTriangle size={size} />;
+  if (severity === "SUGGESTION") return <Icon.Lightbulb size={size} />;
+  return <Icon.Info size={size} />;
+}
+
 export function CodeLine({
   line,
   path,
   threads,
   commenting,
   findings = [],
+  addedLines,
+  allNewSide,
   onFocusFindings,
 }: {
   line: Line;
@@ -37,6 +47,9 @@ export function CodeLine({
   threads: CommentThread[];
   commenting?: DiffCommentApi;
   findings?: FindingRecord[];
+  /** Added new-side line numbers — primary pool for resolving the trigger line. */
+  addedLines: Set<number>;
+  allNewSide: Set<number>;
   onFocusFindings?: (opts: FocusFindingsOptions) => void;
 }) {
   const t = useTranslations("shell");
@@ -51,20 +64,27 @@ export function CodeLine({
     );
   }
 
-  const lineFindings = findingsForLine(findings, path, line);
+  const lineFindings = findingsForLine(findings, path, line, addedLines, allNewSide);
   const primaryFinding = mostSevereFinding(lineFindings);
+  const coveringFindings = findingsCoveringLine(findings, path, line);
+  const primaryCoveringFinding = mostSevereFinding(coveringFindings);
 
   const sign = line.kind === "add" ? "+" : line.kind === "del" ? "−" : "";
   const target = commenting?.canComment ? commentTargetFor(line) : null;
   const showAdd = hover && !!target && !composing;
 
+  const rowStyle = primaryCoveringFinding
+    ? { ...lineRowFor(line.kind), ...findingRowAccent(primaryCoveringFinding.severity) }
+    : lineRowFor(line.kind);
+
   return (
     <div
       style={cs.rowWrap}
+      data-diff-line={line.newNo != null ? `${path}:${line.newNo}` : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <div style={primaryFinding ? { ...lineRowFor(line.kind), ...findingRowAccent(primaryFinding.severity) } : lineRowFor(line.kind)}>
+      <div style={rowStyle}>
         <span className="mono tnum" style={{ ...s.lineNo, position: "relative" }}>
           {showAdd && target && (
             <button
@@ -86,36 +106,41 @@ export function CodeLine({
           {line.text || " "}
         </span>
         {primaryFinding && onFocusFindings && (
-          <Popover
-            panelStyle={s.findingPopoverPanel}
-            trigger={
-              <button
-                type="button"
-                aria-label={t("diffViewer.lineFindingsLabel")}
-                style={{ ...unstyledButtonStyle, ...findingTag(primaryFinding.severity) }}
-              >
-                {LINE_TAG_LABEL[primaryFinding.severity] ?? "finding"}
-              </button>
-            }
-          >
-            <div style={s.findingPopoverList}>
-              {lineFindings.map(({ id, severity, title, rationale }) => (
+          // marginLeft:auto must sit on this wrapper — Popover's trigger root is
+          // display:inline-block and would otherwise ignore auto margins.
+          <div style={{ marginLeft: "auto", marginRight: 14, flexShrink: 0 }}>
+            <Popover
+              panelStyle={s.findingPopoverPanel}
+              trigger={
                 <button
-                  key={id}
                   type="button"
-                  onClick={() => onFocusFindings({ severity, findingId: id })}
-                  style={s.findingPopoverRow}
+                  aria-label={t("diffViewer.lineFindingsLabel")}
+                  style={{ ...unstyledButtonStyle, ...findingTag(primaryFinding.severity) }}
                 >
-                  <SeverityBadge severity={severity as Severity} compact />
-                  <div style={s.findingPopoverRowMain}>
-                    <div style={s.findingPopoverTitle}>{title}</div>
-                    <div style={s.findingPopoverRationale}>{rationale}</div>
-                    <div style={s.findingPopoverJump}>{t("diffViewer.jumpToFinding")}</div>
-                  </div>
+                  <FindingIcon severity={primaryFinding.severity} />
+                  {LINE_TAG_LABEL[primaryFinding.severity] ?? "finding"}
                 </button>
-              ))}
-            </div>
-          </Popover>
+              }
+            >
+              <div style={s.findingPopoverList}>
+                {lineFindings.map(({ id, severity, title, rationale }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onFocusFindings({ severity, findingId: id })}
+                    style={s.findingPopoverRow}
+                  >
+                    <SeverityBadge severity={severity as Severity} compact />
+                    <div style={s.findingPopoverRowMain}>
+                      <div style={s.findingPopoverTitle}>{title}</div>
+                      <div style={s.findingPopoverRationale}>{rationale}</div>
+                      <div style={s.findingPopoverJump}>{t("diffViewer.jumpToFinding")}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Popover>
+          </div>
         )}
       </div>
 

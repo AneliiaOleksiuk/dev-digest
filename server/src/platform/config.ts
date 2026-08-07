@@ -26,6 +26,11 @@ const EnvSchema = z.object({
   // Note: even when on, sections only populate once the repo is indexed; an
   // unindexed repo degrades gracefully. Per-agent override: agents.repo_intel.
   REPO_INTEL_ENABLED: z.string().optional(),
+  // Verbose structured prompt-assembly logging (section names/sources/char
+  // counts, model, correlation id — NEVER content). Off by default; forced
+  // off in production regardless of this value (see loadConfig below), so it
+  // can only ever be turned on for local dev.
+  PROMPT_LOG_VERBOSE: z.string().optional(),
   API_PORT: z.coerce.number().int().default(3001),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
@@ -59,6 +64,13 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /**
+   * Verbose structured prompt-assembly logging (reviewer-core's per-section
+   * char counts + source labels, never content). Local-dev-only by
+   * construction: forced `false` whenever `nodeEnv === 'production'`, so a
+   * stray `PROMPT_LOG_VERBOSE=true` in a deployed env can never enable it.
+   */
+  promptLogVerbose: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -77,5 +89,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    promptLogVerbose: parsed.PROMPT_LOG_VERBOSE === 'true' && parsed.NODE_ENV !== 'production',
   };
 }

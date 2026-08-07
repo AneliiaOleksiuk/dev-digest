@@ -48,6 +48,8 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** Derived PR intent & scope block (rendered plain text); null when absent. */
+  intent: z.string().nullish(),
   user: z.string(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
@@ -83,6 +85,7 @@ export const RunTrace = z.object({
   tool_calls: z.array(ToolCall),
   raw_output: z.string(),
   memory_pulled: z.array(MemoryPulled),
+  /** Spec/plan file paths read anywhere in the run pipeline (currently: intent classification), not necessarily fed to the reviewer's prompt. */
   specs_read: z.array(z.string()),
   log: z.array(RunLogLine),
 });

@@ -3,6 +3,7 @@ import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision } from 
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
+import type { IntentSource } from '../../vendor/shared/contracts/brief';
 
 // ============================================================ Review & findings
 
@@ -52,6 +53,22 @@ export const prIntent = pgTable('pr_intent', {
   intent: text('intent').notNull(),
   inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  /** Which commit the intent describes; drives the "stale, re-run?" state. */
+  headSha: text('head_sha'),
+  /** Capped confidence (see `capConfidence` in `intent-inputs.ts`). */
+  confidence: doublePrecision('confidence'),
+  /** Provenance, incl. unresolved refs. Server-computed, never model-authored. */
+  sources: jsonb('sources').$type<IntentSource[]>().notNull().default(sql`'[]'::jsonb`),
+  /** Explicit "couldn't get this" list. */
+  missingContext: jsonb('missing_context').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  /** Short classifier-authored risk bullets (mock "Risk Areas"), e.g. "New
+   *  dependency: ioredis". Distinct from the unbuilt `pr_brief` `Risks`. */
+  riskAreas: jsonb('risk_areas').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  /** Proves the classifier ran on a different provider/model than the review. */
+  provider: text('provider'),
+  model: text('model'),
+  /** Freshness display. */
+  classifiedAt: timestamp('classified_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const prBrief = pgTable('pr_brief', {

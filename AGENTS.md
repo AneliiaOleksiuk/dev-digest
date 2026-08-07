@@ -33,6 +33,11 @@ deps — see each package's AGENTS.md.
   `~/.devdigest/secrets.json` (mode `0600`), with `process.env` as a fallback.
 - **Migrations are NOT applied on server boot** — always run
   `cd server && pnpm db:migrate` manually after pulling changes.
+- **Cross-tool agent personas live in `agents/<name>.md`** (canonical) and
+  are manually mirrored into `.claude/agents/`, `.codex/agents/`, and
+  `.cursor/agents/` — same manual-mirror convention as `@devdigest/shared`,
+  no sync script. See [agents/README.md](agents/README.md) for the full
+  persona set and handoff chain.
 
 ## Cross-cutting gotchas
 
@@ -53,6 +58,13 @@ deps — see each package's AGENTS.md.
 - [docs/agent-prompts/README.md](docs/agent-prompts/README.md) — how a
   reviewer agent's system prompt becomes the assembled LLM prompt; read this
   before touching anything prompt- or grounding-related.
+- [docs/features/intent-layer.md](docs/features/intent-layer.md) — Intent Layer
+  (classify → persist → prompt scope).
+- [docs/reference/intent-api.md](docs/reference/intent-api.md) — Intent HTTP +
+  contract lookup.
+- [docs/adr/0001-intent-service-in-reviews-module.md](docs/adr/0001-intent-service-in-reviews-module.md)
+  · [0002](docs/adr/0002-model-owned-scope-filtering.md) ·
+  [0003](docs/adr/0003-specs-read-reuse-for-intent.md) — Intent Layer ADRs.
 - `./specs` — per-feature specs (L05 Project Context Folder).
   [specs/skills-feature.md](specs/skills-feature.md) — reusable skills for
   review agents.

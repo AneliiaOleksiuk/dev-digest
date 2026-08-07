@@ -28,7 +28,7 @@ export const s = {
   filePath: {
     fontSize: 13,
     fontWeight: 500,
-    flex: 1,
+    flex: "0 1 auto",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -64,11 +64,11 @@ export const s = {
     flexShrink: 0,
   } satisfies CSSProperties,
   lineText: {
-    flex: 1,
+    flex: "0 1 auto",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     color: "var(--text-primary)",
-    paddingRight: 12,
+    maxWidth: "calc(100% - 140px)",
   } satisfies CSSProperties,
   findingPopoverPanel: { width: 320, padding: 6 } satisfies CSSProperties,
   findingPopoverList: { display: "flex", flexDirection: "column", gap: 2 } satisfies CSSProperties,
@@ -100,28 +100,47 @@ export const s = {
   } satisfies CSSProperties,
 } as const;
 
-/** Left-border accent on a diff line covered by a finding, colored by severity. */
+/** Full-width severity tint + thick left gutter bar (design mock). */
 export function findingRowAccent(severity: string): CSSProperties {
   const color = colorForSeverity(severity);
-  return { borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: color };
+  const tint =
+    severity === "CRITICAL"
+      ? "color-mix(in srgb, var(--crit, #ef4444) 22%, transparent)"
+      : severity === "WARNING"
+        ? "color-mix(in srgb, var(--warn, #f59e0b) 22%, transparent)"
+        : severity === "SUGGESTION"
+          ? "color-mix(in srgb, var(--accent, #3b82f6) 22%, transparent)"
+          : "transparent";
+  return {
+    borderLeftWidth: 3,
+    borderLeftStyle: "solid",
+    borderLeftColor: color,
+    // Overlay the add/del tint so the severity colour reads clearly.
+    backgroundImage: `linear-gradient(${tint}, ${tint})`,
+  };
 }
 
-/** Small inline severity tag ("blocker"/"warning"/…) at the end of a covered line. */
+/** Far-right severity label: icon + lowercase text, no filled pill.
+ *  Horizontal placement is owned by the CodeLine wrapper (marginLeft: auto). */
 export function findingTag(severity: string): CSSProperties {
   const color = colorForSeverity(severity);
   return {
     flexShrink: 0,
-    alignSelf: "center",
-    marginRight: 10,
-    padding: "2px 8px",
-    borderRadius: 5,
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "0 2px",
+    border: "none",
+    borderRadius: 0,
+    fontSize: 12,
+    fontWeight: 500,
+    textTransform: "lowercase",
+    letterSpacing: "0.01em",
     color,
-    background: "var(--bg-hover)",
+    background: "transparent",
     cursor: "pointer",
+    lineHeight: "20px",
+    whiteSpace: "nowrap",
   };
 }
 
@@ -137,7 +156,15 @@ export function chevronFor(open: boolean): CSSProperties {
 /** Row background per line kind (add/del tinted, others transparent). */
 export function lineRowFor(kind: Line["kind"]): CSSProperties {
   const background = kind === "add" ? "var(--code-add)" : kind === "del" ? "var(--code-del)" : "transparent";
-  return { display: "flex", alignItems: "stretch", fontSize: 13, lineHeight: "20px", background };
+  return {
+    display: "flex",
+    alignItems: "center",
+    fontSize: 13,
+    lineHeight: "20px",
+    background,
+    width: "100%",
+    boxSizing: "border-box",
+  };
 }
 
 /** Gutter sign colour per line kind. */

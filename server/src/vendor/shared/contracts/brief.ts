@@ -6,10 +6,52 @@ import { z } from 'zod';
  */
 
 // ---- Intent ----
+/**
+ * Provenance for one piece of input the classifier used (or tried to use).
+ * `resolved` is SERVER-computed, never model-authored: the classifier's own
+ * structured-output schema (service-local, see `intent-service.ts`) has no
+ * `sources` field at all — the server merges its own deterministic `sources[]`
+ * on top of the model's output after the call returns.
+ */
+export const IntentSource = z.object({
+  kind: z.enum([
+    'pr_title',
+    'pr_description',
+    'linked_issue',
+    'spec_file',
+    'external_link',
+    'changed_files',
+  ]),
+  ref: z.string().nullish(),
+  resolved: z.boolean(),
+});
+export type IntentSource = z.infer<typeof IntentSource>;
+
+/**
+ * Product `summary` ≡ contract `intent` (kept as-is, not renamed — see
+ * `docs/plans/intent-layer.md` §A.1 for why); product `in_scope[]`/
+ * `out_of_scope[]` ≡ same names here.
+ *
+ * `confidence`/`sources`/`missing_context`/`risk_areas` are optional with
+ * defaults so every existing parse site (incl. `PrBrief`, `PrIntentRecord`)
+ * keeps working unchanged. `confidence` is capped server-side, never trusted
+ * as-is from the model when any `sources[]` entry is unresolved — see
+ * `capConfidence` in `server/src/modules/reviews/intent-inputs.ts`.
+ *
+ * Product "Risk Areas" (mock: short bullets like "New dependency: ioredis",
+ * "Auth surface touched") ≡ `risk_areas[]` here — short classifier-authored
+ * strings scoped to a single PR's intent. Distinct from the separate `Risks`
+ * contract below (`Risk` objects with `severity`/`file_refs`, unbuilt PR
+ * Brief scaffolding) — do not conflate the two.
+ */
 export const Intent = z.object({
   intent: z.string(),
   in_scope: z.array(z.string()),
   out_of_scope: z.array(z.string()),
+  confidence: z.number().min(0).max(1).nullish(),
+  sources: z.array(IntentSource).default([]),
+  missing_context: z.array(z.string()).default([]),
+  risk_areas: z.array(z.string()).default([]),
 });
 export type Intent = z.infer<typeof Intent>;
 

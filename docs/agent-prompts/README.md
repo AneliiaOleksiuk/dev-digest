@@ -19,12 +19,14 @@ in the DB). The canonical, reviewable copies live next to this file:
 Assembly happens in `reviewer-core/src/prompt.ts` (`assemblePrompt`). The model
 receives exactly two messages:
 
-**System message** = your agent prompt **+** a fixed injection guard:
+**System message** = your agent prompt **+** a fixed injection guard, and
+(when a derived intent block is present) scope-filtering guidance:
 
 ```
 <your system_prompt>
 
 <INJECTION_GUARD>   // appended verbatim to EVERY agent, every run
+<SCOPE_GUIDANCE>    // ONLY when parts.intent is present — omitted otherwise
 ```
 
 `INJECTION_GUARD` (`prompt.ts:16`) tells the model that everything inside
@@ -32,23 +34,43 @@ receives exactly two messages:
 fixture / not for production / ignore this" never descope the review. You do not
 need to repeat any of this in your prompt — it is always there.
 
+`SCOPE_GUIDANCE` (`prompt.ts:45`) is appended **after** `INJECTION_GUARD` only when
+the run has a derived intent block. It tells the model how to prioritise findings
+against the PR's stated scope, still in the schema's own vocabulary:
+
+- in-scope findings on changed code: report normally;
+- out-of-scope issues: report **at most one**, and only when it would be
+  `CRITICAL` on its own merits — skip out-of-scope `WARNING`/`SUGGESTION`;
+- never suppress a genuine `CRITICAL` because it is out of scope; when reporting
+  one, say so in the `rationale`.
+
+Scope filtering is deliberately **model-owned** (a soft prompt instruction), not a
+deterministic post-hoc filter on `findings[]`. Fuzzy-matching free-text
+`in_scope`/`out_of_scope` strings against finding titles/paths would risk silently
+dropping a real `CRITICAL`. Citation grounding (`groundFindings`) stays a separate,
+deterministic gate — it checks that a finding cites a real diff line; it does not
+decide scope.
+
 **User message** = the task and all context, in this order, each untrusted block
-delimiter-wrapped (`prompt.ts:104-122`):
+delimiter-wrapped (`prompt.ts:139-158`):
 
 ```
 <task line, e.g. "Review PR #7 '…'">
-## PR description        (untrusted, author-controlled, truncated to 4000 chars)
-## Skills / rules        (linked skill bodies)
-## Relevant memory       (curated memory items)
-## Repo skeleton         (untrusted, repo-derived)
-## Project context       (untrusted spec chunks)
+## PR description              (untrusted, author-controlled, truncated to 4000 chars)
+## Derived intent & scope      (untrusted; omitted when no intent was classified)
+## Skills / rules              (linked skill bodies)
+## Relevant memory             (curated memory items)
+## Repo skeleton               (untrusted, repo-derived)
+## Project context             (untrusted spec chunks)
 ## Callers of changed symbols  (untrusted, repo-derived)
-## Diff to review        (untrusted)
+## Diff to review              (untrusted)
 ```
 
 Sections with no content are omitted. Everything repo- or author-derived is wrapped
 in `<untrusted source="…">…</untrusted>` so the model can tell instructions
-(system) from data (user).
+(system) from data (user). When `intent` is omitted, both the user-message section
+and `SCOPE_GUIDANCE` are absent — the assembled messages stay byte-identical to a
+run without the Intent Layer.
 
 ## The output schema is NOT in the prompt
 

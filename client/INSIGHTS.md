@@ -114,15 +114,31 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   is under the do-not-touch `src/vendor/ui/**` path per `AGENTS.md`, but is
   a sanctioned exception in practice** — unlike the component files in that
   tree, it's routing/config data, not visual-design-system code. Confirmed
-  necessary twice now (Skills nav entry 2026-08-02, session below; the
-  Conventions nav entry the same day): without an entry here, a new
-  top-level route is only reachable by typing the URL directly — the
-  sidebar has no link to it, and `activeKeyFor` in
-  `components/app-shell/helpers.ts` (already pre-wired for
+  necessary three times now (Skills nav entry 2026-08-02; the Conventions
+  nav entry the same day; splitting `WORKSPACE` into a separate
+  `SKILLS LAB` group for Agents/Skills/Conventions, 2026-08-05 — see
+  Session Notes): without an entry here, a new top-level route is only
+  reachable by typing the URL directly — the sidebar has no link to it, and
+  `activeKeyFor` in `components/app-shell/helpers.ts` (already pre-wired for
   `pathname.includes("/conventions")` before this session even added the
   page) has nothing to highlight. Flag this exception to whoever's
   reviewing before editing it, don't silently treat "do-not-touch" as
-  covering it.
+  covering it. `Sidebar.tsx` already maps generically over `NAV: NavGroup[]`
+  — adding a second section needs zero template changes, just a new
+  `{ section, items }` entry.
+- **A pre-authored `messages/en/*.json` breadcrumb label can reveal an
+  intended sidebar *grouping*, not just a screen's copy** — extends the
+  pattern above (pre-authored JSON encoding intended UX ahead of the UI).
+  `skills.json`, `conventions.json`, `agents.json`, and `eval.json` all
+  independently used `"Skills Lab"` as their breadcrumb root
+  (`crumbLab`/`breadcrumbLab`/`crumbSkillsLab`) well before `nav.ts` grouped
+  those three nav items under a matching sidebar section — the IA decision
+  was already made in copy, `nav.ts` just hadn't caught up. When a sidebar
+  grouping looks arbitrary or flat, grep `messages/en/*.json` for shared
+  breadcrumb-root strings before inventing a new grouping — it may already
+  be specified. (`eval` has no `nav.ts` entry at all yet despite sharing the
+  same breadcrumb root — pre-existing gap, left alone since it wasn't part
+  of the request that prompted this note.)
 - **A pre-authored `client/messages/en/<feature>.json` namespace can cover
   only *part* of a feature's flow, not the whole thing.** Extends the
   pattern noted below for `skills.json` (list/detail/import were all
@@ -135,6 +151,46 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   ones following the existing file's tone/structure rather than guessing
   at a different process.
 
+- **Intent Layer i18n lives under `prReview.intent.*`, not `brief.block.intent`.**
+  `brief.json`'s `block.intent` ("Intent") is scaffolding for the unbuilt PR
+  Brief feature. The Overview IntentCard (and every other PR-detail component)
+  already uses `useTranslations("prReview")`, so new copy goes in
+  `messages/en/prReview.json` under a dedicated `intent` namespace (title,
+  empty/stale/error, scope labels, source kinds, confidence). Trace-drawer
+  prompt-slot labels stay in `runs.json` (`trace.prompt.intent`) — same file
+  as the other `trace.prompt.*` keys. Don't reuse `brief.block.intent` for the
+  card; don't put IntentCard keys in `runs.json`.
+
+- **Embedded Overview panels prefer a compact empty state over `EmptyState`.**
+  `@devdigest/ui`'s `EmptyState` pads ~60px and centers for full-page empty
+  screens (Skills list, FindingsPanel filter miss). For a section that sits
+  above Description on the PR Overview tab (IntentCard), a short left-aligned
+  title/body + primary CTA inside the same bordered `wrap` as the classified
+  state matches VerdictBanner / OverviewTab language better and avoids a
+  giant dead zone in the first viewport.
+
+- **Extend a shared component with an optional prop rather than duplicating
+  its render logic in a wrapper, when only one extra field differs.**
+  `VerdictBanner` (`_components/VerdictBanner/`) gained an optional
+  `costUsd?: number | null` prop (renders a `formatCost` badge only when
+  non-null) so the new Overview `PrBriefBanner` could show cost without a
+  second near-identical verdict-rendering component; `ReviewRunAccordion`'s
+  existing usage doesn't pass it, so it's fully backward compatible and
+  `VerdictBanner.test.tsx` needed no changes. Used for the PR Brief banner
+  (docs/plans/intent-layer.md WI13).
+- **Single-consumer sub-components nest under their one parent's own
+  `_components/`, not as a sibling top-level `_components/<Name>/`.**
+  `PrBriefBanner` (Overview's PR Brief panel, WI13) is only ever rendered by
+  `OverviewTab`, so it lives at `OverviewTab/_components/PrBriefBanner/` —
+  contrast with `BlastRadiusCard` (same plan item), which the plan
+  explicitly specified as `Folder shape like IntentCard/`, i.e. a top-level
+  sibling under the route's own `_components/`, because that's the
+  convention for panels reused/addressed at the Overview-tab level like
+  `IntentCard`/`VerdictBanner` already are.
+- **Overview has no Description panel.** The PR body used to render as a
+  fourth "Description" block under Intent|Blast; the mock is strictly three
+  panels (PR Brief + Intent | Blast Radius). Dropped `prBody` from
+  `OverviewTab` — don't re-add a Description section for mock parity.
 - **Conventions "Accept" is a two-step flow by design, not a shortcut to
   auto-creating a skill** — confirmed with the user 2026-08-02. Clicking
   Accept on a `ConventionCard` only sets `status: "accepted"` and adds the
@@ -148,7 +204,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 
 ## Tool & Library Notes
 
-_(to be filled in)_
+- **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
+  codebase's way to get a "2 columns on desktop, stacks under N px" layout
+  from pure inline-style CSS** — no prior `@media` usage anywhere under
+  `client/src` (checked; the only `@media` in the whole package is
+  `prefers-reduced-motion` in `vendor/ui/styles.css`) and no
+  `useMediaQuery`-style hook exists. Used for Overview's Intent | Blast
+  Radius row (`OverviewTab/styles.ts` `intentBlastRow`,
+  `minmax(380px, 1fr)`, docs/plans/intent-layer.md WI13) instead of adding a
+  new responsive-hook dependency for one row. Reach for this before adding a
+  media-query hook for a simple N-column-or-stack case.
+- **Don't nest `auto-fit`/`minmax(280px+)` inside a panel that already sits
+  in a half-width Overview column.** IntentCard's In|Out `scopeGrid` used
+  `repeat(auto-fit, minmax(280px, 1fr))` and looked correct in isolation, but
+  once Intent lived in `intentBlastRow`'s ~400–500px column, 280×2 overflowed
+  and CSS collapsed In Scope / Out of Scope into a vertical stack — the main
+  mock-parity miss vs the side-by-side mock. Fix: `repeat(2, minmax(0, 1fr))`
+  inside the card; reserve `auto-fit`/`minmax` for the *outer* Intent|Blast
+  row only (`intentBlastRow` at 380px is fine because that row spans the full
+  content width).
 
 ## Recurring Errors & Fixes
 
@@ -215,19 +289,86 @@ _(to be filled in)_
   Create-skill is an intentional two-step flow, not a bug (see Codebase
   Patterns).
 
+- 2026-08-05: Mentor-review fixes on `SkillPreview` and the sidebar.
+  (1) Split the single view/edit panel into `SkillPreview.tsx` (thin tab
+  shell using `@devdigest/ui`'s `Tabs`, mirroring `AgentEditor.tsx`) +
+  `_components/OverviewTab` (verbatim move of the old view/edit logic) +
+  `_components/VersionHistoryTab` (new — first real consumer of the
+  `useSkillVersions` hook and `GET /skills/:id/versions`, which had existed
+  unused since the original Skills build). Read-only by design: no
+  "restore old version" action, confirmed out of scope with the user. A
+  "Stats" tab was considered and explicitly dropped — no analytics data
+  (e.g. "used by N agents") exists on the backend, only raw skill fields
+  already visible on Overview; would need a new backend metric, not a UI
+  wire-up. (2) Split `nav.ts`'s single `WORKSPACE` group into `WORKSPACE`
+  (Pull Requests only) + `SKILLS LAB` (Agents, Skills, Conventions) — see
+  Codebase Patterns above for the breadcrumb-copy evidence that drove the
+  grouping choice. Verified via `tsc --noEmit` (clean) + full Vitest suite
+  (13 files / 38 tests, all passing) — no live browser click-through this
+  session, Docker/Postgres wasn't running locally and the user declined to
+  spin it up just for this verification (see root `INSIGHTS.md` Tool notes
+  on the pnpm-no-TTY and Docker-not-running environment quirks hit while
+  trying).
+
+- 2026-08-06: Intent Layer client finish (plan WI8/9) — `IntentCard` on PR
+  Overview (above Description) wired to existing `usePrIntent`/
+  `useClassifyIntent`; TraceBody gained an `intent` PromptBlock +
+  `PROMPT_COLORS.intent` + `runs.trace.prompt.intent`; `prReview.intent.*`
+  i18n namespace; `docs/agent-prompts/README.md` updated for Derived intent
+  section order + `SCOPE_GUIDANCE`. No `IntentCard.test.tsx` (test-writer).
+  Verified via `tsc --noEmit` + full Vitest (13 files / 38 tests).
+
+- 2026-08-07: Intent Layer design fix-ups, client side (plan
+  `docs/plans/intent-layer.md` WI11 + WI13, mock-parity pass). WI11:
+  `IntentCard` reordered to objective → in/out-of-scope → Risk Areas (new,
+  keyword-heuristic icons in new `helpers.ts`: `riskIconFor`/`truncate`) →
+  confidence/model meta moved into `SectionLabel`'s `right` cluster (was a
+  dedicated row) → Sources collapsed behind a native `<details>` "N sources"
+  toggle → Missing Context capped to first item + "+N more". Out-of-scope X
+  icon recolored `var(--crit)` → `var(--text-muted)`. `prReview.json`
+  `intent.resolved`/`intent.unresolved` renamed to `intent.fetched`/
+  `intent.unavailable`; added `intent.riskAreas`/`sourcesToggle`/
+  `missingContextMore`. WI13: `OverviewTab` is now the real 3-panel mock
+  layout — new `PrBriefBanner` (see Codebase Patterns for its nesting) and
+  new top-level `BlastRadiusCard/` (see Codebase Patterns for `VerdictBanner`
+  extension and the `auto-fit`/`minmax` row layout in Tool & Library Notes).
+  `BlastRadiusCard` always renders `brief.json`'s honest unavailable empty
+  state — no blast-radius data source exists anywhere yet (see the plan's
+  WI13 Deviations note). New `brief.json` `"title": "PR Brief"` key (no
+  prior panel-title string existed). **Known regression, by design**: the
+  pre-existing `IntentCard.test.tsx` (test-writer, WI8) has one failing
+  test (`unresolved-sources`) asserting the now-renamed "Sources"/
+  "Unresolved" copy — expected per WI11's own DoD ("+ tests via test-writer
+  after implementer"), not fixed this session (only added the new required
+  `risk_areas: []` field to its fixture so `tsc` stays clean). Verified via
+  `tsc --noEmit` (clean) + full Vitest (14 files / 44 tests, 43 passed / 1
+  known-stale failure above).
+
+- 2026-08-07: IntentCard mock-parity polish (keep Description under the
+  3-panel row). Objective → italic left-border blockquote; In|Out forced to
+  `repeat(2, minmax(0, 1fr))` so they stop stacking inside the half-width
+  Intent column (see Tool & Library Notes); Risk Areas → horizontal tinted
+  pill chips (`riskColorFor` + `riskPills`); Missing Context warn box demoted
+  to left-accent-only so it doesn't outrank objective/scope/risks. Description
+  section unchanged (live-only, not on the mock). IntentCard tests: 10/10
+  green.
+
+- 2026-08-07: Overview mock header/Description correction. Removed the
+  Overview `Description` panel entirely (`prBody` prop dropped from
+  `OverviewTab` / `page.tsx`) — it was a leftover fourth surface, not on the
+  mock. Intent `SectionLabel` is title-only again (confidence / model /
+  Re-derive moved to a demoted card footer); Risk Areas heading matches mock
+  (warn icon + top border); Blast Radius `SectionLabel` icon `Workflow` →
+  `GitBranch`. IntentCard tests: 10/10 green.
+
+- 2026-08-07: Intent/Blast titles moved **inside** the bordered card
+  (`cardTitle` local style, not `SectionLabel` above `wrap`). Mock has
+  INTENT / BLAST RADIUS as the first row inside the card frame; the previous
+  outside-label layout was the remaining header mismatch. Dropped the
+  duplicate GitBranch icon from Blast empty body.
+
 ## Open Questions
 
-- **Smart Diff (Core logic / Wiring / Boilerplate grouping + per-file "what
-  this does" AI summary) is unwired scaffolding, not a built feature.**
-  The Zod contract (`SmartDiff`/`SmartDiffGroup`/`SmartDiffFile` incl.
-  `pseudocode_summary`, `client/src/vendor/shared/contracts/brief.ts:80-113`)
-  and i18n keys (`smartDiff.*` in `messages/en/prReview.json`) exist, but
-  no server endpoint, no client hook, and no component reads either —
-  confirmed via full-repo grep, zero hits outside the contract file. Don't
-  assume it's implemented anywhere; building it needs a new LLM-backed
-  server endpoint (something has to generate the per-file summary + role
-  classification), which is a materially different scope than wiring
-  existing `FindingRecord` data through existing components.
 - **No browser-automation tool is set up for this Windows dev environment**
   — `agent-browser` (which `e2e/run.ts` expects on `PATH`) and
   `chromium-cli` are both absent. UI-behavior changes here could only be
@@ -239,3 +380,15 @@ _(to be filled in)_
   **Resolved 2026-08-02**: installed globally (`npm i -g agent-browser &&
   agent-browser install`) — see `e2e/INSIGHTS.md` Session Notes/Tool notes
   for the install step and the click-automation quirks hit using it.
+
+## Session Notes
+
+- **Smart Diff is path-based, not LLM-backed.** `GET /pulls/:id/smart-diff`
+  (`server/src/modules/smart-diff/`) classifies `pr_files` into
+  core/wiring/boilerplate via path matchers in `constants.ts`, overlays
+  `finding_lines` from the single latest review, and returns the existing
+  `SmartDiff` Zod contract. `pseudocode_summary` stays `null` (UI renders
+  "What this does" only when non-null — scaffold for a later iteration).
+  Client: `useSmartDiff` + `SmartDiffViewer` on the Files changed tab with
+  Smart/Original order toggle. Zero token cost. The previous Open Question
+  claiming Smart Diff "needs a new LLM-backed server endpoint" was wrong.

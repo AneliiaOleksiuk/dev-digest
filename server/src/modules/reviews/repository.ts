@@ -1,6 +1,7 @@
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
+import type { Finding, Intent, PrIntentRecord, RunSummary, RunTrace } from '@devdigest/shared';
+import type { UpsertIntentInput } from './repository/pull.repo.js';
 
 /**
  * A2 — review data-access. The ONLY layer touching the DB for the review
@@ -127,12 +128,18 @@ export class ReviewRepository {
 
   // ---- intent -------------------------------------------------------------
 
-  upsertIntent(prId: string, intent: Intent): Promise<void> {
+  upsertIntent(prId: string, intent: UpsertIntentInput): Promise<void> {
     return pullRepo.upsertIntent(this.db, prId, intent);
   }
 
   getIntent(prId: string): Promise<Intent | undefined> {
     return pullRepo.getIntent(this.db, prId);
+  }
+
+  /** Full persisted record (incl. head_sha/provider/model/classified_at) for
+   *  the API route and the "stale, re-run?" comparison. */
+  getIntentRecord(prId: string): Promise<PrIntentRecord | undefined> {
+    return pullRepo.getIntentRecord(this.db, prId);
   }
 
   // ---- observability: agent_runs + run_traces ----------------------------

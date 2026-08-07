@@ -53,14 +53,36 @@
     "blockers": " · {count} blockers"
   },
   "smartDiff": {
-    "coreLabel": "Core",
+    "title": "Reviewer-ordered diff",
+    "coreLabel": "Core logic",
     "wiringLabel": "Wiring",
     "boilerplateLabel": "Boilerplate",
     "largeTitle": "This PR is large ({lines} changed lines)",
     "largeBody": "Consider splitting it into smaller, focused PRs for easier review:",
-    "filesCount": "{count} files",
+    "filesCount": "{count, plural, one {# file} other {# files}}",
     "findingLines": "{count} finding-lines",
-    "groupedByRole": "Smart Diff · grouped by role"
+    "findingsBadge": "{count, plural, one {# finding} other {# findings}}",
+    "groupedByRole": "Smart Diff · grouped by role",
+    "order": {
+      "smart": "Smart order",
+      "original": "Original order",
+      "label": "Diff file order"
+    },
+    "subtitle": {
+      "core": "The substance of the change — review closely",
+      "wiring": "Hooks the core into the app",
+      "boilerplate": "Generated / mechanical — skim"
+    },
+    "split": {
+      "core": "Core logic",
+      "wiring": "Wiring",
+      "boilerplate": "Boilerplate"
+    },
+    "unavailable": "Smart order unavailable — showing original order.",
+    "whatThisDoes": "What this does:",
+    "summaryBadge": "summary",
+    "summaryFallback": "{path} (+{additions} −{deletions})",
+    "jumpToLine": "Jump to line {line}"
   },
   "list": {
     "breadcrumb": "Pull Requests",
@@ -115,5 +137,35 @@
     "openTrace": "Open run trace & logs",
     "deleteRun": "Delete run",
     "filterBySeverity": "Show {severity} findings"
+  },
+  "intent": {
+    "title": "Intent",
+    "emptyTitle": "No intent derived yet",
+    "emptyBody": "Derive what this PR sets out to do from its title, description, linked issue, specs, and changed files — without reading diff bodies.",
+    "derive": "Derive intent",
+    "reDerive": "Re-derive intent",
+    "inScope": "In scope",
+    "outOfScope": "Out of scope",
+    "noInScope": "None listed",
+    "noOutOfScope": "None listed",
+    "confidence": "Confidence {pct}%",
+    "staleNotice": "PR updated since this was derived",
+    "staleBody": "The PR’s head commit has moved. Re-derive to refresh intent for the latest changes.",
+    "riskAreas": "Risk areas",
+    "sourcesToggle": "{count, plural, one {# source} other {# sources}}",
+    "fetched": "Fetched",
+    "unavailable": "Unavailable",
+    "missingContext": "Missing context",
+    "missingContextMore": "+{count} more",
+    "loadError": "Couldn’t load intent",
+    "classifyError": "Couldn’t classify intent — try again.",
+    "sourceKind": {
+      "pr_title": "PR title",
+      "pr_description": "PR description",
+      "linked_issue": "Linked issue",
+      "spec_file": "Spec / plan",
+      "external_link": "External link",
+      "changed_files": "Changed files"
+    }
   }
 }

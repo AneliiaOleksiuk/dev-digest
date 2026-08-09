@@ -11,6 +11,7 @@ import {
   GetBlastRadiusOutputShape,
   type GetBlastRadiusInput,
 } from '../schemas.js';
+import { registerTool } from './register.js';
 
 const DESCRIPTION =
   "Get the blast radius (impact map) of a pull request's changes: symbols declared in the changed files, their direct callers, and the endpoints/cron jobs those callers reach. Read entirely from the repo's existing code index — never from a model.";
@@ -46,7 +47,8 @@ export async function getBlastRadiusHandler(
 }
 
 export function registerGetBlastRadius(server: McpServer, api: ApiClient): void {
-  server.registerTool(
+  registerTool(
+    server,
     'get_blast_radius',
     {
       description: DESCRIPTION,
@@ -56,6 +58,6 @@ export function registerGetBlastRadius(server: McpServer, api: ApiClient): void 
       // syncs from GitHub (same reasoning as get_findings, docs/plans/mcp-server.md Risk 6).
       annotations: { title: 'Get blast radius', readOnlyHint: true, openWorldHint: true },
     },
-    (input) => getBlastRadiusHandler(api, input),
+    (input) => getBlastRadiusHandler(api, input as GetBlastRadiusInput),
   );
 }

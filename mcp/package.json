@@ -11,7 +11,7 @@
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "review": "tsx src/cli.ts review --mode working",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json && node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.cli.json",
     "test": "vitest run"
   },
   "dependencies": {

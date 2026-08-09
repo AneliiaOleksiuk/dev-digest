@@ -5,6 +5,7 @@ import type { ApiClient } from '../api-client.js';
 import { apiFailureToolError, buildResult } from '../errors.js';
 import { toAgentSummary } from '../project.js';
 import { ListAgentsInputShape, ListAgentsOutputSchema, ListAgentsOutputShape } from '../schemas.js';
+import { registerTool } from './register.js';
 
 const DESCRIPTION =
   "List the reviewer agents configured in this DevDigest workspace. Returns each agent's id, name, description, and model — the id is required by run_agent_on_pr and get_findings.";
@@ -25,7 +26,8 @@ export async function listAgentsHandler(api: ApiClient): Promise<CallToolResult>
 }
 
 export function registerListAgents(server: McpServer, api: ApiClient): void {
-  server.registerTool(
+  registerTool(
+    server,
     'list_agents',
     {
       description: DESCRIPTION,

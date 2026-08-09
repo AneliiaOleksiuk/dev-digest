@@ -11,6 +11,7 @@ import {
   GetConventionsOutputShape,
   type GetConventionsInput,
 } from '../schemas.js';
+import { registerTool } from './register.js';
 
 const DESCRIPTION =
   "Get this repository's extracted coding conventions — the same house rules used to ground agent reviews.";
@@ -45,7 +46,8 @@ export async function getConventionsHandler(
 }
 
 export function registerGetConventions(server: McpServer, api: ApiClient): void {
-  server.registerTool(
+  registerTool(
+    server,
     'get_conventions',
     {
       description: DESCRIPTION,
@@ -53,6 +55,6 @@ export function registerGetConventions(server: McpServer, api: ApiClient): void 
       outputSchema: GetConventionsOutputShape,
       annotations: { title: "Get a repo's conventions", readOnlyHint: true, openWorldHint: false },
     },
-    (input) => getConventionsHandler(api, input),
+    (input) => getConventionsHandler(api, input as GetConventionsInput),
   );
 }

@@ -168,6 +168,13 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `reviewer-core/tsconfig.json`: add `"zod"` / `"zod/*"` paths pointing at
   `./node_modules/zod`. Without this, installing reviewer-core deps alone is
   not enough.
+- **`mcp` CI typecheck exits 134 (JS heap OOM).** Two stacked causes:
+  (1) MCP SDK 1.30 `registerTool` generics + zod 3.25 shapes explode tsc
+  (TS2589 / ~4GB heap) — wrap registrations in `src/tools/register.ts` to
+  erase that generic surface. (2) CLI path-maps raw `reviewer-core` source —
+  split `tsconfig.json` (tools) / `tsconfig.cli.json` (CLI) and run both
+  under `node --max-old-space-size=6144`. `.github/workflows/mcp.yml` also
+  sets `NODE_OPTIONS` the same way.
 
 ## Session Notes
 
@@ -208,8 +215,9 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   either (no `api-client` import, no DB import), so their being up doesn't
   weaken this as a "no server/DB required" proof.
 - 2026-08-09: Fixed mcp CI typecheck — `zod`/`zod/*` path aliases in
-  `mcp/tsconfig.json` (same as reviewer-core). `npm run typecheck` +
-  `npm test` (35) green locally.
+  `mcp/tsconfig.json` (same as reviewer-core); then fixed OOM (exit 134)
+  via `registerTool` wrapper + split `tsconfig.cli.json` + 6GB heap.
+  `npm run typecheck` + `npm test` (35) green locally.
 
 ## Open Questions
 

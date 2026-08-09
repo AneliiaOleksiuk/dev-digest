@@ -21,11 +21,10 @@
     "paths": {
       "@devdigest/shared": ["../server/src/vendor/shared/index.ts"],
       "@devdigest/shared/*": ["../server/src/vendor/shared/*"],
-      "@devdigest/reviewer-core": ["../reviewer-core/src/index.ts"],
-      "@devdigest/reviewer-core/*": ["../reviewer-core/src/*"],
       "zod": ["./node_modules/zod"],
       "zod/*": ["./node_modules/zod/*"]
     }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["src/cli.ts", "src/cli/**", "test/cli-*.test.ts"]
 }

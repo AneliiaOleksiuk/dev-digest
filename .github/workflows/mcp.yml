@@ -65,6 +65,12 @@ jobs:
         working-directory: reviewer-core
         run: npm ci
 
+      # Tools + CLI typecheck both need a raised heap: MCP SDK registerTool
+      # generics + path-mapped shared/reviewer-core otherwise OOM (~4GB, exit
+      # 134). package.json typecheck already passes --max-old-space-size=6144;
+      # keep NODE_OPTIONS as a belt-and-suspenders for the workflow.
       - run: npm run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - run: npm test

@@ -11,6 +11,7 @@ import {
   VerdictResultSchema,
   VerdictResultShape,
 } from '../schemas.js';
+import { registerTool } from './register.js';
 
 const DESCRIPTION =
   'Get the verdict and findings from the most recent completed review of a pull request. Use after run_agent_on_pr, or to check a review someone else already ran.';
@@ -62,7 +63,8 @@ export async function getFindingsHandler(api: ApiClient, input: GetFindingsInput
 }
 
 export function registerGetFindings(server: McpServer, api: ApiClient): void {
-  server.registerTool(
+  registerTool(
+    server,
     'get_findings',
     {
       description: DESCRIPTION,
@@ -73,6 +75,6 @@ export function registerGetFindings(server: McpServer, api: ApiClient): void {
       // local read, unlike get_conventions/list_agents.
       annotations: { title: 'Get review findings', readOnlyHint: true, openWorldHint: true },
     },
-    (input) => getFindingsHandler(api, input),
+    (input) => getFindingsHandler(api, input as GetFindingsInput),
   );
 }

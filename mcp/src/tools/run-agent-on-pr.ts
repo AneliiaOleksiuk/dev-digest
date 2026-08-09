@@ -7,6 +7,7 @@ import { apiFailureToolError, buildResult, toolError } from '../errors.js';
 import { toVerdictResult } from '../project.js';
 import { resolveAgent, resolvePr, resolveRepo } from '../resolve.js';
 import { RunAgentOnPrInputShape, type RunAgentOnPrInput, VerdictResultSchema, VerdictResultShape } from '../schemas.js';
+import { registerTool } from './register.js';
 
 const DESCRIPTION =
   'Run a code review on a pull request using the given agent, wait for it to finish, and return the verdict with findings. Args: repo (owner/name), pr (PR number), agent (id from list_agents).';
@@ -128,7 +129,8 @@ export async function runAgentOnPrHandler(
 }
 
 export function registerRunAgentOnPr(server: McpServer, api: ApiClient): void {
-  server.registerTool(
+  registerTool(
+    server,
     'run_agent_on_pr',
     {
       description: DESCRIPTION,
@@ -142,6 +144,11 @@ export function registerRunAgentOnPr(server: McpServer, api: ApiClient): void {
         openWorldHint: true,
       },
     },
-    (input, extra) => runAgentOnPrHandler(api, input, extra),
+    (input, extra) =>
+      runAgentOnPrHandler(
+        api,
+        input as RunAgentOnPrInput,
+        extra as RequestHandlerExtra<ServerRequest, ServerNotification>,
+      ),
   );
 }

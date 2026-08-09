@@ -161,7 +161,13 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 
 ## Recurring Errors & Fixes
 
-_(to be filled in)_
+- **`mcp` CI typecheck fails with `Cannot find module 'zod'` from
+  `server/src/vendor/shared/**` (and cascading `any` in `project.ts` /
+  `report.ts`).** Path-mapped `@devdigest/shared` files resolve bare
+  `zod` by walking up from `server/…`, not from `mcp/node_modules`. Mirror
+  `reviewer-core/tsconfig.json`: add `"zod"` / `"zod/*"` paths pointing at
+  `./node_modules/zod`. Without this, installing reviewer-core deps alone is
+  not enough.
 
 ## Session Notes
 
@@ -201,6 +207,9 @@ _(to be filled in)_
   by a concurrent agent's session) but the CLI code path has no way to reach
   either (no `api-client` import, no DB import), so their being up doesn't
   weaken this as a "no server/DB required" proof.
+- 2026-08-09: Fixed mcp CI typecheck — `zod`/`zod/*` path aliases in
+  `mcp/tsconfig.json` (same as reviewer-core). `npm run typecheck` +
+  `npm test` (35) green locally.
 
 ## Open Questions
 

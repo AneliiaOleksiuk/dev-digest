@@ -11,20 +11,20 @@ import { NextIntlClientProvider } from "next-intl";
 import type { PrIntentRecord } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/prReview.json";
 
-const usePrIntent = vi.fn();
-const useClassifyIntent = vi.fn();
+const usePullIntent = vi.fn();
+const useRecalculateIntent = vi.fn();
 
 vi.mock("../../../../../../../lib/hooks/reviews", () => ({
-  usePrIntent: (...args: unknown[]) => usePrIntent(...args),
-  useClassifyIntent: (...args: unknown[]) => useClassifyIntent(...args),
+  usePullIntent: (...args: unknown[]) => usePullIntent(...args),
+  useRecalculateIntent: (...args: unknown[]) => useRecalculateIntent(...args),
 }));
 
 import { IntentCard } from "./IntentCard";
 
 afterEach(() => {
   cleanup();
-  usePrIntent.mockReset();
-  useClassifyIntent.mockReset();
+  usePullIntent.mockReset();
+  useRecalculateIntent.mockReset();
 });
 
 const CLASSIFIED: PrIntentRecord = {
@@ -47,7 +47,7 @@ const CLASSIFIED: PrIntentRecord = {
 };
 
 function idleClassify() {
-  useClassifyIntent.mockReturnValue({
+  useRecalculateIntent.mockReturnValue({
     mutate: vi.fn(),
     isPending: false,
     isError: false,
@@ -64,7 +64,7 @@ function renderCard(headSha = "abc1234") {
 
 describe("IntentCard", () => {
   it("unclassified: empty state + Derive intent action", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: null,
       isLoading: false,
       isError: false,
@@ -80,7 +80,7 @@ describe("IntentCard", () => {
   });
 
   it("loading: shows skeletons while the query is in flight with no record", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
@@ -98,7 +98,7 @@ describe("IntentCard", () => {
   });
 
   it("classified: shows intent text, in/out of scope, confidence, and model badge", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: CLASSIFIED,
       isLoading: false,
       isError: false,
@@ -120,7 +120,7 @@ describe("IntentCard", () => {
   });
 
   it("stale: record.head_sha !== pr headSha shows update notice + re-derive", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: CLASSIFIED,
       isLoading: false,
       isError: false,
@@ -154,7 +154,7 @@ describe("IntentCard", () => {
         "specs/missing.md could not be retrieved (no local clone)",
       ],
     };
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: withUnresolved,
       isLoading: false,
       isError: false,
@@ -177,7 +177,7 @@ describe("IntentCard", () => {
   });
 
   it("sources: collapsed by default behind a native <details> toggle (WI11 item 5)", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: CLASSIFIED, // 3 resolved sources
       isLoading: false,
       isError: false,
@@ -198,7 +198,7 @@ describe("IntentCard", () => {
       ...CLASSIFIED,
       risk_areas: ["New dependency: ioredis", "Auth surface touched"],
     };
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: withRisks,
       isLoading: false,
       isError: false,
@@ -214,7 +214,7 @@ describe("IntentCard", () => {
   });
 
   it("risk areas: omits the subsection entirely when risk_areas is empty (no 'No risks' filler)", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: CLASSIFIED, // risk_areas: []
       isLoading: false,
       isError: false,
@@ -234,7 +234,7 @@ describe("IntentCard", () => {
       ...CLASSIFIED,
       missing_context: [long, "second missing item", "third missing item"],
     };
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: withMany,
       isLoading: false,
       isError: false,
@@ -257,7 +257,7 @@ describe("IntentCard", () => {
   });
 
   it("error: load failure shows ErrorState when there is no cached record", () => {
-    usePrIntent.mockReturnValue({
+    usePullIntent.mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,

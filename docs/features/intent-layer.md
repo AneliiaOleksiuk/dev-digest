@@ -164,8 +164,10 @@ objective/scope/risk hierarchy above it.
   composes `PrBriefBanner` (nested under `OverviewTab/_components/`, single
   consumer), `IntentCard`, and `BlastRadiusCard` (both top-level siblings
   under `_components/`, reused/reusable outside Overview).
-- Hooks: `usePrIntent` / `useClassifyIntent` in `client/src/lib/hooks/reviews.ts`
-  (unchanged by this round).
+- Hooks: `usePullIntent` / `useRecalculateIntent` in `client/src/lib/hooks/reviews.ts`
+  (renamed from `usePrIntent` / `useClassifyIntent` by
+  `docs/plans/l04-followups-blast-inline-and-fixes.md` WI8; unchanged
+  otherwise by this round).
 - Copy: `prReview.intent.*` in `client/messages/en/prReview.json` for
   `IntentCard` (including new `riskAreas`, `fetched`, `unavailable` keys);
   `brief.title` / `brief.block.blast` / `brief.unavailable` /

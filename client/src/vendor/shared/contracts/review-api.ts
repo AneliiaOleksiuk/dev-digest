@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Finding, Verdict } from './findings.js';
-import { Intent, SmartDiff } from './brief.js';
+import { BlastRadius, Intent, SmartDiff } from './brief.js';
 
 /**
  * A2 — Review-Core API surface contracts. These extend the core
@@ -74,3 +74,33 @@ export type PrIntentRecord = z.infer<typeof PrIntentRecord>;
 /** Smart-diff response for a PR (the SmartDiff). */
 export const SmartDiffResponse = SmartDiff;
 export type SmartDiffResponse = z.infer<typeof SmartDiffResponse>;
+
+/**
+ * One prior PR (same workspace + repo) that overlaps ≥1 of the current PR's
+ * changed file paths (WI3/WI4, L04 follow-ups — "Prior PRs touching these
+ * files").
+ */
+export const PriorPr = z.object({
+  id: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  author: z.string(),
+  overlapping_files: z.number().int(),
+});
+export type PriorPr = z.infer<typeof PriorPr>;
+
+/**
+ * Blast-radius response for a PR (`GET /pulls/:id/blast`, WI2). Extends the
+ * core `BlastRadius` (`changed_symbols` / `downstream` / `summary`) with the
+ * index-freshness status the endpoint derives from `IndexState` +
+ * `BlastResult.degraded` — never a bare enum, `reason` is a human sentence
+ * (null only when `status === 'full'`). `prior_prs` (WI4, L04 follow-ups) is
+ * required, not optional: the service always produces it (`[]` on the
+ * degraded/no-files path), so there is no "not yet computed" state to model.
+ */
+export const BlastRadiusResponse = BlastRadius.extend({
+  status: z.enum(['full', 'partial', 'degraded']),
+  reason: z.string().nullable(),
+  prior_prs: z.array(PriorPr),
+});
+export type BlastRadiusResponse = z.infer<typeof BlastRadiusResponse>;

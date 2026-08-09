@@ -89,6 +89,28 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   threading a ref map through the list, and safe because ids are unique
   across the whole document even when several `ReviewRunAccordion`s are
   open at once (matching bare-severity case) and all run the same effect.
+- **The file-header severity badge in `FileCard` was invisible in Smart Diff
+  mode until 2026-08-09 (L04 follow-ups WI9)** — it was gated behind
+  `!smartMode`, and `smartMode` is true whenever `RoleGroup` (the
+  `SmartDiffViewer` path, the default `order` in `DiffTab`) renders the file,
+  since it always passes a `fileSummary` prop. No INSIGHTS entry or code
+  comment ever justified the gate; removing it was a one-line fix. The
+  second half of that fix: the badge's `onClick` now sends **both**
+  `severity` and a `findingId` (the file's first finding of that severity) —
+  `severity` alone made `ReviewRunAccordion` open and `FindingsPanel` filter,
+  but never set `forceExpanded` on any card, so every card stayed collapsed.
+  Both fields are load-bearing; check `isTargetedSeverity`/`isFiltered` in
+  `ReviewRunAccordion.tsx` before changing either in isolation.
+- **The severity deep-link is PR-wide, not file-scoped, by design (so far).**
+  Clicking CRITICAL on one file's header badge filters *all* runs' CRITICAL
+  findings, not just that file's — `FocusFindingsOptions` has no `file` key.
+  WI9 (above) mitigates the symptom by also passing a `findingId` from that
+  file, so the user lands on the right expanded card, but the filtered list
+  around it still spans the whole PR. A proper fix means adding a `file` key
+  to `FocusFindingsOptions` and a `?file=` URL param, which widens the
+  deep-link contract above for its four existing producers (PR-list hover
+  preview, Timeline, run-header badges, diff lines) — deliberately deferred,
+  not attempted.
 - **`usePrLatestFindings(prId, {enabled})` in `lib/hooks/reviews.ts`
   intentionally reuses `usePrReviews`'s exact query key** (`["reviews",
   prId]`) — it's the same endpoint (`GET /pulls/:id/reviews`), just gated
@@ -222,7 +244,46 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   mock-parity miss vs the side-by-side mock. Fix: `repeat(2, minmax(0, 1fr))`
   inside the card; reserve `auto-fit`/`minmax` for the *outer* Intent|Blast
   row only (`intentBlastRow` at 380px is fine because that row spans the full
-  content width).
+  content width). **Update, 2026-08-09 (L04 follow-ups):** Blast Radius left
+  this row entirely — the same overflow logic that forced IntentCard's In|Out
+  into `repeat(2, ...)` applies even harder to a symbol tree with monospace
+  `file:line` rows and endpoint badges. **Update, 2026-08-09 (L04 acceptance
+  fix):** Intent | Blast are side-by-side again in `intentBlastRow`
+  (`repeat(auto-fit, minmax(380px, 1fr))`). Blast stays column-narrow-safe
+  via inline stats (not 4 tiles), collapsible symbol groups, and
+  `file:line`-only caller rows — no nested `minmax(280px+)` grids inside the
+  card.
+
+- **`BlastRadiusCard` (Overview) renders the full inline Blast tree** — no
+  separate tab, no click-through. Current shape (2026-08-09, L04 acceptance
+  fix): Intent | Blast side-by-side; `BlastRadiusCard` is chrome-only (title);
+  `BlastPanel` owns `useBlastRadius` (gated until PR detail sync), inline
+  stats + Tree/Graph header, collapsible symbol groups (`symbol()` display),
+  `file:line`-only callers, degraded/partial banners with the server's
+  `reason`, and Prior PRs. Stale `?tab=blast` still normalizes to `overview`.
+  Endpoints may include reverse-import dependents (≤2 hops) from the API —
+  see `server/INSIGHTS.md` / `repo-intel/README.md`.
+- **`status !== 'full'` always renders a warning banner with the server's
+  own `reason` — including `status === 'partial'`, not just `degraded`.**
+  Confirmed product decision for Blast Radius (L04): don't reuse the
+  "partial is still a working index, no warning" framing other
+  repo-intel-backed UI might use — `BlastPanel` treats `partial` as
+  "warn, don't hide."
+- **A caller's `file:line` in Blast Radius links to the GitHub blob at the
+  PR's head SHA (`githubBlobUrl`), never into the diff viewer or through
+  `focusFindings`** — unlike `FindingCard`'s file:line link (same `MonoLink`
+  primitive, different target). Blast callers routinely live in files that
+  are NOT part of the PR's diff, so the diff-viewer/finding-focus target
+  `FindingCard` uses would silently fail to resolve for most callers.
+- **This codebase has no charting/graph-layout library** (`recharts` is used
+  for simple charts elsewhere, but nothing does node/edge graphs) — Blast
+  Radius's "graph" view (`BlastTab/BlastGraph.tsx`, driven by
+  `BlastTab/helpers.ts`'s `buildGraphLayout`) is a small hand-rolled
+  two-column SVG (changed symbols left, deduped/capped callers right,
+  straight connecting lines), not a general-purpose graph renderer. Good
+  enough to honor the pre-authored `blast.json` `graph.ariaLabel`/
+  `graph.empty` keys; don't expect it to scale to a real force-directed
+  layout without a real library.
 
 ## Recurring Errors & Fixes
 
@@ -311,8 +372,11 @@ _(to be filled in)_
   trying).
 
 - 2026-08-06: Intent Layer client finish (plan WI8/9) — `IntentCard` on PR
-  Overview (above Description) wired to existing `usePrIntent`/
-  `useClassifyIntent`; TraceBody gained an `intent` PromptBlock +
+  Overview (above Description) wired to existing `usePullIntent`/
+  `useRecalculateIntent` (renamed from `usePrIntent`/`useClassifyIntent` on
+  2026-08-09, L04 follow-ups WI8 — the react-query key `["pr-intent", prId]`
+  and the `/pulls/:id/intent` endpoint are unchanged, symbol rename only);
+  TraceBody gained an `intent` PromptBlock +
   `PROMPT_COLORS.intent` + `runs.trace.prompt.intent`; `prReview.intent.*`
   i18n namespace; `docs/agent-prompts/README.md` updated for Derived intent
   section order + `SCOPE_GUIDANCE`. No `IntentCard.test.tsx` (test-writer).
@@ -352,6 +416,47 @@ _(to be filled in)_
   to left-accent-only so it doesn't outrank objective/scope/risks. Description
   section unchanged (live-only, not on the mock). IntentCard tests: 10/10
   green.
+
+- 2026-08-09: Blast Radius client side (Part 1 of
+  `docs/plans/l04-blast-radius-and-prepush-cli.md` WI5/WI6) — new
+  `lib/hooks/blast.ts` (`useBlastRadius`, verbatim shape of
+  `useSmartDiff`), new top-level `_components/BlastTab/` (4th PR-detail tab,
+  tree/graph toggle via the pre-authored `blast.json`), `BlastRadiusCard`
+  rewritten from its always-unavailable placeholder to a real compact
+  summary (see Codebase Patterns above for both). Pre-existing
+  `BlastRadiusCard.test.tsx` broke when the component gained a real hook
+  dependency — kept green via the same "mock the hook, keep only the case
+  that's still true, defer new-behavior coverage" pattern already used for
+  `IntentCard.test.tsx`'s 2026-08-07 regression, rather than authoring new
+  assertions for the new compact-summary state (that's `BlastTab.test.tsx`'s
+  job, added the same session). Verified via `tsc --noEmit` (clean) + full
+  Vitest (19 files / 77 tests, all passing). **Superseded later the same
+  day** — the 4th tab and the compact summary described here were both
+  replaced before end of session; see the entry below.
+- 2026-08-09 (later, L04 follow-ups plan
+  `docs/plans/l04-followups-blast-inline-and-fixes.md`, Parts A + E) —
+  inline Blast tree + tab deletion. The tree/graph rendering that lived only
+  in `BlastTab` (`BlastBody`/`BlastTree`/`BlastGraph`) was extracted into a
+  shared `BlastPanel` component (see Codebase Patterns above), which
+  `BlastRadiusCard` now renders directly on Overview — no more four-stat
+  compact summary, no more `onViewBlast`/`?tab=blast` click-through. New
+  "Prior PRs touching these files" collapsible section (server-provided
+  `prior_prs`, internal `/repos/:repoId/pulls/:number` links, renders nothing
+  when empty). Once `BlastPanel` had every consumer's coverage, the
+  now-redundant standalone Blast tab was deleted outright: the 4th
+  `PrDetailHeader` tab entry, the `{tab === "blast"}` branch in `page.tsx`,
+  and `_components/BlastTab/` are gone; `BlastPanel` moved a second time,
+  from WI1's top-level placement to nested under
+  `BlastRadiusCard/_components/` (this file's single-consumer placement rule
+  now points the other way, since deleting the tab removed `BlastPanel`'s
+  second consumer). PR-detail pages are back to **three** tabs
+  (overview · findings · diff) — any INSIGHTS/README text elsewhere still
+  describing a 4th "Blast" tab is stale. Coverage consolidated into
+  `BlastPanel.test.tsx`; `BlastTab.test.tsx` deleted. Ran in parallel with
+  three file-disjoint implementer agents (intent-hook rename, a
+  SmartDiffViewer severity-badge fix, a new `verify-l03.sh` gate) in the same
+  shared working tree — no file overlap, all four self-verified clean
+  (`tsc --noEmit` + package test suites) before this entry was written.
 
 - 2026-08-07: Overview mock header/Description correction. Removed the
   Overview `Description` panel entirely (`prBody` prop dropped from

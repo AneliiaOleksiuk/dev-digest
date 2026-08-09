@@ -14,5 +14,15 @@
   "graph": {
     "empty": "No downstream callers to graph.",
     "ariaLabel": "Blast radius graph"
+  },
+  "banner": {
+    "degradedTitle": "Blast radius unavailable",
+    "partialTitle": "Partial index"
+  },
+  "depthNote": "Endpoints and cron jobs come from direct callers of a changed symbol and from modules within 2 reverse-import hops of the changed file.",
+  "priorPrs": {
+    "title": "Prior PRs touching these files",
+    "sharedFiles": "{count} shared file(s)",
+    "byAuthor": "by {author}"
   }
 }

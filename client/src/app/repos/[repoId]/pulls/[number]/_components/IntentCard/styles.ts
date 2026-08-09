@@ -10,6 +10,7 @@ export const s = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
+    minWidth: 0,
   } satisfies CSSProperties,
   // Same visual language as SectionLabel, without its outer marginBottom —
   // title sits inside the card; wrap `gap` owns spacing under it.

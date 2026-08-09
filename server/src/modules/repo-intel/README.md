@@ -51,3 +51,24 @@ and a per-agent `repo_intel` flag.
 
 - `GET /repos/:id/index-state` — index status (drives the **Indexed** badge).
 - `POST /repos/:id/resync` — enqueue a re-index.
+- `GET /pulls/:id/blast` (`modules/blast/`, L04) — changed symbols + their
+  callers + affected endpoints/crons for a PR, mapped from `getBlastRadius` +
+  `getIndexState`. Lives in its own module (not `repo-intel/`) since it's a
+  *consumer* of the facade, same as Smart Diff.
+
+## Blast Radius endpoint detection — depth limit (L04)
+
+`getBlastRadius` finds **direct callers** of changed symbols (reference
+rows) and attributes HTTP/cron impact from:
+
+1. **Caller files** — `file_facts` (persistent) or live `extractEndpoints`
+   (ripgrep fallback) on files that directly call a changed symbol.
+2. **Reverse import reach (persistent path only)** — a BFS over `file_edges`
+   as imported → importers, capped at `BFS_DEPTH` (2). Endpoints/crons on
+   those dependent modules are attributed to symbols declared in the seed
+   changed file. The ripgrep/degraded path has no `file_edges` and does
+   **not** pretend this walk ran.
+
+Callers-of-callers via the *reference* graph are still not walked. The Blast
+API `summary` and client copy state the reverse-import depth so the map is
+never over-claimed.

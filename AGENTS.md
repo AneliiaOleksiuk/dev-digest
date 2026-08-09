@@ -18,6 +18,7 @@ on the host via `pnpm dev`).
 | `client/` | `@devdigest/web` | Next.js 15 web app | 3000 |
 | `reviewer-core/` | `@devdigest/reviewer-core` | diff → prompt → LLM → findings | — |
 | `e2e/` | `@devdigest/e2e` | deterministic browser e2e | — |
+| `mcp/` | `@devdigest/mcp` | stdio MCP server (review tools) + pre-push CLI (`devdigest review`) | — |
 
 Cross-package sharing goes through **tsconfig path aliases**, not npm/workspace
 deps — see each package's AGENTS.md.
@@ -72,7 +73,8 @@ deps — see each package's AGENTS.md.
 - Package maps: [server/README.md](server/README.md) ·
   [client/README.md](client/README.md) ·
   [reviewer-core/README.md](reviewer-core/README.md) ·
-  [e2e/README.md](e2e/README.md).
+  [e2e/README.md](e2e/README.md) ·
+  [mcp/README.md](mcp/README.md).
 
 **Before ending a session:** update INSIGHTS.md with anything non-obvious
 you learned — don't skip this step (`engineering-insights` skill).

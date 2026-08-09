@@ -35,6 +35,19 @@ export const s = {
     whiteSpace: "nowrap",
   } satisfies CSSProperties,
   fileStat: { fontSize: 12 } satisfies CSSProperties,
+  /** Trailing cluster (summary badge, +/- stat, comment count, severity
+   *  badges) as one flex group: a single `marginLeft: auto` pushes the whole
+   *  group right, and `flexShrink: 0` keeps it intact — `filePath`'s own
+   *  `minWidth: 0` + ellipsis absorbs the squeeze instead of this row
+   *  wrapping or the badges getting clipped by `fileCard`'s `overflow:
+   *  hidden`. */
+  fileHeaderRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: "auto",
+    flexShrink: 0,
+  } satisfies CSSProperties,
   addText: { color: "var(--code-add-text)" } satisfies CSSProperties,
   delText: { color: "var(--code-del-text)" } satisfies CSSProperties,
   fileBody: {

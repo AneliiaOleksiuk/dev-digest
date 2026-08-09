@@ -61,7 +61,7 @@ export function usePrReviews(prId: string | null | undefined) {
 /** The PR's persisted intent record, or `null` when not classified yet
    (the server returns 200 + null, not a 404 — "not classified" is a normal
    state). */
-export function usePrIntent(prId: string | null | undefined) {
+export function usePullIntent(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-intent", prId],
     queryFn: () => api.get<PrIntentRecord | null>(`/pulls/${prId}/intent`),
@@ -71,7 +71,7 @@ export function usePrIntent(prId: string | null | undefined) {
 
 /** Force re-classify a PR's intent (manual trigger — also used to re-run
    after the PR's head SHA has moved). */
-export function useClassifyIntent(prId: string | null | undefined) {
+export function useRecalculateIntent(prId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<PrIntentRecord>(`/pulls/${prId}/intent`),

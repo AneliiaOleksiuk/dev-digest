@@ -11,6 +11,7 @@
   "overlap": "{count} overlap",
   "unavailable": "Brief not available yet.",
   "unavailableHint": "Run a review or open the PR to compute it.",
+  "viewBlast": "View blast radius",
   "why": {
     "title": "git-why",
     "blame": "blame",

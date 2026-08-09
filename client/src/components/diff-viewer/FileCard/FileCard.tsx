@@ -155,58 +155,64 @@ export function FileCard({
             }}
           />
         )}
-        {showsBadge && (
-          <button
-            type="button"
-            aria-pressed={showSummary}
-            aria-label={summaryBadgeLabel ?? "summary"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowSummary((v) => !v);
-              if (!open) setOpen(true);
-            }}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              flexShrink: 0,
-              marginLeft: "auto",
-              padding: "3px 9px",
-              borderRadius: 6,
-              border: "none",
-              background: showSummary
-                ? "color-mix(in srgb, var(--accent, #3b82f6) 18%, transparent)"
-                : "transparent",
-              color: "var(--accent-text, #93c5fd)",
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: "pointer",
-              textTransform: "lowercase",
-            }}
-          >
-            <Icon.Sparkles size={11} />
-            {summaryBadgeLabel ?? "summary"}
-          </button>
-        )}
-        <span className="mono tnum" style={showsBadge ? s.fileStat : { ...s.fileStat, marginLeft: "auto" }}>
-          <span style={s.addText}>+{file.additions}</span>{" "}
-          <span style={s.delText}>−{file.deletions}</span>
-        </span>
-        {commentCount > 0 && (
-          <span
-            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}
-          >
-            <Icon.MessageSquare size={12} />
-            {commentCount}
+        <div style={s.fileHeaderRight}>
+          {showsBadge && (
+            <button
+              type="button"
+              aria-pressed={showSummary}
+              aria-label={summaryBadgeLabel ?? "summary"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowSummary((v) => !v);
+                if (!open) setOpen(true);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                flexShrink: 0,
+                padding: "3px 9px",
+                borderRadius: 6,
+                border: "none",
+                background: showSummary
+                  ? "color-mix(in srgb, var(--accent, #3b82f6) 18%, transparent)"
+                  : "transparent",
+                color: "var(--accent-text, #93c5fd)",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                textTransform: "lowercase",
+              }}
+            >
+              <Icon.Sparkles size={11} />
+              {summaryBadgeLabel ?? "summary"}
+            </button>
+          )}
+          <span className="mono tnum" style={s.fileStat}>
+            <span style={s.addText}>+{file.additions}</span>{" "}
+            <span style={s.delText}>−{file.deletions}</span>
           </span>
-        )}
-        {!smartMode && fileFindings.length > 0 && onFocusFindings && (
-          <SeverityBadgeRow
-            counts={severityCounts}
-            labelFor={(severity) => t("diffViewer.filterBySeverity", { severity })}
-            onClick={(severity) => onFocusFindings({ severity })}
-          />
-        )}
+          {commentCount > 0 && (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}
+            >
+              <Icon.MessageSquare size={12} />
+              {commentCount}
+            </span>
+          )}
+          {fileFindings.length > 0 && onFocusFindings && (
+            <SeverityBadgeRow
+              counts={severityCounts}
+              labelFor={(severity) => t("diffViewer.filterBySeverity", { severity })}
+              onClick={(severity) =>
+                onFocusFindings({
+                  severity,
+                  findingId: fileFindings.find((f) => f.severity === severity)?.id,
+                })
+              }
+            />
+          )}
+        </div>
       </div>
       {open && (
         <div style={s.fileBody}>

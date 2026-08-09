@@ -4,6 +4,8 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
 import type { RunSummary, PrCommit } from "@devdigest/shared";
+import { formatCost } from "@/helpers/format";
+import { SeverityBadgeRow, unstyledButtonStyle } from "@/components/severity-badge-button";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -89,6 +91,7 @@ export function RunHistory({
   commits = [],
   onOpenTrace,
   onGoToReview,
+  onSeverityClick,
   onDelete,
 }: {
   runs: RunSummary[];
@@ -97,6 +100,8 @@ export function RunHistory({
   onOpenTrace: (runId: string) => void;
   /** Jump to this run's inline review accordion below (clicking the agent name). */
   onGoToReview?: (runId: string) => void;
+  /** Jump to this run's findings, filtered to one severity (clicking a count badge). */
+  onSeverityClick?: (runId: string, severity: string) => void;
   onDelete?: (runId: string) => void;
 }) {
   const t = useTranslations("prReview");
@@ -149,6 +154,7 @@ export function RunHistory({
         const r = item.run;
         const o = outcomeOf(r);
         const settled = r.status === "done";
+        const { critical_count, warning_count, suggestion_count, blockers } = r;
         return (
           <div key={`run:${r.run_id}`} style={rowStyle}>
             <Badge color={o.color} bg={o.bg} icon={o.icon}>
@@ -189,13 +195,38 @@ export function RunHistory({
                 </div>
               )}
               {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
-                  {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                  {critical_count || warning_count || suggestion_count ? (
+                    <SeverityBadgeRow
+                      counts={{ CRITICAL: critical_count, WARNING: warning_count, SUGGESTION: suggestion_count }}
+                      labelFor={(severity) => t("timeline.filterBySeverity", { severity })}
+                      onClick={(severity) => onSeverityClick?.(r.run_id, severity)}
+                    />
+                  ) : (
+                    t("runStatus.findings", { count: 0 })
+                  )}
+                  {(blockers ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSeverityClick?.(r.run_id, "CRITICAL");
+                      }}
+                      style={unstyledButtonStyle}
+                    >
+                      {t("runStatus.blockers", { count: blockers ?? 0 })}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
+              <span>
+                {r.tokens_in != null && r.tokens_out != null
+                  ? `${(r.tokens_in + r.tokens_out).toLocaleString()} tok · `
+                  : ""}
+                {formatCost(r.cost_usd)}
+              </span>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}
             </div>
             <button

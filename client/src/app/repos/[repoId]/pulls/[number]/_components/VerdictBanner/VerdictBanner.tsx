@@ -6,6 +6,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, CircularScore } from "@devdigest/ui";
 import type { Verdict } from "@devdigest/shared";
+import { formatCost } from "@/helpers/format";
 import { VERDICT_META } from "./constants";
 import { s } from "./styles";
 
@@ -16,6 +17,7 @@ export function VerdictBanner({
   findingsCount,
   blockers,
   agentName,
+  costUsd,
 }: {
   verdict: Verdict;
   summary: string | null;
@@ -23,6 +25,11 @@ export function VerdictBanner({
   findingsCount: number;
   blockers: number;
   agentName?: string | null;
+  /** Only pass when the caller already has a real per-run cost (e.g. the
+   *  matching RunSummary) — omit rather than invent a figure. Used by the
+   *  Overview PR Brief banner (docs/plans/intent-layer.md WI13); the
+   *  per-run Findings-tab usage doesn't pass this and is unaffected. */
+  costUsd?: number | null;
 }) {
   const t = useTranslations("prReview");
   const m = VERDICT_META[verdict] ?? VERDICT_META.comment;
@@ -42,6 +49,11 @@ export function VerdictBanner({
           {agentName && (
             <Badge color="var(--accent-text)" bg="var(--accent-bg)" icon="Cpu">
               {agentName}
+            </Badge>
+          )}
+          {costUsd != null && (
+            <Badge color="var(--text-muted)" icon="DollarSign" mono>
+              {formatCost(costUsd)}
             </Badge>
           )}
         </div>

@@ -5,6 +5,7 @@ import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
+import { IntentService } from './intent-service.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
 import { reviewToDto } from './helpers.js';
 
@@ -29,11 +30,16 @@ export class ReviewService {
   private repo: ReviewRepository;
   private agents: Container['agentsRepo'];
   private executor: ReviewRunExecutor;
+  /** Intent classification — exposed so `routes.ts` can call it without
+   *  importing `ReviewRepository`/`IntentService` (and therefore any DB/
+   *  adapter type) directly; the thin-handler contract stays intact. */
+  readonly intent: IntentService;
 
   constructor(private container: Container) {
     this.repo = new ReviewRepository(container.db);
     this.agents = container.agentsRepo;
     this.executor = new ReviewRunExecutor(container, this.repo, this.agents);
+    this.intent = new IntentService(this.repo, container);
   }
 
   // ===========================================================================

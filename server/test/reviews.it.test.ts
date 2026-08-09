@@ -60,6 +60,20 @@ const REVIEW_FIXTURE: Review = {
   ],
 };
 
+/** Valid fixture for the intent classifier's schema (see `intent-service.ts`'s
+ *  `IntentClassifierOutput`) — keeps the intent-classification call path
+ *  deterministic/fast in these tests, same reasoning as `REVIEW_FIXTURE`. */
+const INTENT_FIXTURE = {
+  intent: 'Add rate limiting to protect the API from abuse.',
+  in_scope: ['rate limiting middleware'],
+  out_of_scope: [],
+  confidence: 0.8,
+  missing_context: [],
+  // WI10 (docs/plans/intent-layer.md): risk_areas round-trips through the
+  // live-Postgres pr_intent.risk_areas column, not just in-memory.
+  risk_areas: ['New dependency: ioredis'],
+};
+
 let repoSeq = 0;
 async function setupRepoAndPr(db: PgFixture['handle']['db'], workspaceId: string) {
   const name = `payments-api-${repoSeq++}`;
@@ -119,6 +133,11 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
         git: new MockGitClient({ diff: DIFF }),
         llm: {
           [provider]: new MockLLMProvider(provider, { structured }),
+          // Intent classification (the `review_intent` feature) defaults to
+          // openrouter — mock it too so these tests never make a real network
+          // call (this machine has a real OPENROUTER_API_KEY configured) and
+          // stay fast/deterministic, same reasoning as the line above.
+          openrouter: new MockLLMProvider('openai', { structured: INTENT_FIXTURE }),
         },
       },
     });
@@ -159,7 +178,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
   it('runs a review: map-reduce + grounding drops the hallucinated finding, keeps the valid one', async () => {
     const app = await appWith(REVIEW_FIXTURE);
-    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
 
     const agent = (
       await app.inject({
@@ -208,6 +227,16 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+
+    // findings severity breakdown: only the grounded CRITICAL survives, so
+    // both the run-history timeline and the PR-list rollup read {1, 0, 0}.
+    const runs = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    const runSummary = runs.find((r: { run_id: string }) => r.run_id === runId);
+    expect(runSummary).toMatchObject({ critical_count: 1, warning_count: 0, suggestion_count: 0 });
+
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const prMeta = pulls.find((p: { number: number }) => p.number === pr.number);
+    expect(prMeta).toMatchObject({ critical_count: 1, warning_count: 0, suggestion_count: 0 });
 
     await app.close();
   });
@@ -297,6 +326,55 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     // seed has 2 enabled agents; we may have created more above in this PR's ws.
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  // ---- Intent Layer routes (docs/plans/intent-layer.md §E / Test plan) ----
+
+  it('GET /pulls/:id/intent → 200 null when unclassified; POST classifies; GET returns record', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const empty = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(empty.statusCode).toBe(200);
+    // Fastify serializes a null reply body as the JSON null literal.
+    expect(empty.json()).toBeNull();
+
+    const created = await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent` });
+    expect(created.statusCode).toBe(200);
+    const record = created.json();
+    expect(record.pr_id).toBe(pr.id);
+    expect(record.intent).toBe(INTENT_FIXTURE.intent);
+    expect(record.in_scope).toEqual(INTENT_FIXTURE.in_scope);
+    expect(record.head_sha).toBe(pr.headSha);
+    expect(record.provider).toBeTruthy();
+    expect(record.model).toBeTruthy();
+    expect(record.classified_at).toBeTruthy();
+    expect(Array.isArray(record.sources)).toBe(true);
+    expect(record.sources.some((s: { kind: string }) => s.kind === 'pr_title')).toBe(true);
+    // WI10: risk_areas persisted through the real pr_intent.risk_areas jsonb
+    // column and back out via getIntentRecord, not just held in memory.
+    expect(record.risk_areas).toEqual(INTENT_FIXTURE.risk_areas);
+
+    const again = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().intent).toBe(INTENT_FIXTURE.intent);
+    expect(again.json().pr_id).toBe(pr.id);
+    expect(again.json().risk_areas).toEqual(INTENT_FIXTURE.risk_areas);
+
+    await app.close();
+  });
+
+  it('GET/POST /pulls/:id/intent → 404 for unknown pull id', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const missing = '00000000-0000-0000-0000-000000000000';
+
+    const get = await app.inject({ method: 'GET', url: `/pulls/${missing}/intent` });
+    expect(get.statusCode).toBe(404);
+
+    const post = await app.inject({ method: 'POST', url: `/pulls/${missing}/intent` });
+    expect(post.statusCode).toBe(404);
+
     await app.close();
   });
 });

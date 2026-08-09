@@ -56,8 +56,19 @@ export const ReviewRunResponse = z.object({
 });
 export type ReviewRunResponse = z.infer<typeof ReviewRunResponse>;
 
-/** Intent persisted for a PR (the Intent plus the pr_id it scopes). */
-export const PrIntentRecord = Intent.extend({ pr_id: z.string() });
+/**
+ * Intent persisted for a PR (the Intent plus the pr_id it scopes and the
+ * classification metadata the card/trace need: which commit it describes
+ * — compared against `pull.head_sha` client-side to render the "stale, re-run?"
+ * state — which provider/model classified it, and when).
+ */
+export const PrIntentRecord = Intent.extend({
+  pr_id: z.string(),
+  head_sha: z.string().nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  classified_at: z.string(),
+});
 export type PrIntentRecord = z.infer<typeof PrIntentRecord>;
 
 /** Smart-diff response for a PR (the SmartDiff). */

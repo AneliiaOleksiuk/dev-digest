@@ -2,12 +2,12 @@ import type { CSSProperties } from "react";
 
 /** Co-located styles for FindingCard (extracted from inline styles). */
 export const s = {
-  card: (focused: boolean, sevColor: string, muted: boolean): CSSProperties => ({
+  card: (focused: boolean, sevColor: string, muted: boolean, highlighted = false): CSSProperties => ({
     borderRadius: 8,
     // All-longhand (never mix `border` shorthand with `borderLeft` — React warns
     // about updating shorthand + non-shorthand on the same rerender).
     borderStyle: "solid",
-    borderColor: focused ? sevColor : "var(--border)",
+    borderColor: focused || highlighted ? sevColor : "var(--border)",
     borderWidth: 1,
     borderLeftWidth: 3,
     borderLeftColor: sevColor,
@@ -15,7 +15,7 @@ export const s = {
     overflow: "hidden",
     opacity: muted ? 0.6 : 1,
     transition: "opacity .2s, border-color .12s, box-shadow .12s",
-    boxShadow: focused ? "0 0 0 1px " + sevColor : "none",
+    boxShadow: highlighted ? "0 0 0 3px " + sevColor : focused ? "0 0 0 1px " + sevColor : "none",
   }),
   header: {
     display: "flex",

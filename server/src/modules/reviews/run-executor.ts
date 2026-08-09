@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
+import type { PrIntentRecord, Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
@@ -8,6 +8,8 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { IntentService } from './intent-service.js';
+import { renderIntentBlock, specPathsFrom, toIntentDiffSummary } from './intent-inputs.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -41,11 +43,15 @@ export type RunOutcome = {
  * review. Per-agent failures are isolated.
  */
 export class ReviewRunExecutor {
+  private intentService: IntentService;
+
   constructor(
     private container: Container,
     private repo: ReviewRepository,
     private agents: Container['agentsRepo'],
-  ) {}
+  ) {
+    this.intentService = new IntentService(this.repo, this.container);
+  }
 
   /**
    * Background execution of the queued agent runs (NOT awaited by the route).
@@ -80,6 +86,7 @@ export class ReviewRunExecutor {
             durationMs: 0,
             tokensIn: 0,
             tokensOut: 0,
+            costUsd: null,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
@@ -104,6 +111,19 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Intent classification: PR-scoped (keyed by prId alone, like the diff
+    // above), not agent-scoped — one classification (or cache reuse) shared
+    // by every agent in this batch. Best-effort: a failure here must never
+    // fail the review run, so it's caught and degraded to `undefined`.
+    const intentLookup = await this.buildOrLoadIntent(workspaceId, pull, repo, diff, runLog);
+    const intentRecord = intentLookup?.record;
+    // `RunTrace.specs_read` — paths only, never contents. Populate ONLY when
+    // this run actually opened those files (fresh classify). A head-SHA cache
+    // hit reuses the persisted record without re-reading; claiming those
+    // paths here would be a false claim about *this* run.
+    const specsRead =
+      intentLookup && !intentLookup.reused ? specPathsFrom(intentLookup.record) : [];
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -111,7 +131,18 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(
+          workspaceId,
+          pull,
+          repo,
+          diff,
+          agent,
+          runId,
+          runLog,
+          intentRecord,
+          specsRead,
+          logger,
+        );
         logger?.info(
           {
             runId,
@@ -143,6 +174,9 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    intentRecord: PrIntentRecord | undefined,
+    specsRead: string[],
+    logger?: Logger,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -183,6 +217,24 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Derived intent & scope — rendered plain-text block, same
+      // already-rendered-string contract as callers/repoMap. Omitted when no
+      // intent was classified (best-effort; never blocks the review).
+      const intentBlock = intentRecord ? renderIntentBlock(intentRecord) : undefined;
+
+      // Skills — linked via the Agent Editor's Skills tab, ordered. Only
+      // *enabled* skills reach the prompt: linking ≠ trusting (imported_url/
+      // community skills land disabled until a human vets them).
+      const linkedSkills = await this.agents.linkedSkills(agent.id);
+      const enabledSkills = linkedSkills.filter((link) => link.skill.enabled);
+      if (enabledSkills.length > 0) {
+        runLog.info(`${enabledSkills.length} skill(s) linked and enabled — added to prompt`);
+      }
+      const skills =
+        enabledSkills.length > 0
+          ? enabledSkills.map((link) => `### ${link.skill.name}\n${link.skill.body}`)
+          : undefined;
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -200,9 +252,13 @@ export class ReviewRunExecutor {
         ...(callersDigest ? { callers: callersDigest } : {}),
         // T3 — repo skeleton, same omit-when-empty contract.
         ...(repoMap ? { repoMap } : {}),
+        // Linked + enabled skills, same omit-when-empty contract.
+        ...(skills ? { skills } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // Derived intent & scope — same omit-when-empty contract.
+        ...(intentBlock ? { intent: intentBlock } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
@@ -210,7 +266,19 @@ export class ReviewRunExecutor {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
         },
       });
-      const { tokensIn, tokensOut, grounding } = outcome;
+      const { tokensIn, tokensOut, costUsd, grounding } = outcome;
+
+      // Structured, secure prompt-assembly log — section name/source/char count,
+      // selected model, correlation id (runId). NEVER content: no diff, no spec
+      // text, no secrets. Local-dev-only (config.promptLogVerbose is forced off
+      // in production) and stdout-only — not streamed to the Live Log, not
+      // persisted in run_traces.
+      if (this.container.config.promptLogVerbose) {
+        logger?.debug(
+          { runId, agent: agent.name, model: agent.model, sections: outcome.sections },
+          'prompt assembled',
+        );
+      }
 
       const keptFindings = outcome.review.findings;
 
@@ -245,6 +313,7 @@ export class ReviewRunExecutor {
         durationMs,
         tokensIn,
         tokensOut,
+        costUsd,
         findingsCount: findingRows.length,
         grounding,
         score: outcome.review.score,
@@ -265,6 +334,7 @@ export class ReviewRunExecutor {
           duration_ms: durationMs,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
+          cost_usd: costUsd,
           findings: findingRows.length,
           grounding,
         },
@@ -277,7 +347,7 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        specs_read: specsRead,
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
@@ -300,13 +370,17 @@ export class ReviewRunExecutor {
           durationMs: Date.now() - start,
           tokensIn: 0,
           tokensOut: 0,
+          costUsd: null,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
         })
         .catch(() => undefined);
       await this.repo
-        .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start))
+        .saveRunTrace(
+          runId,
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, specsRead),
+        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
@@ -411,6 +485,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     grounding: string,
     durationMs = 0,
+    specsRead: string[] = [],
   ): RunTrace {
     return {
       config: {
@@ -421,13 +496,38 @@ export class ReviewRunExecutor {
         pr: pull.number,
         source: 'local',
       },
-      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, findings: 0, grounding },
+      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],
-      specs_read: [],
+      specs_read: specsRead,
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
+  }
+
+  /**
+   * PR-scoped, best-effort intent classification/reuse — same position and
+   * degradation contract as `buildCallersDigest`/`buildRepoMapDigest`: never
+   * let a failure here fail the review. Converts the loaded `UnifiedDiff`
+   * into the narrowed `IntentDiffSummary` the classifier is allowed to see
+   * (path/±counts + synthesized hunk headers only, never `raw`/hunk bodies).
+   */
+  private async buildOrLoadIntent(
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    diff: UnifiedDiff,
+    runLog: RunLogger,
+  ): Promise<{ record: PrIntentRecord; reused: boolean } | undefined> {
+    const diffSummary = toIntentDiffSummary(diff);
+    try {
+      return await this.intentService.getOrClassify(workspaceId, pull, repo, diffSummary, runLog);
+    } catch (err) {
+      runLog.error(
+        `Intent: classification failed — ${(err as Error).message}; continuing review without intent`,
+      );
+      return undefined;
+    }
   }
 }

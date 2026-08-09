@@ -47,6 +47,8 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** Derived PR intent & scope block (rendered plain text); null when absent. */
+  intent: z.string().nullish(),
   user: z.string(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
@@ -61,6 +63,7 @@ export const RunStats = z.object({
   duration_ms: z.number().int(),
   tokens_in: z.number().int(),
   tokens_out: z.number().int(),
+  cost_usd: z.number().nullable(),
   findings: z.number().int(),
   grounding: z.string(),
 });
@@ -81,6 +84,7 @@ export const RunTrace = z.object({
   tool_calls: z.array(ToolCall),
   raw_output: z.string(),
   memory_pulled: z.array(MemoryPulled),
+  /** Spec/plan file paths read anywhere in the run pipeline (currently: intent classification), not necessarily fed to the reviewer's prompt. */
   specs_read: z.array(z.string()),
   log: z.array(RunLogLine),
 });
@@ -101,6 +105,7 @@ export const RunSummary = z.object({
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
+  cost_usd: z.number().nullable(),
   findings_count: z.number().int().nullable(),
   grounding: z.string().nullable(),
   ran_at: z.string().nullable(),
@@ -109,5 +114,10 @@ export const RunSummary = z.object({
   // findings that trip the agent's gate. Null on failed/cancelled runs.
   score: z.number().int().nullable(),
   blockers: z.number().int().nullable(),
+  // Findings severity breakdown for this run's review (computed on read from
+  // findings, not denormalized). Null on failed/cancelled runs.
+  critical_count: z.number().int().nullable(),
+  warning_count: z.number().int().nullable(),
+  suggestion_count: z.number().int().nullable(),
 });
 export type RunSummary = z.infer<typeof RunSummary>;

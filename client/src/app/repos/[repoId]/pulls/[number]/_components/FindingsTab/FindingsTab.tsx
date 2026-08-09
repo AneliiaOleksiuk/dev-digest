@@ -8,6 +8,7 @@ import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
 import type { FindingRecord, ReviewRecord, RunSummary, PrCommit } from "@devdigest/shared";
 import type { UseMutationResult } from "@tanstack/react-query";
+import type { FocusFindingsOptions } from "@/lib/types";
 
 interface FindingsTabProps {
   prId: string | null;
@@ -21,6 +22,10 @@ interface FindingsTabProps {
   /** owner/repo + head sha — used to deep-link a finding's file:line to GitHub. */
   repoFullName?: string | null;
   headSha?: string | null;
+  /** Findings deep-link, driven by the page's URL (?run=&severity=&finding=). */
+  focus?: FocusFindingsOptions;
+  onFocusFindings: (opts: FocusFindingsOptions) => void;
+  onClearFocus: () => void;
   onOpenTrace: (id: string) => void;
   onDelete: (id: string) => void;
   onRunDone: () => void;
@@ -37,10 +42,14 @@ export function FindingsTab({
   cancelMutation,
   repoFullName,
   headSha,
+  focus,
+  onFocusFindings,
+  onClearFocus,
   onOpenTrace,
   onDelete,
   onRunDone,
 }: FindingsTabProps) {
+  const { runId: focusRunId = null, severity: focusSeverity = null, findingId: focusFindingId = null } = focus ?? {};
   const handleCancelAll = useCallback(() => {
     liveRunIds.forEach((id) => cancelMutation.mutate(id));
   }, [liveRunIds, cancelMutation]);
@@ -63,13 +72,26 @@ export function FindingsTab({
     [onDelete],
   );
 
-  // Timeline → Review-runs navigation: clicking an agent name in the timeline
-  // opens + scrolls to that run's accordion below. The nonce re-triggers the
-  // scroll even when the same run is clicked twice.
-  const [target, setTarget] = React.useState<{ runId: string; n: number } | null>(null);
-  const handleGoToReview = useCallback((runId: string) => {
-    setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
-  }, []);
+  // Timeline / Review-runs-header clicks focus a run (and optionally a
+  // severity or a single finding) via the page's URL — shareable/reload-safe.
+  // clickToken bumps on every click so the accordion's scrollIntoView
+  // re-fires even when the same target is re-clicked (URL params alone
+  // wouldn't change in that case).
+  const [clickToken, setClickToken] = React.useState(0);
+  const handleGoToReview = useCallback(
+    (runId: string) => {
+      setClickToken((n) => n + 1);
+      onFocusFindings({ runId });
+    },
+    [onFocusFindings],
+  );
+  const handleSeverityClick = useCallback(
+    (runId: string | null, severity: string) => {
+      setClickToken((n) => n + 1);
+      onFocusFindings({ runId, severity });
+    },
+    [onFocusFindings],
+  );
 
   return (
     <section>
@@ -133,6 +155,7 @@ export function FindingsTab({
             commits={prCommits}
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
+            onSeverityClick={handleSeverityClick}
             onDelete={handleDelete}
           />
         </div>
@@ -162,8 +185,10 @@ export function FindingsTab({
             defaultOpen={i === 0}
             repoFullName={repoFullName}
             headSha={headSha}
-            targetRunId={target?.runId ?? null}
-            targetNonce={target?.n ?? 0}
+            target={{ runId: focusRunId, severity: focusSeverity, findingId: focusFindingId }}
+            targetNonce={clickToken}
+            onSeverityClick={(severity) => handleSeverityClick(review.run_id, severity)}
+            onClearFilter={onClearFocus}
           />
         ))
       )}

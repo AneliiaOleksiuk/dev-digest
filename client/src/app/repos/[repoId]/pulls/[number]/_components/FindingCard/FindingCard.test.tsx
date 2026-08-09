@@ -39,7 +39,7 @@ describe("FindingCard (smoke, both themes)", () => {
     it(`renders severity + file:line + rationale in ${theme}`, () => {
       renderWithIntl(
         <div data-theme={theme}>
-          <FindingCard f={FINDING} defaultExpanded onAction={() => {}} />
+          <FindingCard finding={FINDING} defaultExpanded onAction={() => {}} />
         </div>,
       );
       expect(screen.getByText("Hardcoded Stripe secret key")).toBeInTheDocument();
@@ -51,7 +51,7 @@ describe("FindingCard (smoke, both themes)", () => {
 
   it("fires accept/dismiss actions", () => {
     const onAction = vi.fn();
-    renderWithIntl(<FindingCard f={FINDING} defaultExpanded onAction={onAction} />);
+    renderWithIntl(<FindingCard finding={FINDING} defaultExpanded onAction={onAction} />);
     fireEvent.click(screen.getByText("Accept"));
     expect(onAction).toHaveBeenCalledWith("accept");
     fireEvent.click(screen.getByText("Dismiss"));

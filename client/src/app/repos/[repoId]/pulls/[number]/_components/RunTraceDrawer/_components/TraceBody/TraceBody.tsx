@@ -8,6 +8,7 @@ import { Badge } from "@devdigest/ui";
 import type { RunTrace, FindingRecord } from "@devdigest/shared";
 import { PROMPT_COLORS } from "../../constants";
 import { formatSeconds, formatTokens } from "../../helpers";
+import { formatCost } from "@/helpers/format";
 import { s } from "../../styles";
 import { TraceSection } from "../TraceSection";
 import { ToolCallRow } from "../ToolCallRow";
@@ -63,6 +64,7 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
         <div style={s.statsRow}>
           <Stat label={t("trace.stat.duration")} val={formatSeconds(stats.duration_ms)} />
           <Stat label={t("trace.stat.tokens")} val={formatTokens(stats.tokens_in, stats.tokens_out)} />
+          <Stat label={t("trace.stat.cost")} val={formatCost(stats.cost_usd)} />
           <Stat label={t("trace.stat.findings")} val={stats.findings} />
         </div>
       </TraceSection>
@@ -85,6 +87,9 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
         )}
         {trace.prompt_assembly.callers != null && (
           <PromptBlock label={t("trace.prompt.callers")} text={trace.prompt_assembly.callers} color={PROMPT_COLORS.callers} />
+        )}
+        {trace.prompt_assembly.intent != null && (
+          <PromptBlock label={t("trace.prompt.intent")} text={trace.prompt_assembly.intent} color={PROMPT_COLORS.intent} />
         )}
         <PromptBlock label={t("trace.prompt.user")} text={trace.prompt_assembly.user} color={PROMPT_COLORS.user} />
       </TraceSection>

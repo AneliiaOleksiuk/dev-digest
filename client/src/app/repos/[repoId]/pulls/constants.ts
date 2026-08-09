@@ -23,8 +23,19 @@ export const SIZE_COLOR: Record<string, string> = {
   L: "var(--crit)",
 };
 
-/** Grid template for both the header row and PR rows. */
-export const GRID = "1fr 132px 92px 60px 118px 78px";
+/** Grid template for both the header row and PR rows. Findings is 140px (not
+ *  100px) so 3 compact severity badges with 2-digit counts fit on one line
+ *  without wrapping (`findingsCell` in styles.ts pairs this with
+ *  `flexWrap: "nowrap"`). The title column has a 200px floor (`minmax`, not
+ *  bare `1fr`) so it stops crushing the PR title as the window narrows;
+ *  once the row hits `MIN_ROW_WIDTH` the table scrolls horizontally
+ *  (`tableCard` in styles.ts) instead of clipping the fixed-width columns. */
+export const GRID = "minmax(200px, 1fr) 132px 92px 60px 140px 118px 72px 78px";
+
+/** Sum of the fixed-width columns + title floor + inter-column gaps (14px × 7)
+ *  in `GRID`. Applied as `minWidth` on the header/row grids so the browser
+ *  triggers `tableCard`'s horizontal scroll instead of squeezing columns. */
+export const MIN_ROW_WIDTH = 200 + 132 + 92 + 60 + 140 + 118 + 72 + 78 + 14 * 7;
 
 /** Line-count thresholds for the S/M/L size bucket. */
 export const SIZE_SMALL_MAX = 100;
@@ -44,7 +55,9 @@ export const COLUMN_KEYS: string[] = [
   "author",
   "size",
   "score",
+  "findings",
   "status",
+  "cost",
   "updated",
 ];
 

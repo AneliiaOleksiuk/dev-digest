@@ -52,8 +52,8 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: 'review_intent',
     label: 'PR Review · Intent',
     description: 'Derives a PR’s intent and scope before review.',
-    defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    defaultProvider: 'openrouter',
+    defaultModel: 'deepseek/deepseek-v4-flash',
   },
   {
     id: 'risk_brief',
@@ -170,6 +170,14 @@ export const PrMeta = z.object({
   updated_at: z.string().nullish(),
   // Latest-review score (list endpoint only; null/absent until reviewed).
   score: z.number().int().nullish(),
+  // Cost (USD) of the run that produced the latest review above (same run,
+  // list endpoint only; null/absent until reviewed).
+  cost_usd: z.number().nullish(),
+  // Findings severity breakdown of the same latest review above (not summed
+  // across every agent/run on the PR); null/absent until reviewed.
+  critical_count: z.number().int().nullish(),
+  warning_count: z.number().int().nullish(),
+  suggestion_count: z.number().int().nullish(),
 });
 export type PrMeta = z.infer<typeof PrMeta>;
 

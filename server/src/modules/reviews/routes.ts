@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { RunRequest } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
@@ -6,6 +6,18 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import type { IntentLogSink } from './intent-service.js';
+
+/** 3-line adapter over `req.log` — the manual `POST /pulls/:id/intent` route's
+ *  version of `RunLogger`'s structural sink (which the background run path
+ *  uses instead; both satisfy the same `IntentLogSink` shape). */
+function intentLogSink(log: FastifyBaseLogger): IntentLogSink {
+  return {
+    info: (msg, data) => log.info(data !== undefined ? { data } : {}, msg),
+    tool: (msg, data) => log.info(data !== undefined ? { data } : {}, msg),
+    error: (msg, data) => log.error(data !== undefined ? { data } : {}, msg),
+  };
+}
 
 /**
  * reviews module.
@@ -14,6 +26,8 @@ import { ReviewService } from './service.js';
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
+ *   POST   /pulls/:id/intent                           → force re-classify a PR's intent
+ *   GET    /pulls/:id/intent                            → persisted intent, or `null`
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
 export default async function reviewsRoutes(appBase: FastifyInstance) {
@@ -41,6 +55,25 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       req.log,
     );
     return { pr_id: req.params.id, runs, reviews };
+  });
+
+  // ---- Intent: force re-classify (manual trigger) --------------------------
+  // Same rate limit + rationale as POST /pulls/:id/review: each call is a
+  // paid LLM call. Rate limiting is globally disabled under NODE_ENV=test.
+  app.post(
+    '/pulls/:id/intent',
+    { schema: { params: IdParams }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.intent.classifyForPr(workspaceId, req.params.id, intentLogSink(req.log));
+    },
+  );
+
+  // ---- Intent: persisted record (200 + null body when not classified yet) --
+  app.get('/pulls/:id/intent', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    const record = await service.intent.getStoredIntent(workspaceId, req.params.id);
+    return record ?? null;
   });
 
   // ---- SSE: live run events (replay buffer first, then live; ends on done) -

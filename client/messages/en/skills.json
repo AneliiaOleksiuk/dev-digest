@@ -96,6 +96,16 @@
     "untrustedNotice": "This skill came from an untrusted source. Its body is stored as data (delimiter-wrapped) and must be vetted before it is enabled for an agent.",
     "bodyLabel": "Skill body (Markdown)",
     "bodyHint": "Saving a changed body creates a new immutable version.",
-    "version": "v{version}"
+    "version": "v{version}",
+    "tabs": {
+      "overview": "Overview",
+      "history": "Version History"
+    },
+    "history": {
+      "empty": "No earlier versions yet.",
+      "createdAt": "Created {date}",
+      "current": "current",
+      "loadError": "Could not load version history."
+    }
   }
 }

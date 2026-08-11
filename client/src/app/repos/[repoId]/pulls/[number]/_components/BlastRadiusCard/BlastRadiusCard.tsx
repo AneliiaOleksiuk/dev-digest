@@ -1,17 +1,30 @@
-/* BlastRadiusCard — right column of the 3-panel Overview row (WI13).
-   No GET /blast-radius endpoint exists yet — only the unbuilt `BlastRadius`
-   contract in brief.ts. This card ALWAYS renders the honest "unavailable"
-   empty state; it must never fabricate a symbol/caller/endpoint tree. Full
-   blast-radius compute + API is a follow-on (see docs/plans/intent-layer.md
-   WI13 Deviations note). Title lives INSIDE the bordered card (mock parity). */
+/* BlastRadiusCard — right column of the Intent | Blast Overview row.
+   Card chrome only (title); BlastPanel owns the useBlastRadius fetch and
+   all body states including degraded-with-reason. Full inline tree matches
+   the design mock (L04 acceptance fix). */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon } from "@devdigest/ui";
+import { BlastPanel } from "./_components/BlastPanel";
 import { s } from "./styles";
 
-export function BlastRadiusCard() {
+export function BlastRadiusCard({
+  prId,
+  repoFullName,
+  headSha,
+  repoId,
+  blastReady = true,
+}: {
+  prId: string;
+  /** github.com "owner/repo" — null until the repo is loaded (no link, plain text). */
+  repoFullName: string | null;
+  headSha: string;
+  repoId: string;
+  /** False until GET /pulls/:id has finished (so pr_files are synced). */
+  blastReady?: boolean;
+}) {
   const t = useTranslations("brief");
 
   return (
@@ -20,10 +33,14 @@ export function BlastRadiusCard() {
         <Icon.GitBranch size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
         <span style={s.cardTitleText}>{t("block.blast")}</span>
       </div>
-      <div style={s.empty}>
-        <div style={s.emptyTitle}>{t("unavailable")}</div>
-        <div style={s.emptyBody}>{t("unavailableHint")}</div>
-      </div>
+
+      <BlastPanel
+        prId={prId}
+        repoFullName={repoFullName}
+        headSha={headSha}
+        repoId={repoId}
+        enabled={blastReady}
+      />
     </section>
   );
 }

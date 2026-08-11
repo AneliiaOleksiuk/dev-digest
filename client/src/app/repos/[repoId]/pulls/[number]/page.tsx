@@ -24,6 +24,11 @@ import { githubPrUrl } from "../../../../../lib/github-urls";
 import type { FocusFindingsOptions } from "../../../../../lib/types";
 import type { FindingRecord } from "@devdigest/shared";
 
+// WI11 (L04 follow-ups): the 3 tabs left once the Blast tab is deleted —
+// static, so hoisted out of the component body rather than recreated per
+// render.
+const KNOWN_TABS = new Set(["overview", "findings", "diff"]);
+
 export default function PRDetailPage() {
   const params = useParams<{ repoId: string; number: string }>();
   const search = useSearchParams();
@@ -58,7 +63,14 @@ export default function PRDetailPage() {
     if (prId) qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
   };
 
-  const tab = search.get("tab") ?? "overview";
+  // Normalize unknown tab keys to "overview" — a one-line, side-effect-free
+  // read guard, chosen over a dead param (blank content area, no branch
+  // matches) and over a `router.replace` redirect (a navigation side effect
+  // on mount for a URL almost nobody holds). Sends every stale `?tab=blast`
+  // bookmark to the tab that now *contains* the blast tree (Overview), and
+  // fixes typo'd `?tab=` values as a bonus.
+  const rawTab = search.get("tab") ?? "overview";
+  const tab = KNOWN_TABS.has(rawTab) ? rawTab : "overview";
   const traceRunId = search.get("trace");
   // Findings deep-link: which run/severity/finding the Findings tab should
   // focus, driven entirely by the URL so it's shareable/reload-safe (set from
@@ -153,7 +165,13 @@ export default function PRDetailPage() {
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
         {tab === "overview" && prId && (
-          <OverviewTab prId={prId} headSha={pr.head_sha} />
+          <OverviewTab
+            prId={prId}
+            headSha={pr.head_sha}
+            repoFullName={repoFullName}
+            repoId={repoId}
+            blastReady
+          />
         )}
 
         {tab === "findings" && (

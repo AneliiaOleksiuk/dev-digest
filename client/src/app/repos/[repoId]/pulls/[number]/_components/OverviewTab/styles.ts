@@ -1,12 +1,12 @@
 import type { CSSProperties } from "react";
 
 export const s = {
-  // Intent | Blast Radius, side by side (WI13 layout rule: 1fr 1fr, stacking
-  // under ~900px). `auto-fit`/`minmax` gives that breakpoint from pure CSS —
-  // no JS media-query hook needed for a two-column-or-stack row.
+  // Intent | Blast side-by-side on desktop; stacks under ~380px (design mock).
   intentBlastRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    // min(..., 100%) lets columns shrink below 380px so long mono paths
+    // don't force the Blast card wider than the viewport.
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(380px, 100%), 1fr))",
     gap: 20,
     alignItems: "start",
   } satisfies CSSProperties,

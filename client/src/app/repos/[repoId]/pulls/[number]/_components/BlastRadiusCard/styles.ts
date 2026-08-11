@@ -11,6 +11,10 @@ export const s = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
+    // Grid/flex children default to min-content width; long file paths
+    // otherwise blow past the card edge.
+    minWidth: 0,
+    overflow: "hidden",
   } satisfies CSSProperties,
   cardTitle: {
     display: "flex",

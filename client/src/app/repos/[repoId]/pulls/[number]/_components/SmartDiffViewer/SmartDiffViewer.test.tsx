@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord, PrFile, SmartDiffResponse } from "@devdigest/shared";
+import type { FocusFindingsOptions } from "@/lib/types";
 import prReviewMessages from "../../../../../../../../messages/en/prReview.json";
 import shellMessages from "../../../../../../../../messages/en/shell.json";
 import { SmartDiffViewer } from "./SmartDiffViewer";
@@ -101,13 +102,21 @@ const FINDINGS: FindingRecord[] = [
   },
 ];
 
-function renderViewer(smartDiff: SmartDiffResponse = SMART) {
+function renderViewer(
+  smartDiff: SmartDiffResponse = SMART,
+  onFocusFindings?: (opts: FocusFindingsOptions) => void,
+) {
   return render(
     <NextIntlClientProvider
       locale="en"
       messages={{ prReview: prReviewMessages, shell: shellMessages }}
     >
-      <SmartDiffViewer smartDiff={smartDiff} files={FILES} findings={FINDINGS} />
+      <SmartDiffViewer
+        smartDiff={smartDiff}
+        files={FILES}
+        findings={FINDINGS}
+        onFocusFindings={onFocusFindings}
+      />
     </NextIntlClientProvider>,
   );
 }
@@ -153,6 +162,19 @@ describe("SmartDiffViewer", () => {
     const row = subtitle.parentElement;
     expect(row?.textContent).toMatch(/Core logic/);
     expect(row?.textContent).toMatch(/The substance of the change/);
+  });
+
+  it("shows the file-header severity badge in Smart Diff mode (reachable, not gated behind smartMode)", () => {
+    renderViewer(SMART, vi.fn());
+    expect(screen.getByRole("button", { name: "Show WARNING findings" })).toBeInTheDocument();
+  });
+
+  it("clicking the file-header severity badge passes both severity and a findingId from that file", () => {
+    const onFocusFindings = vi.fn();
+    renderViewer(SMART, onFocusFindings);
+    const badge = screen.getByRole("button", { name: "Show WARNING findings" });
+    fireEvent.click(badge);
+    expect(onFocusFindings).toHaveBeenCalledWith({ severity: "WARNING", findingId: "f1" });
   });
 
   it("scrolls to data-diff-line when the status dot is clicked", () => {

@@ -9,21 +9,39 @@ import { s } from "./styles";
 interface OverviewTabProps {
   prId: string;
   headSha: string;
+  /** github.com "owner/repo" — null until the repo is loaded; threaded down to
+   *  BlastRadiusCard → BlastPanel for the caller `file:line` GitHub links. */
+  repoFullName: string | null;
+  /** Route param, threaded down to BlastRadiusCard → BlastPanel → PriorPrs
+   *  for the internal `/repos/:repoId/pulls/:number` prior-PR links. */
+  repoId: string;
+  /** True once GET /pulls/:id has completed (pr_files synced). */
+  blastReady?: boolean;
 }
 
 /**
- * 3-panel Overview (docs/plans/intent-layer.md WI13): PR Brief banner full
- * width on top, Intent | Blast Radius as a 1fr 1fr row below it (stacking
- * under ~900px via `s.intentBlastRow`). No Description panel — mock has
- * only the three panels; PR body is not a fourth Overview surface.
+ * Overview: PR Brief full width, then Intent | Blast side-by-side (design
+ * mock). Blast is column-narrow-safe (inline stats, no nested wide grids).
  */
-export function OverviewTab({ prId, headSha }: OverviewTabProps) {
+export function OverviewTab({
+  prId,
+  headSha,
+  repoFullName,
+  repoId,
+  blastReady = true,
+}: OverviewTabProps) {
   return (
     <>
       <PrBriefBanner prId={prId} />
       <div style={s.intentBlastRow}>
         <IntentCard prId={prId} headSha={headSha} />
-        <BlastRadiusCard />
+        <BlastRadiusCard
+          prId={prId}
+          repoFullName={repoFullName}
+          headSha={headSha}
+          repoId={repoId}
+          blastReady={blastReady}
+        />
       </div>
     </>
   );

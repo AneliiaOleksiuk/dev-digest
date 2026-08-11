@@ -18,7 +18,7 @@ import {
   type IconName,
 } from "@devdigest/ui";
 import type { IntentSource, PrIntentRecord } from "@devdigest/shared";
-import { useClassifyIntent, usePrIntent } from "@/lib/hooks/reviews";
+import { useRecalculateIntent, usePullIntent } from "@/lib/hooks/reviews";
 import { riskColorFor, riskIconFor, truncate } from "./helpers";
 import { s } from "./styles";
 
@@ -38,8 +38,8 @@ function CardTitle({ icon, children }: { icon: IconName; children: React.ReactNo
 
 export function IntentCard({ prId, headSha }: { prId: string; headSha: string }) {
   const t = useTranslations("prReview");
-  const { data, isLoading, isError, refetch, error } = usePrIntent(prId);
-  const classify = useClassifyIntent(prId);
+  const { data, isLoading, isError, refetch, error } = usePullIntent(prId);
+  const classify = useRecalculateIntent(prId);
 
   const record = data ?? null;
   const stale = record != null && record.head_sha !== headSha;

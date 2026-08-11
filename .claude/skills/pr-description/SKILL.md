@@ -1,6 +1,6 @@
 ---
 name: pr-description
-description: "Drafts a terse, concrete pull-request description (Summary, Scope, Risks, Tests, Effort & Cost) before it's written to GitHub. Use PROACTIVELY whenever about to open a new PR (gh pr create) or edit an existing PR's body (gh pr edit --body) -- draft the text in chat first and get explicit user approval before writing anything to the actual PR. Never create a PR or modify its body before the complete proposed body has been shown to the user and explicitly approved. Creating an empty PR first does not bypass this requirement."
+description: "Drafts a terse, concrete pull-request description (Summary, Scope, Risks, Tests, Effort) before it's written to GitHub. Use PROACTIVELY whenever about to open a new PR (gh pr create) or edit an existing PR's body (gh pr edit --body) -- draft the text in chat first and get explicit user approval before writing anything to the actual PR. Never create a PR or modify its body before the complete proposed body has been shown to the user and explicitly approved. Creating an empty PR first does not bypass this requirement."
 ---
 
 # PR Description
@@ -61,60 +61,31 @@ Never claim a verification step that didn't happen.
   available in this environment) for a UI task, say that explicitly in
   the Tests section rather than omitting it.
 
-### Effort & Cost
-Reports how the work was actually produced, not how much the reviewed
-*application's* LLM calls cost -- this is the coding agent's own session,
-not a run of the product being built.
+### Effort
+How the coding session was run — **only these two bullets**, nothing else
+(no tokens, cost, human/agent contribution, or collaboration notes):
 
-- **Tool** -- what ran the session (e.g. "Claude Code CLI", "Claude Code —
-  VS Code extension", "Claude Code — web"). Read this from the session's own
-  environment/system context, don't guess.
-- **Model(s)** -- the exact model id(s) used (e.g. `claude-sonnet-5`),
-  including any different model a spawned subagent ran under, if that
-  differed from the main session.
-- **Tokens** -- report input, output, and total token usage when available.
-  Prefer a session-wide usage report such as Claude Code's `/cost` output or
-  the IDE/extension's visible usage indicator. Add separately reported
-  subagent usage only when the session-wide report explicitly excludes it.
-  Never sum overlapping usage sources. If no complete usage source is
-  available, report only the known values and clearly identify what they
-  cover. If token usage is not available, write:
-  "Token count not introspectable in this environment." Never estimate or
-  invent token usage.
-- **Cost (USD)** -- computed with the *same formula this project already
-  uses* for LLM cost attribution (`server/src/platform/price-book.ts`'s
-  `PriceBook.estimate` / `server/src/adapters/llm/pricing.ts`'s
-  `estimateCost`): `(tokensIn * pricePerMTokIn + tokensOut *
-  pricePerMTokOut) / 1_000_000`, with prices in USD per 1 million tokens for
-  the specific model. Pull the *current* price for the model that ran this
-  session from the `claude-api` skill/reference (the static
-  `pricing.ts` table in this repo is for models the *product* reviews with,
-  is explicitly marked approximate, and doesn't include this session's
-  model) -- don't reuse a stale number. If the input/output split isn't
-  known, report the total-token estimate and flag it as approximate rather
-  than silently treating it as exact.
-- **Human contribution** -- describe only the user contributions observable
-  in the session: requirements, constraints, technical decisions, corrections,
-  approvals, code supplied by the user, and manual verification performed by
-  the user. Do not infer unobserved work or equate message count with effort.
-  If the available transcript is insufficient, state that the contribution
-  cannot be fully assessed.
-- **Agent contribution** -- describe the work performed by the coding agent:
-  investigation, implementation, tests, documentation, and automated
-  verification. Distinguish autonomous work from work directed or corrected
-  by the user.
-- **Collaboration notes** -- identify the important points at which human input
-  changed the implementation or prevented an incorrect result. Include only
-  claims supported by the session transcript.
+```markdown
+## Effort
+- **Tool:** <tool that ran the session>
+- **Model(s):** <exact model id(s)>
+```
+
+- **Tool** -- what ran the session (e.g. "Cursor (IDE agent)", "Claude Code
+  CLI"). Read this from the session's own environment/system context, don't
+  guess.
+- **Model(s)** -- the exact model id(s) used (e.g. `Cursor Grok 4.5`,
+  `claude-sonnet-5`), including any different model a spawned subagent ran
+  under, if that differed from the main session.
 
 ## Quality bar
 
 - No filler, no restating the diff, no boilerplate ("This PR adds..." /
   "Changes include..." padding). Terse and factual, like a colleague
   handing off a finished task.
-- Every claim must be verifiable by the reviewer from the diff, the named
-  test run, or the session's own transcript -- not a paraphrase of what the
-  ticket asked for, and never a fabricated number for tokens, cost, or a
-  screenshot that wasn't actually captured.
+- Every claim must be verifiable by the reviewer from the diff or the named
+  test run -- not a paraphrase of what the ticket asked for, and never a
+  fabricated screenshot that wasn't actually captured.
 - Prefer a bullet the reviewer will actually read over a paragraph they'll
   skim.
+- Do **not** pad Effort with tokens, USD cost, or contribution narratives.

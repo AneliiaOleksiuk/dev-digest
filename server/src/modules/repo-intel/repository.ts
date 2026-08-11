@@ -530,6 +530,41 @@ export class RepoIntelRepository {
       );
   }
 
+  /**
+   * Name-matched callers when `decl_file` was never resolved (no/empty
+   * `file_edges`). Used as a blast fallback so direct call sites still
+   * surface. Caller must exclude the declaring file(s) of each symbol.
+   * `rank` is 0 when the from_path has no `file_rank` row.
+   */
+  async getNameMatchedCallers(
+    repoId: string,
+    names: string[],
+  ): Promise<ResolvedCallerRow[]> {
+    if (names.length === 0) return [];
+    const rows = await this.db
+      .select({
+        fromPath: t.references.fromPath,
+        toSymbol: t.references.toSymbol,
+        line: t.references.line,
+        rank: t.fileRank.rank,
+      })
+      .from(t.references)
+      .leftJoin(
+        t.fileRank,
+        and(
+          eq(t.fileRank.repoId, t.references.repoId),
+          eq(t.fileRank.filePath, t.references.fromPath),
+        ),
+      )
+      .where(and(eq(t.references.repoId, repoId), inArray(t.references.toSymbol, names)));
+    return rows.map((r) => ({
+      fromPath: r.fromPath,
+      toSymbol: r.toSymbol,
+      line: r.line,
+      rank: r.rank ?? 0,
+    }));
+  }
+
   /** Per-file facts (endpoints/crons) for the given files. */
   async getFileFacts(repoId: string, files: string[]): Promise<IndexerFileFactsRow[]> {
     if (files.length === 0) return [];

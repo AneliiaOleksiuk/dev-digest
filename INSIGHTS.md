@@ -40,6 +40,15 @@ _(to be filled in)_
   `.\node_modules\.bin\tsc.cmd --noEmit -p tsconfig.json` and
   `.\node_modules\.bin\vitest.cmd run` from the package dir — skips pnpm's
   install-check entirely and still gives a real typecheck/test result.
+  **Refinement (2026-08-09, `scripts/verify-l03.sh`):** the `.cmd` suffix
+  above is specifically for a PowerShell caller. Under the Bash tool's Git
+  Bash shell, npm/pnpm's bin-linking generates three shims per binary
+  (`tsc`, `tsc.CMD`, `tsc.ps1`) and the **extensionless** one is a real POSIX
+  shell script — `./node_modules/.bin/tsc` and `./node_modules/.bin/vitest`
+  run directly with no suffix, no `pnpm exec`, and no `ERR_PNPM_ABORTED_…`
+  risk. A cross-tool script that must work under both callers should invoke
+  the extensionless form and let Git Bash resolve it; don't default to
+  `.cmd` just because the environment is Windows.
 - **Docker Desktop is not auto-started in this environment.** Any package
   needing Postgres (`server/`, and therefore a live `pnpm dev` client/API
   loop) can't come up until Docker is manually launched first — `docker ps`
@@ -165,6 +174,36 @@ _(to be filled in)_
   grep for `Copilot|four mirror|github/agents` after any future Haiku
   mirroring pass, not just trusting the subagent's own "verified clean"
   claim in its report.
+- 2026-08-08: Built `mcp/` (`@devdigest/mcp`), a new standalone npm package
+  exposing DevDigest's existing review capabilities to an MCP client over
+  stdio (`list_agents`, `run_agent_on_pr`, `get_findings`, `get_conventions`,
+  `get_blast_radius` stub) — a pure HTTP façade over the local API on
+  `:3001`, no in-process `server/src` import (see `mcp/AGENTS.md` for why).
+  Confirmed the plan's zod-major risk was moot in practice:
+  `@modelcontextprotocol/sdk`'s peer range (`zod: "^3.25 || ^4.0"`) is
+  satisfied by npm resolving the repo's existing `^3.24.1` pin up to
+  `zod@3.25.x` — one zod instance, no zod-4 split needed. Also confirmed
+  `CallToolResult.structuredContent` must be a JSON object, not a bare
+  array — an SDK constraint the plan's literal `AgentSummary[]` /
+  `ConventionSummary[]` output typing didn't anticipate; both tools wrap
+  their array under a top-level key instead. See `mcp/INSIGHTS.md` for the
+  package-level detail (SDK API shape, test-harness pattern, stdio spawn
+  verification).
+
+- 2026-08-09: Added `scripts/verify-l03.sh` (WI10 of
+  `docs/plans/l04-followups-blast-inline-and-fixes.md`) — a root gate that
+  runs server typecheck, server unit tests narrowed to the L03 suites
+  (`intent-*`, `smart-diff-*`, excluding `**/*.it.test.ts`), client
+  typecheck, and client's full `vitest run`, fail-fast with the failing lane
+  named. Deliberately excludes `reviewer-core` (scoped to client+server per
+  user decision) and never invokes `pnpm test`/`pnpm test run` — see the
+  script's own header comment for the full rationale. Verified live: passes
+  clean (exit 0) with Docker running (this session never needed to stop it —
+  none of the four lanes touch Postgres); a deliberately introduced type
+  error in `server/src/modules/smart-diff/service.ts` made it fail at lane 1
+  with a non-zero exit as expected, then was fully reverted (`git diff`
+  confirmed clean) before finishing. See the Tool & Library Notes entry
+  above for the `.bin` shim nuance this surfaced.
 
 ## Open Questions
 

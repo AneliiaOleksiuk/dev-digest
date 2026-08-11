@@ -31,6 +31,7 @@ If a test wouldn't catch a class of regression we care about, we don't write it.
 | server-integration | `server/` | integration (real Postgres) | vitest | `server-integration.yml` | **yes** |
 | reviewer-core | `reviewer-core/` | unit (engine) | vitest | `reviewer-core.yml` | no |
 | e2e web | `e2e/` | browser e2e (deterministic) | agent-browser + `run.ts` | `e2e-web.yml` | yes (stack) |
+| mcp | `mcp/` | unit (hermetic — `fetch` stubbed for the MCP tools, git + `LLMProvider` stubbed for the pre-push CLI) | vitest | `mcp.yml` | no |
 
 ## What each suite covers
 
@@ -62,6 +63,7 @@ No `chat`, no model key.
 # per package
 cd client        && pnpm test           # + pnpm typecheck
 cd reviewer-core && npm test
+cd mcp           && npm test
 
 # server — the unit/integration split (see note below)
 cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'   # unit, no Docker
@@ -73,6 +75,11 @@ cd server && pnpm test                                          # both
 npm i -g agent-browser && agent-browser install
 cd e2e && npm install && npm test
 ```
+
+Lesson gate: `./scripts/verify-l03.sh` runs the L03-scoped subset of the
+above (server typecheck + narrowed unit tests, client typecheck + full test
+suite) as one pre-submission command — see the script's `--help` for the
+exact lanes and why `reviewer-core` is excluded.
 
 ## Conventions
 

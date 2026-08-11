@@ -296,7 +296,7 @@ export class RepoIntelService implements RepoIntel {
 
     return {
       changedSymbols,
-      callers: callerRows,
+      callers: capCallersPerSymbol(callerRows, changedSymbols, MAX_CALLERS_PER_SYMBOL),
       impactedEndpoints: [...endpoints],
       degraded: true,
       reason: 'no_data',
@@ -339,7 +339,25 @@ export class RepoIntelService implements RepoIntel {
     }
 
     // Resolved cross-file callers.
-    const callerRows = await this.repo.getResolvedCallers(repoId, changedFiles, [...nameSet]);
+    let callerRows = await this.repo.getResolvedCallers(repoId, changedFiles, [...nameSet]);
+
+    // Fallback when import-graph resolution left decl_file NULL (e.g. empty
+    // file_edges): still surface direct name-matched call sites outside the
+    // declaring file(s), so blast is not empty for an otherwise full index.
+    if (callerRows.length === 0) {
+      const declFilesByName = new Map<string, Set<string>>();
+      for (const sym of changedSymbols) {
+        const set = declFilesByName.get(sym.name) ?? new Set<string>();
+        set.add(sym.file);
+        declFilesByName.set(sym.name, set);
+      }
+      const byName = await this.repo.getNameMatchedCallers(repoId, [...nameSet]);
+      callerRows = byName.filter((row) => {
+        const decls = declFilesByName.get(row.toSymbol);
+        return !!decls && !decls.has(row.fromPath);
+      });
+    }
+
     const callerFiles = [...new Set(callerRows.map((c) => c.fromPath))];
 
     // Enclosing caller symbol from the callers' persistent symbol rows.
@@ -369,11 +387,17 @@ export class RepoIntelService implements RepoIntel {
         rank: c.rank,
       });
     }
-    callers.sort((a, b) => b.rank - a.rank);
+    // Reverse import-graph: modules that depend on each changed file, up to
+    // BFS_DEPTH hops (imported → importers). Pure read over file_edges —
+    // never re-parses the clone. Endpoints/crons on those dependents are
+    // attributed per declaring file via dependentFilesByDeclFile.
+    const edges = await this.repo.getEdges(repoId);
+    const dependentFilesByDeclFile = reverseImportReach(edges, changedFiles, BFS_DEPTH);
+    const dependentFiles = [...new Set([...dependentFilesByDeclFile.values()].flat())];
 
-    // Precomputed facts per caller file (endpoints + crons), so consumers can
-    // attribute them to the changed symbol whose callers live in that file.
-    const facts = await this.repo.getFileFacts(repoId, callerFiles);
+    // Precomputed facts for direct caller files ∪ reverse-reach dependents.
+    const factPaths = [...new Set([...callerFiles, ...dependentFiles])];
+    const facts = await this.repo.getFileFacts(repoId, factPaths);
     const endpoints = new Set<string>();
     const factsByFile: Record<string, { endpoints: string[]; crons: string[] }> = {};
     for (const f of facts) {
@@ -383,9 +407,10 @@ export class RepoIntelService implements RepoIntel {
 
     return {
       changedSymbols,
-      callers: callers.slice(0, MAX_CALLERS_PER_SYMBOL),
+      callers: capCallersPerSymbol(callers, changedSymbols, MAX_CALLERS_PER_SYMBOL),
       impactedEndpoints: [...endpoints],
       factsByFile,
+      dependentFilesByDeclFile: Object.fromEntries(dependentFilesByDeclFile),
       degraded: false,
     };
   }
@@ -730,6 +755,82 @@ const JUNK_PATH_PATTERNS = [
 function isJunkPath(path: string): boolean {
   const lower = path.toLowerCase();
   return JUNK_PATH_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Reverse import reach from each seed file: walk `file_edges` as
+ * imported → importers (edge storage is importer → imported) up to `depth`
+ * hops. Returns a map seed → dependent files at hops 1..depth (seed itself
+ * excluded). Pure — no I/O. Exported for unit tests.
+ */
+export function reverseImportReach(
+  edges: ReadonlyArray<{ fromFile: string; toFile: string }>,
+  seeds: readonly string[],
+  depth: number,
+): Map<string, string[]> {
+  const importersOf = new Map<string, string[]>();
+  for (const e of edges) {
+    const arr = importersOf.get(e.toFile);
+    if (arr) arr.push(e.fromFile);
+    else importersOf.set(e.toFile, [e.fromFile]);
+  }
+
+  const out = new Map<string, string[]>();
+  for (const seed of seeds) {
+    const reached = new Set<string>();
+    let frontier: string[] = [seed];
+    for (let hop = 0; hop < depth; hop += 1) {
+      const next: string[] = [];
+      for (const file of frontier) {
+        for (const importer of importersOf.get(file) ?? []) {
+          if (importer === seed || reached.has(importer)) continue;
+          reached.add(importer);
+          next.push(importer);
+        }
+      }
+      frontier = next;
+      if (frontier.length === 0) break;
+    }
+    out.set(seed, [...reached]);
+  }
+  return out;
+}
+
+/**
+ * Cap + rank-sort `callers` PER CHANGED SYMBOL (`viaSymbol`), not globally.
+ * Groups callers by `viaSymbol`, sorts each group by `rank` DESC with a
+ * deterministic tiebreak (`file` asc, then `line` asc — needed because the
+ * ripgrep/degraded path has `rank: 0` for every row), takes the first `cap`
+ * rows of each group, then concatenates groups in `changedSymbols` order.
+ * Shared by both `tryPersistentBlast` and the ripgrep fallback in
+ * `getBlastRadius` so the cap can't drift between the two paths.
+ */
+function capCallersPerSymbol(
+  callers: BlastCallerRow[],
+  changedSymbols: BlastChangedSymbol[],
+  cap: number,
+): BlastCallerRow[] {
+  const callersByViaSymbol = new Map<string, BlastCallerRow[]>();
+  for (const caller of callers) {
+    const { viaSymbol } = caller;
+    const existingGroup = callersByViaSymbol.get(viaSymbol);
+    if (existingGroup) existingGroup.push(caller);
+    else callersByViaSymbol.set(viaSymbol, [caller]);
+  }
+
+  const cappedCallers: BlastCallerRow[] = [];
+  const processedSymbolNames = new Set<string>();
+  for (const { name: symbolName } of changedSymbols) {
+    if (processedSymbolNames.has(symbolName)) continue; // one group per distinct viaSymbol name
+    processedSymbolNames.add(symbolName);
+    const group = callersByViaSymbol.get(symbolName);
+    if (!group) continue;
+    group.sort(
+      (a, b) => b.rank - a.rank || a.file.localeCompare(b.file) || a.line - b.line,
+    );
+    cappedCallers.push(...group.slice(0, cap));
+  }
+  return cappedCallers;
 }
 
 /** Enclosing top-level (bare-name) symbol for a line, from persistent rows. */

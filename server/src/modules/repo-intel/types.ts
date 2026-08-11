@@ -77,11 +77,19 @@ export interface BlastResult {
   /** "METHOD /path" (via extractEndpoints / file_facts) — flat union. */
   impactedEndpoints: string[];
   /**
-   * Per-caller-file precomputed facts, so consumers (blast) can attribute
-   * endpoints/crons to the changed symbol whose callers live in that file.
-   * Present on the persistent (non-degraded) path; absent otherwise.
+   * Per-file precomputed facts (endpoints + crons). On the persistent path
+   * this covers direct caller files AND modules within ≤BFS_DEPTH reverse
+   * import hops of each changed declaring file. Absent on the degraded/
+   * ripgrep path.
    */
   factsByFile?: Record<string, { endpoints: string[]; crons: string[] }>;
+  /**
+   * Files within ≤BFS_DEPTH reverse-import hops of each changed declaring
+   * file (imported → importers). Blast maps these through `factsByFile` so
+   * endpoints on dependent modules attach to symbols declared in that file.
+   * Present only on the persistent path.
+   */
+  dependentFilesByDeclFile?: Record<string, string[]>;
   degraded?: boolean;
   reason?: DegradedReason;
 }

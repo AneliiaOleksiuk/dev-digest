@@ -122,6 +122,94 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `sources[].ref` still names those files, but this run did not open them.
   Populate via `specPathsFrom(record)` only when `reused: false`.
 
+- **`repo-intel`'s caller cap MUST be applied per-`viaSymbol`, never globally
+  — a shared helper prevents the two read paths from drifting.** WI1 of
+  `docs/plans/l04-blast-radius-and-prepush-cli.md` found that
+  `tryPersistentBlast` sorted+sliced its WHOLE `callers` array by rank before
+  capping at `MAX_CALLERS_PER_SYMBOL` — a single fan-out changed symbol could
+  starve every other changed symbol's callers down to zero — and the ripgrep
+  fallback in `getBlastRadius` capped/sorted **nothing at all** (every row
+  emitted with `rank: 0`, in discovery order). Fixed with one module-scope
+  helper, `capCallersPerSymbol(callers, changedSymbols, cap)` in
+  `modules/repo-intel/service.ts`: group by `viaSymbol`, sort each group by
+  `rank` desc with a `file` asc / `line` asc tiebreak (the tiebreak matters
+  most on the ripgrep path, where every rank is 0), slice to `cap`, then
+  concatenate groups in `changedSymbols` order — called identically from both
+  `tryPersistentBlast` and the ripgrep path so they can't re-drift. Test:
+  `server/test/repo-intel-blast-cap.test.ts`.
+- **A route that needs the repo-intel facade but isn't `repo-intel/` itself
+  should still live in its own module** — `modules/blast/` (L04,
+  `GET /pulls/:id/blast`) calls exactly two facade methods
+  (`repoIntel.getBlastRadius` + `repoIntel.getIndexState`, in parallel) and
+  is otherwise a normal onion module (`routes.ts`→`service.ts`→
+  `repository.ts`←`repository.drizzle.ts`), copied from `smart-diff/`'s
+  shape. **Update, 2026-08-09 (L04 acceptance fix):** `tryPersistentBlast`
+  now also walks `file_edges` in reverse (imported → importers) up to
+  `BFS_DEPTH` (2) and merges those dependents' `file_facts` into
+  `factsByFile` / `dependentFilesByDeclFile` so endpoints on modules that
+  import the changed file (not only direct symbol callers) surface in
+  `GET /pulls/:id/blast`. Pure index read — no AST rebuild on the request.
+  See `reverseImportReach` + `server/test/repo-intel-blast-reverse.test.ts`.
+- **When `references.decl_file` is NULL for an otherwise full index, blast
+  still surfaces callers via name match.** `getResolvedCallers` requires
+  `decl_file ∈ changedFiles`; if the import graph never resolved
+  (`file_edges` empty / unmatched imports), that query returns `[]` even
+  though `references` rows exist. `tryPersistentBlast` then falls back to
+  `RepoIntelRepository.getNameMatchedCallers` (left-join `file_rank`,
+  coalesce rank 0) and drops rows whose `fromPath` is a declaring file of
+  that symbol. Confirmed live on demo PR #3 (`rateLimit` → 4 callers +
+  endpoint badges) after checking out the PR tip into the clone and full-
+  indexing. Caveat: common names (`push`, `get`, …) inflate callers until
+  `decl_file` resolution works. Test: name-matched case in
+  `server/test/repo-intel-blast-reverse.test.ts`.
+- **`status: 'partial'` gets its own client-facing warning even though
+  `RepoIntelRepository.tryGetIndexState` itself does NOT treat `partial` as
+  degraded** (`stats.status === 'degraded' || 'failed'` is the only
+  `degraded: true` trigger there — see the entry below this one). L04's
+  `BlastRadiusResponse.status` derivation (`modules/blast/helpers.ts`,
+  `deriveStatus`) is a **deliberate product decision, not a mechanical
+  passthrough**: `degraded` when `blast.degraded` or the index status is
+  `degraded`/`failed`; **`partial` renders its own banner** (not silently
+  folded into "full") whenever the index status is `partial`; `full`
+  otherwise. If another repo-intel consumer is tempted to reuse
+  `tryGetIndexState`'s "partial is still fine" framing for a new
+  user-facing feature, confirm that's actually wanted first — L04 chose the
+  opposite for Blast Radius.
+- **`BlastRadiusResponse` (`contracts/review-api.ts`) extends the existing
+  `BlastRadius` from `contracts/brief.ts`** (`BlastRadius.extend({status,
+  reason})`) — same pattern as `SmartDiffResponse = SmartDiff`. Do **not**
+  add a `rank` field to `BlastCaller`; it's shared with the still-unbuilt
+  `PrBrief`, and ordering is already carried by array order (rank-sorted
+  server-side by the `capCallersPerSymbol` fix above).
+- **`BlastRepository` grew a third port method** (2026-08-09, L04
+  follow-ups): `getPull`/`getPrFiles` were joined by `getPriorPrsForFiles`
+  (`repository.ts`/`repository.drizzle.ts`) — a `pr_files ⋈ pull_requests`
+  aggregate join (`groupBy` + `count(distinct path)`) answering "which other
+  PRs touched these same files," capped by `MAX_PRIOR_PRS`/
+  `MAX_PATHS_FOR_PRIOR_PRS` in `modules/blast/constants.ts`. Ordered on
+  `pull_requests.number` (`notNull`, unique per repo), not on
+  `opened_at`/`updated_at` (both nullable) — a correct recency proxy that's
+  also deterministic. `prior_prs: PriorPr[]` was added to
+  `BlastRadiusResponse` as **required** (not optional): the service always
+  produces it, `[]` on the degraded/no-files path, so an optional field
+  would only add `?.` at every read site for no honesty gain. `pr_files` has
+  **no index on `path`** — fine at this app's local-first scale with the
+  path-count cap; if it ever needs one, generate it
+  (`pnpm db:generate` → `pnpm db:migrate`), never hand-edit
+  `src/db/migrations/**`. Deliberately **not** exposed through the MCP
+  `get_blast_radius` tool (`mcp/src/project.ts`'s `toBlastRadiusOutput`
+  keeps its explicit field list, so adding a contract field can't leak
+  through by accident) — "who touched these files before" is a UI
+  affordance, not something a reviewing model needs, and `mcp/AGENTS.md`'s
+  token-frugality principle argues against spending output tokens on it.
+- **`repo-intel`'s endpoint/cron detection used to be DIRECT callers only;
+  L04 acceptance fix superseded that.** Older note: `tryPersistentBlast`
+  resolved only DIRECT callers via `references.decl_file`, then read
+  `file_facts` for those caller files — no importer walk. **Update,
+  2026-08-09:** reverse `file_edges` BFS (`BFS_DEPTH` = 2) merges dependents'
+  facts, and when `decl_file` is unresolved the name-matched caller fallback
+  still feeds `file_facts` for those caller paths. Do not re-assert "one hop
+  only" from README prose written before that fix.
 - **`PrIntentRecord` (`review-api.ts`) picks up new `Intent` fields for free
   via `Intent.extend({...})`** — adding `risk_areas: z.array(z.string())
   .default([])` to the base `Intent` schema in `brief.ts` required zero
@@ -226,6 +314,15 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   errors until that file is fixed separately — don't assume your own
   change broke typecheck without first checking whether the errors are in
   a file you actually touched.
+  **STALE as of 2026-08-08/09 — fixed outside this note's originating plan.**
+  `orders.ts` is a deliberately-fake `payments-api-fixture` package
+  (simulating the seeded `acme/payments-api`, imported by nothing real) that
+  `server/tsconfig.json`'s `include: ["src/**/*.ts"]` was sweeping into
+  typecheck; a `"exclude": ["src/modules/orders/**"]` entry was added.
+  Confirmed 2026-08-09 (L04 Blast Radius session): `cd server && pnpm
+  typecheck` is clean with zero errors. Any typecheck error you see now is
+  real and belongs to whatever you touched — don't reflexively attribute it
+  to this old, now-resolved entry.
 - **`curl -d '{"...":"... — ..."}'` (em dash, U+2014, or other multi-byte
   UTF-8 chars) from Git Bash on Windows can fail with `{"error":{"code":
   "internal_error","message":"Request body size did not match
@@ -414,6 +511,36 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `pseudocode_summary` always null. `package.json` + tests are boilerplate
   (mock parity); bootstrap basenames (`index.ts`, `server.ts`, …) are wiring.
 
+- 2026-08-09: Blast Radius server side (Part 1 of
+  `docs/plans/l04-blast-radius-and-prepush-cli.md`) — WI1's required
+  per-symbol caller-cap bug fix in `repo-intel/service.ts` (see Codebase
+  Patterns above), new `modules/blast/` module (`GET /pulls/:id/blast`),
+  `container.blastRepo`, `BlastRadiusResponse` contract added to
+  `contracts/review-api.ts` and hand-mirrored to `client/`, and the
+  endpoint-detection depth documented in `modules/repo-intel/README.md`
+  (WI4 — verification + prose only, no new traversal code). Client
+  (`BlastTab`, `BlastRadiusCard` real data) and the MCP `get_blast_radius`
+  tool are the same session's client/mcp INSIGHTS entries. Part 2 (the
+  pre-push CLI) was a separate, concurrent agent's work in the same
+  session — not covered by this entry.
+- 2026-08-09 (later, L04 follow-ups plan `docs/plans/l04-followups-blast-inline-and-fixes.md`
+  Part A): `BlastRepository.getPriorPrsForFiles` added (see Codebase
+  Patterns above for the full shape) and wired through `BlastService`'s
+  existing `Promise.all`; `summary` deliberately left untouched (prior PRs
+  are provenance, not blast radius). `pnpm arch:check` stayed clean (no new
+  port/adapter boundary violation). This landed alongside three unrelated,
+  file-disjoint client-side items (intent-hook rename, a Smart-Diff
+  severity-badge fix, a new `verify-l03.sh` gate) executed by three parallel
+  implementer agents in the same shared working tree — see `client/
+  INSIGHTS.md` and root `INSIGHTS.md` for those.
+- 2026-08-09 (demo): PR-tip checkout + full index for blast fixture; added
+  `getNameMatchedCallers` fallback when `decl_file` stays NULL (empty
+  `file_edges`). Live `rateLimit` callers+endpoints on PR #3. Do **not**
+  click list Refresh — resync restores `main` and drops the PR fixture.
+
 ## Open Questions
 
-_(to be filled in)_
+- Why does `depgraph.buildEdges` leave `file_edges` empty for the demo
+  orders/public import graph even after a full index on the PR tip? Name-
+  matched callers paper over it; proper `decl_file` resolution is still the
+  right long-term fix.

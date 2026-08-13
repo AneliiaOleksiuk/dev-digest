@@ -114,6 +114,38 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   comment mismatch alone unless you're deliberately reconciling the whole
   vendor mirror.
 
+- **Vendored `trace.ts` comment drift was reconciled 2026-08-13 (SPEC-01
+  plan-verifier fix-loop).** The entry above is still correct for *unrelated*
+  work: don't "fix" the comments as a drive-by. This session *was* the
+  deliberate reconciliation — copy the server's more-specific `T1.3` / `T3`
+  JSDoc onto the client copy (`callers` / `repo_map`). After that, `git
+  diff --no-index -- server/src/vendor/shared/contracts/trace.ts
+  client/src/vendor/shared/contracts/trace.ts` must be empty. Schema
+  unchanged; comments only. Same rule as any other hand-mirror: edit both
+  copies, then prove byte-identity with `--no-index`, not with a visual
+  glance.
+
+- **`GET /repos/:id/context` 404 is owned by `ProjectContextService.listDocuments`,
+  not the route.** `routes.ts` must not call `contextRepo.getRepo` — that
+  made the service's missing-repo branch unreachable over HTTP and put the
+  HTTP layer on the port past its own application layer. Missing repo →
+  throw `NotFoundError('Repo not found')`. No-clone (`clonePath` null) still
+  returns the AC-3/E-1 degraded empty listing, never an error. Skill/agent
+  404s stay in the route via `skillsRepo`/`agentsRepo`.
+
+- **AC-15 and E-8 cannot be unit-tested at the service if the only filter
+  lives in SQL.** `listForAgentEffective` still has `eq(skills.enabled, true)`
+  and `eq(…repoId, repoId)` — that is the injection gate and must stay.
+  To prove AC-15 at the service without ripping that SQL out: `EffectiveAttachmentRow`
+  carries optional `enabled`, drizzle sets `enabled: true` on mapped rows,
+  and `resolveEffectiveSet` skips `source === 'skill' && enabled === false`
+  *before* dedupe/read. To prove E-8 run-log lines: a separate
+  `listMismatchedForAgent` port returns other-repo paths (never injected);
+  `resolveEffectiveSet` returns them as `mismatched: string[]`;
+  `buildProjectContext` logs `project context: skipped (other repo) — ${path}`
+  *before* the empty-set early return so a run that has only other-repo
+  attachments still emits the lines and still omits the prompt slot (AC-21).
+
 - **`RunTrace.specs_read` must only list paths opened *this run*.** Intent
   Layer reuses that field for intent-resolved spec paths (documented on the
   contract: pipeline reads, not necessarily prompt-fed). On a head-SHA
@@ -222,6 +254,41 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   hand-built object literal typed against the *extended* schema, not just
   the base one.
 
+- **A shared pure write-guard module composes better than one method per
+  gate.** `modules/project-context/write-guards.ts` (SPEC-01 amendment,
+  AC-35/AC-36/AC-43/AC-45/AC-47) splits into `validateDocPathShape` (no
+  filesystem/config — extension, `.`/`..`, separator, absolute/drive/UNC
+  form, charset, depth/length caps) and `resolveWritablePath` (shape → first
+  path segment ∈ configured roots → no segment in `EXCLUDED_DIRS` →
+  `isInsideClone`), each returning `{ ok: true, ... } | { ok: false, reason
+  }` instead of a boolean. Both `saveDocument` and `createDocument` in
+  `service.ts` call the SAME `resolveWritablePath`, so a rule added there
+  can't silently apply to only one write path. `isInsideClone`
+  (`reviews/intent-inputs.ts:138`) is a containment check only — a path
+  under `.git/hooks/` resolves inside the clone just fine, so it is
+  deliberately the LAST gate, not a stand-in for the whole chain.
+- **Content-hash staleness token, not mtime, for a concurrent-edit check on
+  win32.** `helpers.ts`'s `revisionOf(buf)` (sha256 hex) backs AC-37's "save
+  rejected if the file moved since the editor read it": `GET
+  .../context/document` returns it, the client sends it back on `PUT`, and
+  `saveDocument` re-reads + re-hashes right before the write. An mtime was
+  rejected — this dev environment is win32, where a same-tick out-of-band
+  write can share an mtime with the read that preceded it, defeating the
+  check exactly when it matters.
+- **A vendored port interface (`GitClient`) can drift between the server and
+  client mirrors even though the "hand-mirror on every edit" rule says it
+  shouldn't.** Discovered while doing the SPEC-01 amendment's `sync()`
+  docblock mirror (WI5): `client/src/vendor/shared/adapters.ts`'s
+  `GitClient` was already missing `sync`, `diffNameOnly`, and several
+  unrelated interfaces (`CommitFilesPayload`, `commitFiles`, `findOpenPr`,
+  the `sessionId` field, the `'openrouter'` provider literal) that the
+  server copy has — pre-existing drift, not something this session caused.
+  `GitClient` has ZERO consumers anywhere in `client/src` (confirmed by
+  grep), so nothing broke. Fixed only the one method this session's DoD
+  required (`sync` + its docblock, added to the client interface); the rest
+  of the drift is still there — don't assume the client `adapters.ts` mirror
+  is otherwise in sync with the server one.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -288,6 +355,28 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   scope comment, not an architectural boundary. The comment in
   `server/src/adapters/tokenizer/index.ts` was widened accordingly; do not
   re-narrow it or invent a reviews→repo-intel dependency to "fix" the call.
+
+- **`fs.readFile(path, 'utf8')` does not throw on invalid UTF-8.** Node
+  (this repo's floor is ≥22) decodes with U+FFFD replacement characters,
+  so a `.catch(() => null)` never fires for a binary `.md` and the garbage
+  string gets injected. SPEC-01 E-5 ("skip like E-2, do not throw") needs
+  a Buffer read plus `isUtf8` from `node:buffer` (no extra dependency):
+  `readUtf8OrNull` in `modules/project-context/helpers.ts` returns `null`
+  for missing/unreadable/non-UTF8; `resolveEffectiveSet` pushes that path
+  onto `skipped[]`. Do not "fix" E-5 by catching a decode throw — there
+  isn't one. `listDocuments` / `getDocument` still use `'utf8'` on
+  purpose (listing/preview is not E-5's contract).
+
+- **`simple-git`'s typed API has no `status --porcelain` passthrough that
+  returns the raw string** — `SimpleGit.status()` returns a parsed
+  `StatusResult` object, not the porcelain text AC-50 asks for
+  (`git status --porcelain --untracked-files=all`). Used
+  `g.raw(['status', '--porcelain', '--untracked-files=all'])` instead
+  (`adapters/git/simple-git.ts`'s `sync()`) and hand-parsed the fixed-width
+  `XY PATH` porcelain-v1 line format (`slice(3)` for the path, `' -> '` split
+  for a rename) rather than reaching for `StatusResult`, which would need a
+  second `status()` call anyway (this one already gates the fetch/reset that
+  follows it).
 
 ## Recurring Errors & Fixes
 
@@ -537,6 +626,94 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `getNameMatchedCallers` fallback when `decl_file` stays NULL (empty
   `file_edges`). Live `rateLimit` callers+endpoints on PR #3. Do **not**
   click list Refresh — resync restores `main` and drops the PR fixture.
+
+- 2026-08-13: Project Context (SPEC-01, plan `docs/plans/spec-01-project-context.md`)
+  server side — new `modules/project-context/` (onion port/adapter:
+  `discover.ts` bounded recursive `.md` walk modelled on `repo-intel/pipeline/
+  walk.ts`, `repository.ts`/`repository.drizzle.ts`, `service.ts`, `routes.ts`),
+  new `project_context_attachments` table (migration `0016`, polymorphic
+  `surface`/`surface_id` with NO FK — compensated by `AgentsService.delete`/
+  `SkillsService.delete` explicitly calling `contextRepo.deleteForSurface`),
+  `AppConfig.projectContextRoots` (env `PROJECT_CONTEXT_ROOTS`, default
+  `specs,docs,insights`), and the `run-executor.ts` wiring that finally
+  populates `PromptParts.specs` (`reviewer-core` untouched — confirmed via
+  `git diff --stat reviewer-core/` returning empty both before and after).
+  Two ripples the plan's WI7 file list didn't anticipate, needed purely to
+  keep the codebase compiling once `RunTrace.project_context_docs` was added
+  as a real (if `.default([])`) field: **any hand-built `RunTrace` object
+  literal needs the field even though `.default()` covers `.parse()` calls**
+  — `platform/trace-builder.ts`'s `buildRunTrace` (shared by other run paths:
+  built-in detectors, multi-agent runs) needed a new optional
+  `projectContextDocs` input defaulting to `[]`, and the client's
+  `RunTraceDrawer.test.tsx` fixture needed the field added too. Same pattern
+  server/INSIGHTS.md already documented for `PrIntentRecord`/`risk_areas` —
+  grep every hand-typed object literal against an extended `z.infer` schema,
+  not just the schema's own `.parse()` call sites, whenever a contract gains
+  a new non-optional-with-default field.
+  Two deviations from the plan's literal port-method signatures, both
+  necessary for correctness rather than convenience: `ContextRepository
+  .listFor`/`listForAgentEffective` needed a required `repoId` param (the
+  plan's stated signature omitted it) — a skill/agent can hold attachments
+  against several repos at once (E-8), so an unscoped read can't be
+  correctly rendered on a single-repo Context tab; and `ContextDocument`
+  gained a `used_by_agents: number` field beyond WI1's literal shape list,
+  because AC-8 requires it on the listing response and WI5 explicitly
+  computes it via `usageCountsByPath` — the shape list appears to have been
+  an oversight in the plan, not a deliberate omission.
+  Verified: `pnpm typecheck` clean, `pnpm arch:check` clean (new module
+  respects the onion boundary), full unit suite green except the
+  pre-existing `indexer-pipeline.test.ts` Windows flake (untouched file,
+  confirmed via `git status`), and a new `.it.test.ts` (real Postgres) round-
+  tripping AC-1/AC-3/AC-9/AC-10/AC-16/cross-workspace-404 end to end through
+  real HTTP routes. WI13 (live grounding verification on PR #3) intentionally
+  NOT attempted this session — it requires pushing a commit to a real, shared
+  GitHub PR branch, which needs explicit human approval of the exact diff
+  before the push per the plan's approval gate; that approval could not be
+  obtained within this session, so WI13 is reported blocked, not done.
+
+- 2026-08-13: SPEC-01 fix pass after test-writer — E-5 binary skip in
+  `resolveEffectiveSet` now uses `readUtf8OrNull` (`isUtf8` on a Buffer)
+  instead of `readFile(..., 'utf8').catch()`, which never threw. See Tool
+  & Library Notes above.
+
+- 2026-08-13: SPEC-01 plan-verifier fix-loop iteration 1 — reconciled
+  vendored `trace.ts` comments (server `T1.3`/`T3` copied onto client);
+  AC-15 defense-in-depth skip in `resolveEffectiveSet`; `listMismatchedForAgent`
+  + run-log line `project context: skipped (other repo) — ${path}`;
+  `other_repo_documents` on `ContextAttachmentSet` (no 7th endpoint);
+  `listDocuments` throws `NotFoundError` for a missing repo (route no
+  longer calls `contextRepo.getRepo`). See Codebase Patterns above.
+
+- 2026-08-13: SPEC-01 amendment (AC-29–AC-53, plan
+  `docs/plans/spec-01-project-context-authoring.md`) server side, WI1–WI5 —
+  `ContextDocumentContent`/`SaveContextDocumentBody`/
+  `CreateContextDocumentBody`/`ContextWriteResult` contracts +
+  `ContextListing.roots` added to both `platform.ts` vendor mirrors (Rec-4);
+  `MAX_DOC_PATH_DEPTH`/`MAX_DOC_PATH_LENGTH`/`MAX_DIRTY_PATHS_SHOWN` added to
+  `project-context/constants.ts` (values approved by the user, not
+  re-derived); new pure `write-guards.ts` (see Codebase Patterns above);
+  `service.ts` gained `saveDocument`/`createDocument` plus a `revision` on
+  `getDocumentContent`, both write paths sharing the guard chain (Rec-6);
+  `ConflictError` (409) added to `platform/errors.ts` (Rec-2); `PUT`/`POST
+  /repos/:id/context/document` routes added; `GitClient.sync` gained the
+  AC-50 dirty-clone precondition (`adapters/git/simple-git.ts`, new
+  `adapters/git/errors.ts` `DirtyCloneError`, `MockGitClient.dirtyPaths`),
+  and `RepoIntelService.resyncRepo` catches it before the generic
+  `sync_failed:` branch and persists `dirty_clone:<paths>` through
+  `touchIndexState` (Rec-5/R-4 accepted gap: no-op on a never-indexed repo).
+  Both vendored `adapters.ts` `GitClient.sync` docblocks updated — see
+  Codebase Patterns above for the client-copy drift this surfaced.
+  Verified: `pnpm typecheck` clean (server: one pre-existing unrelated error
+  in `adapters/auth/local.ts:40`, not touched this session — present before
+  this session started per initial `git status`); `pnpm arch:check` clean;
+  full unit suite green except the pre-existing `indexer-pipeline.test.ts`
+  Windows flake (confirmed via `git status` — file untouched, matches the
+  existing Recurring-Errors-&-Fixes entry); all 8 integration test files (41
+  tests) green against live Docker Postgres, including the pre-existing
+  `project-context.it.test.ts`/`project-context-run.it.test.ts`. Client-side
+  WI6–WI10 done in the same session — see `client/INSIGHTS.md`. Test
+  authorship for the new write paths (AC-34–AC-53) is explicitly `test-
+  writer`'s job next, not done here beyond the pre-existing suites passing.
 
 ## Open Questions
 

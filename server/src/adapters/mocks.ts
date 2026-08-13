@@ -33,6 +33,7 @@ import type {
   SecretKey,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './git/diff-parser.js';
+import { DirtyCloneError } from './git/errors.js';
 
 /**
  * Deterministic MOCK adapters for tests/dev — NO real network. Each mirrors the
@@ -249,6 +250,10 @@ export interface MockGitOptions {
   head?: string;
   /** Head `currentHead()` returns AFTER `sync()` runs — simulates fetch+reset advancing HEAD. */
   syncedHead?: string;
+  /** When set (non-empty), `sync()` throws `DirtyCloneError(dirtyPaths)`
+   *  instead of syncing — simulates AC-50's refusal so it's testable
+   *  without a real git fixture clone (R-7). */
+  dirtyPaths?: string[];
 }
 
 export class MockGitClient implements GitClient {
@@ -267,6 +272,9 @@ export class MockGitClient implements GitClient {
   }
   async fetchPullHead(): Promise<void> {}
   async sync(repo: RepoRef, branch: string): Promise<{ head: string }> {
+    if (this.opts.dirtyPaths && this.opts.dirtyPaths.length > 0) {
+      throw new DirtyCloneError(this.opts.dirtyPaths);
+    }
     this.syncs.push({ repo, branch });
     // After a sync, HEAD advances to syncedHead (or stays at head if unset).
     this.syncedHead = this.opts.syncedHead ?? this.opts.head ?? 'a1b2c3d4';

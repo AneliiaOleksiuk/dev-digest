@@ -26,8 +26,10 @@ import {
   parseSymbols,
   langForFile,
 } from '../../adapters/astgrep/index.js';
+import { DirtyCloneError } from '../../adapters/git/errors.js';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { MAX_DIRTY_PATHS_SHOWN } from '../project-context/constants.js';
 import { RepoIntelRepository, type FullSymbolRow } from './repository.js';
 import type {
   BlastCallerRow,
@@ -150,6 +152,18 @@ export class RepoIntelService implements RepoIntel {
     try {
       await this.container.git.sync(ref, repo.defaultBranch);
     } catch (err) {
+      // AC-51 — a dirty clone is a distinct, expected refusal (checked
+      // BEFORE the generic catch below), never folded into `sync_failed:`,
+      // which would read as a network/fetch problem instead of an
+      // instruction to commit or discard (AC-52).
+      if (err instanceof DirtyCloneError) {
+        const reason = `dirty_clone:${err.paths.slice(0, MAX_DIRTY_PATHS_SHOWN).join(', ')}`;
+        const durationMs = Date.now() - startedAt;
+        // Persist so the refusal is observable at GET /repos/:id/index-state
+        // (Rec-5) — a no-op when the repo was never indexed (R-4, accepted).
+        await this.repo.touchIndexState(repoId, { durationMs, reason });
+        return { status: 'degraded', filesIndexed: 0, filesSkipped: 0, durationMs, reason };
+      }
       return {
         status: 'degraded',
         filesIndexed: 0,

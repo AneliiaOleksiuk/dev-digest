@@ -38,7 +38,15 @@ export type {
   CreateContextDocumentBody,
   ContextWriteResult,
   IndexStatus,
+  Onboarding,
+  OnboardingSection,
+  OnboardingLink,
+  OnboardingSectionKind,
+  OnboardingStatus,
+  OnboardingGenerationUsage,
+  OnboardingTourResponse,
 } from "@devdigest/shared";
+export { ONBOARDING_SECTION_KINDS } from "@devdigest/shared";
 
 export type { Review, Finding, Severity, Verdict } from "@devdigest/shared";
 export type { PrBrief, SmartDiff } from "@devdigest/shared";

@@ -9,6 +9,7 @@ import {
   vector,
   index,
   uniqueIndex,
+  doublePrecision,
 } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { repos } from './repos';
@@ -117,10 +118,38 @@ export const references = pgTable(
   }),
 );
 
+/**
+ * SPEC-02 generation metadata (`status`..`indexStatus` below) lives in DEDICATED
+ * columns, not inside `json` — AC-36 requires `json` to parse cleanly against the
+ * `Onboarding` contract ({sections} only) on every read, and a zod object
+ * silently strips unknown keys, so metadata smuggled into `json` would be
+ * destroyed by that same validation. Column shape mirrors `agentRuns`
+ * (`db/schema/runs.ts`) — same provider/model/tokensIn/tokensOut/costUsd fields,
+ * same `doublePrecision` for cost (not `numeric`) so `costUsd: number | null`
+ * round-trips with no extra `mode` config.
+ */
 export const onboarding = pgTable('onboarding', {
   repoId: uuid('repo_id')
     .primaryKey()
     .references(() => repos.id, { onDelete: 'cascade' }),
   json: jsonb('json').notNull(),
   generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  /** One enumerated status per generation attempt (AC-17). Always set once a
+   *  row exists — `never_generated` is the "no row" case, never persisted. */
+  status: text('status', {
+    enum: ['ok', 'partial_index', 'no_clone', 'not_indexed', 'llm_failed', 'never_generated'],
+  }).notNull(),
+  provider: text('provider'),
+  model: text('model'),
+  tokensIn: integer('tokens_in'),
+  tokensOut: integer('tokens_out'),
+  costUsd: doublePrecision('cost_usd'),
+  callCount: integer('call_count').notNull().default(1),
+  /** `IndexState.lastIndexedSha` this tour was generated against (AC-26's
+   *  staleness comparison key). */
+  indexSha: text('index_sha'),
+  /** `IndexState.filesIndexed` this tour was generated from (AC-15 attribution). */
+  filesIndexed: integer('files_indexed'),
+  /** `IndexState.status` this tour was generated against (AC-15). */
+  indexStatus: text('index_status'),
 });

@@ -698,3 +698,52 @@ _(to be filled in)_
   `ProjectContextView.test.tsx` this session were fixes to keep the
   PRE-EXISTING self-check tests compiling/passing against the new hook
   surface, not new coverage.
+
+- 2026-08-14: SPEC-02 Onboarding Generator (plan
+  `docs/plans/spec-02-onboarding-generator.md`) client side, WI10-WI13 — new
+  repo-scoped route `repos/[repoId]/onboarding/` (`OnboardingTourView`: five
+  collapsible `SectionCard`s in the fixed AC-4 order, a `RegenerateConfirmModal`
+  naming both AC-6 consequences before the paid call fires, client-side
+  `toMarkdown` export with zero network request), new
+  `lib/hooks/onboarding.ts` (`useOnboardingTour` read + `useGenerateOnboardingTour`
+  mutation), `messages/en/onboarding.json` fully reconciled to the five
+  canonical section kinds (D-6/Q7 — the old copy promised "overview,
+  architecture, key modules, getting started, and conventions & gotchas",
+  a different five than the tour renders).
+  **Nav vendor-do-not-touch exception used a 5th time** (after Skills,
+  Conventions, the SKILLS-LAB split, and Project Context): added an
+  `onboarding-tour` key to `src/vendor/ui/nav.ts`'s **WORKSPACE** group
+  (beside `pulls`/`context` — a reading surface, not a Skills Lab tool, same
+  reasoning as Project Context's IA placement), icon `"Workflow"` (an
+  EXISTING `IconName` — `icons.tsx` stays untouched, no `"Compass"`/
+  `"Download"` icons exist in this registry despite reading like natural
+  fits; used `"Workflow"` for the empty-state icon too and `"ArrowDown"` for
+  the export button instead).
+  **Pre-existing nav/route collision fixed, not left as "already working"**:
+  `activeKeyFor` (`components/app-shell/helpers.ts`) already had
+  `pathname.includes("/onboarding") → "onboarding-tour"` BEFORE this
+  session, pre-wired for a route that didn't exist yet — but that predicate
+  also matches the UNRELATED top-level add-repo screen at exactly
+  `/onboarding` (`app/onboarding/page.tsx`), which predates this feature and
+  means something else entirely. Fixed to
+  `pathname.startsWith("/repos/") && pathname.includes("/onboarding")` so
+  only the new repo-scoped route highlights the sidebar item — same
+  "pre-authored code anticipates the intended UX, but check it for
+  collisions before trusting it verbatim" lesson this file's `nav.ts`/
+  `activeKeyFor` entries already document for Skills/Conventions/Context,
+  just the first case where the pre-wiring was WRONG rather than merely
+  early.
+  **AC-12's "First tasks" badge is section-level, not per-task-card** — see
+  `server/INSIGHTS.md`'s same-date entry for why (`OnboardingSection` has no
+  structured per-task array). One "Model estimate" `Badge` (with a `title`
+  tooltip, since `Badge` itself has no `title` prop — wrapped in a plain
+  `<span title=…>`) on the `first_tasks` card's header.
+  **`run_locally`'s copy-to-clipboard button copies the WHOLE section body**,
+  not a per-command button — AC-34 only requires display+copy, never
+  execution; a single section-level copy action satisfies that without
+  needing per-line UI plumbing the flat `body` field doesn't cleanly support.
+  Verified: `tsc --noEmit` clean; full Vitest green (28 files / 130 tests —
+  no new `*.test.tsx` file this session, per the multi-agent handoff split;
+  test authorship for `OnboardingTourView`/`SectionCard`/
+  `RegenerateConfirmModal`/`helpers.ts` is `test-writer`'s job next).
+  `smoke.test.tsx` still passes.

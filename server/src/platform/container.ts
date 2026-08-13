@@ -35,6 +35,10 @@ import type { SmartDiffRepository } from '../modules/smart-diff/repository.js';
 import { DrizzleSmartDiffRepository } from '../modules/smart-diff/repository.drizzle.js';
 import type { BlastRepository } from '../modules/blast/repository.js';
 import { DrizzleBlastRepository } from '../modules/blast/repository.drizzle.js';
+import type { ContextRepository } from '../modules/project-context/repository.js';
+import { DrizzleContextRepository } from '../modules/project-context/repository.drizzle.js';
+import type { OnboardingRepository } from '../modules/onboarding/repository.js';
+import { DrizzleOnboardingRepository } from '../modules/onboarding/repository.drizzle.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -61,6 +65,8 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  contextRepo?: ContextRepository;
+  onboardingRepo?: OnboardingRepository;
 }
 
 export class Container {
@@ -87,6 +93,8 @@ export class Container {
   private _conventionsRepo?: ConventionsRepository;
   private _smartDiffRepo?: SmartDiffRepository;
   private _blastRepo?: BlastRepository;
+  private _contextRepo?: ContextRepository;
+  private _onboardingRepo?: OnboardingRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -129,6 +137,16 @@ export class Container {
 
   get blastRepo(): BlastRepository {
     return (this._blastRepo ??= new DrizzleBlastRepository(this.db));
+  }
+
+  get contextRepo(): ContextRepository {
+    if (this.overrides.contextRepo) return this.overrides.contextRepo;
+    return (this._contextRepo ??= new DrizzleContextRepository(this.db));
+  }
+
+  get onboardingRepo(): OnboardingRepository {
+    if (this.overrides.onboardingRepo) return this.overrides.onboardingRepo;
+    return (this._onboardingRepo ??= new DrizzleOnboardingRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {

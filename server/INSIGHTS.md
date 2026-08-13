@@ -715,9 +715,91 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   authorship for the new write paths (AC-34–AC-53) is explicitly `test-
   writer`'s job next, not done here beyond the pre-existing suites passing.
 
+- 2026-08-14: SPEC-02 Onboarding Generator (plan
+  `docs/plans/spec-02-onboarding-generator.md`) server side, WI1-WI9 — new
+  `modules/onboarding/` (`facts.ts` for file I/O, pure `helpers.ts`,
+  `prompt.ts`, `service.ts`, `repository.ts`/`repository.drizzle.ts`,
+  `routes.ts`), generation-metadata columns added to `onboarding`
+  (migration `0017_sweet_rachel_grey.sql`, a clean single-pass `ADD COLUMN`
+  set — no interactive drizzle-kit prompt this time since nothing was
+  dropped/renamed, contrast the DROP+ADD workaround documented above),
+  `container.onboardingRepo`, and the previously-unloaded
+  `prompts/onboarding.system.md` finally wired via `renderPrompt`. `pnpm
+  arch:check` stays clean with the new module **not** added to
+  `PRE_EXISTING_MODULES` — confirmed the `conventions/service.ts` precedent
+  (importing `RepoRepository` from `modules/repos/repository.js` directly in
+  a non-exempt module's `service.ts`) is legitimate: dependency-cruiser's
+  `no-service-to-db` rule only matches DIRECT edges from `service.ts` to
+  `db/(schema|client)`, not transitive ones through another module's own
+  repository, so this pattern is arch-check-safe as long as the import
+  target isn't itself under `src/adapters/` or `src/db/`.
+- 2026-08-14: The onboarding table's generation-metadata columns
+  (`status`/`provider`/`model`/`tokensIn`/`tokensOut`/`costUsd`/`callCount`/
+  `indexSha`/`filesIndexed`/`indexStatus`) were modeled on `agentRuns`
+  (`db/schema/runs.ts`) field-for-field, INCLUDING its `doublePrecision`
+  (not `numeric`) for `costUsd` — simpler than `numeric`'s `{mode:'number'}`
+  config for the exact same `number | null` round-trip, and matches the
+  ALREADY-established codebase convention (`agent_runs`/`eval_runs`/
+  `ci_checks` all use `doublePrecision('cost_usd')`), not the plan's
+  literal-but-untested "numeric" suggestion. Metadata lives in dedicated
+  columns, never inside `onboarding.json`, specifically because the `json`
+  column must parse cleanly against the `Onboarding` zod contract
+  (`{sections}` only) on every read — a zod object silently strips unknown
+  keys, so metadata smuggled into `json` would be destroyed by that same
+  validation.
+- 2026-08-14: **`knowledge.ts` (both vendor copies) has pre-existing drift
+  UNRELATED to onboarding** — discovered while adding the new
+  `OnboardingStatus`/`OnboardingGenerationUsage`/`OnboardingTourResponse`
+  contracts, which had to be placed AFTER the `Provider` enum (referencing a
+  `const` before its declaration throws at module load, temporal dead
+  zone) rather than physically next to the existing `Onboarding`/
+  `OnboardingSection` block the plan pointed at. The client copy is missing
+  `AgentVersionConfig`/`AgentVersion` entirely and has shorter comments on
+  `Provider`/`CiFailOn` than the server copy — same "leave pre-existing
+  drift alone unless deliberately reconciling the whole file" rule this file
+  already documents for `trace.ts`. New content was appended at the very END
+  of both files (after each file's own existing tail) specifically so it
+  introduces ZERO new diff on top of that pre-existing drift — confirmed via
+  `git diff --no-index` before/after: the hunks are identical, nothing new.
+  Don't "fix" the older drift as a drive-by from a future onboarding session.
+- 2026-08-14: The `run_locally` section's model-authored markdown has NO
+  structured `commands[]` field — the shared `OnboardingSection` contract is
+  flat (`{kind,title,body,diagram,links}`), so AC-8's "every shell command
+  must be verbatim-matched or dropped" is enforced by regex-extracting
+  fenced-code-block (```) LINES from the markdown `body` and substring-
+  matching each trimmed line against the concatenated run-locally source
+  files — a whole fence collapses to nothing (removed entirely, not left as
+  an empty ` ``` ` pair) if every one of its lines fails to match. Inline
+  code spans (single backticks) are deliberately NOT put through this check
+  — treated as identifiers/short mentions, not full shell commands; only
+  fenced blocks are. If a future session needs finer-grained command
+  extraction, this is the seam (`groundRunLocallyBody`/`extractDeterministic
+  Commands` in `modules/onboarding/helpers.ts`), not a reason to add a
+  `commands[]` field to the shared contract without a product decision.
+- 2026-08-14: AC-12's "First tasks" complexity/difficulty badge could NOT be
+  built per-task-card as the reference design implies, because
+  `OnboardingSection` has no structured per-task array to attach a badge
+  to — only one flat markdown `body`. Implemented as ONE section-level badge
+  ("Model estimate", with a tooltip) on the `first_tasks` card instead of a
+  per-card badge — a deliberate, documented simplification given the
+  contract shape, not an oversight. If a later iteration wants true
+  per-task badges (Recommendation 4's rank-percentile alternative), that
+  needs a contract change (a structured `tasks[]` field) which is out of
+  this iteration's scope.
+
 ## Open Questions
 
 - Why does `depgraph.buildEdges` leave `file_edges` empty for the demo
   orders/public import graph even after a full index on the PR tip? Name-
   matched callers paper over it; proper `decl_file` resolution is still the
   right long-term fix.
+- 2026-08-14: `test/project-context-run.it.test.ts`'s "AC-22: the second of
+  two over-budget documents is dropped..." integration test fails
+  (`Cannot read properties of undefined (reading 'map')` on
+  `trace.project_context_docs`) on a clean run against this working tree —
+  confirmed PRE-EXISTING and unrelated to the SPEC-02 onboarding session
+  above via `git status` (zero changes from this session to
+  `project-context/**`, `run-executor.ts`, or `trace-builder.ts`; the latter
+  shows modified from an EARLIER uncommitted session, not this one). Left
+  unresolved — it belongs to whichever session left `trace-builder.ts` mid-
+  edit, not to onboarding.

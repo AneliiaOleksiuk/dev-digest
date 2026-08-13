@@ -1,16 +1,69 @@
 {
   "title": "Onboarding Tour",
-  "sections": "Sections",
-  "sectionCount": "{count} sections",
-  "regenerate": "Regenerate",
-  "regenerating": "Regenerating…",
-  "unknownError": "Unknown error",
-  "generate": {
-    "title": "Generate onboarding tour",
-    "body": "DevDigest indexes the repo and specs, then writes a 5-section guided tour: overview, architecture, key modules, getting started, and conventions & gotchas.",
-    "cta": "Generate onboarding tour",
-    "generating": "Generating…"
+  "crumb": "Onboarding Tour",
+  "sections": {
+    "architecture": "Architecture overview",
+    "critical_paths": "Critical paths",
+    "run_locally": "How to run locally",
+    "reading_path": "Guided reading path",
+    "first_tasks": "First tasks"
   },
+  "header": {
+    "generated": "Generated {time}",
+    "neverGenerated": "Not generated yet",
+    "filesIndexed": "{count} files indexed",
+    "filesIndexedPartial": "{count} files indexed (partial)",
+    "stale": "Stale — the index has moved since this tour was generated"
+  },
+  "cost": {
+    "label": "Last generation",
+    "callCount": "{count} model call",
+    "tokens": "{tokensIn} in / {tokensOut} out tokens",
+    "cost": "Cost: {cost}",
+    "noUsage": "No cost data yet"
+  },
+  "actions": {
+    "generate": "Generate onboarding tour",
+    "generating": "Generating…",
+    "regenerate": "Regenerate",
+    "regenerating": "Regenerating…",
+    "resync": "Re-analyze repo",
+    "export": "Export as Markdown",
+    "open": "Open"
+  },
+  "confirm": {
+    "title": "Regenerate the onboarding tour?",
+    "body": "This spends one paid model call, and replaces the tour every member of your workspace sees.",
+    "outboundNotice": "Repo excerpts (ranked files, README, package.json, critical paths) are sent to the configured model provider.",
+    "confirmCta": "Regenerate now",
+    "cancelCta": "Cancel"
+  },
+  "resyncNote": "Regenerating uses the current index and does not fetch new code. For a tour of the latest commits, re-analyze the repo first, then regenerate.",
+  "empty": {
+    "noClone": {
+      "title": "No local clone yet",
+      "body": "This repo has no local clone yet — clone it before generating an onboarding tour."
+    },
+    "notIndexed": {
+      "title": "Not indexed yet",
+      "body": "This repo has not been indexed yet — the tour below is built from a bounded file sample instead of the import graph."
+    },
+    "neverGenerated": {
+      "title": "No onboarding tour yet",
+      "body": "Generate a five-section tour: architecture overview, critical paths, how to run locally, guided reading path, and first tasks."
+    },
+    "llmFailed": {
+      "title": "Generation failed",
+      "body": "The last generation attempt failed. The previous tour, if any, is unchanged."
+    }
+  },
+  "section": {
+    "emptyFallback": "No content available for this section yet.",
+    "openAction": "Open on GitHub",
+    "firstTasksBadge": "Model estimate",
+    "firstTasksBadgeTooltip": "Task ordering is the model's own estimate, not a measured property."
+  },
+  "unknownError": "Unknown error",
   "loadError": {
     "title": "Couldn’t load the onboarding tour"
   }

@@ -1,24 +1,55 @@
 {
   "title": "Project Context",
-  "chunks": "{count} chunks",
-  "reindex": "Re-index",
-  "indexing": "Indexing…",
-  "resync": "Resync",
-  "resyncing": "Resyncing…",
-  "indexStatus": "Index status: {status}",
-  "loadError": "Couldn’t load specs",
-  "kb": "{kb}kb",
-  "empty": {
-    "title": "No spec files yet",
-    "body": "Drop your PRDs, tech specs, and acceptance criteria under .devdigest/specs/. Every agent and the PR brief read them as grounding context."
+  "crumbContext": "Project Context",
+  "summary": "{count} files indexed · ≈{tokens} tokens",
+  "tokens": "≈{tokens} tokens",
+  "searchPlaceholder": "Search documents…",
+  "usedByAgents": "Used by {count} agent(s)",
+  "coverage": {
+    "label": "{covered} of {total} documents attached to at least one agent"
   },
-  "mode": {
-    "preview": "preview",
-    "edit": "edit"
+  "missingBadge": "Missing from disk",
+  "outboundNotice": "Attached documents are sent to the model provider on every run of every agent that inherits them.",
+  "loadError": "Couldn’t load documents",
+  "preview": {
+    "placeholder": "Select a document to preview its content.",
+    "loadError": "Couldn’t load this document."
   },
-  "editor": {
-    "loadError": "Couldn’t load spec",
+  "edit": {
+    "toggleEdit": "Edit",
+    "toggleView": "Preview",
+    "dirty": "Unsaved changes",
+    "cancel": "Cancel",
     "save": "Save",
-    "saving": "Saving…"
+    "discardConfirm": "Discard unsaved changes?",
+    "writeNotice": "Save writes this file to the repo clone on disk — it does not commit or push anything.",
+    "conflict": "This document changed on disk since you opened it. Reload and try again.",
+    "saveError": "Couldn’t save this document."
+  },
+  "newDocument": {
+    "action": "New document",
+    "title": "New document",
+    "subtitle": "Creates a new .md file inside the repo clone. It appears on the page after the next discovery walk.",
+    "pathLabel": "Path",
+    "relativePlaceholder": "adr/0005-example",
+    "contentLabel": "Initial content",
+    "cancel": "Cancel",
+    "create": "Create",
+    "noRoots": "No configured search roots are available for this repo.",
+    "error": "Couldn’t create this document."
+  },
+  "resyncBlocked": {
+    "title": "Re-analyze is paused",
+    "message": "This repo's clone has uncommitted changes — commit or discard them using your own git tooling, then check again. DevDigest does not commit, discard, or push anything on your behalf.",
+    "checkAgain": "Check again"
+  },
+  "empty": {
+    "noClone": {
+      "title": "No local clone yet"
+    },
+    "zero": {
+      "title": "No documents found",
+      "body": "No .md files were found under specs/, docs/, or insights/ in this repo."
+    }
   }
 }

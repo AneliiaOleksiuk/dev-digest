@@ -27,7 +27,16 @@ export type {
   PrCommit,
   PrReviewComment,
   PrStatus,
-  SpecFile,
+  ContextDocument,
+  ContextListing,
+  ContextAttachment,
+  OtherRepoAttachment,
+  ContextAttachmentSet,
+  SetContextBody,
+  ContextDocumentContent,
+  SaveContextDocumentBody,
+  CreateContextDocumentBody,
+  ContextWriteResult,
   IndexStatus,
 } from "@devdigest/shared";
 

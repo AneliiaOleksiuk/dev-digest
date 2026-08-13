@@ -176,6 +176,21 @@ export interface GitCommit {
 export interface GitClient {
   clone(repo: RepoRef, url: string, opts?: CloneOptions): Promise<{ path: string }>;
   fetchPullHead(repo: RepoRef, n: number): Promise<void>;
+  /**
+   * Resync an already-cloned repo to the tip of `branch`: fetch from origin and
+   * advance the local working tree to `origin/<branch>`. Unlike `clone`'s bare
+   * `fetch` (which only moves remote-tracking refs), this moves local HEAD so a
+   * subsequent index reflects the latest code. Returns the new HEAD sha.
+   *
+   * PRECONDITION (SPEC-01 amendment, AC-50): checks `git status --porcelain
+   * --untracked-files=all` BEFORE any fetch/reset and throws `DirtyCloneError`
+   * (`adapters/git/errors.ts`) when the clone has uncommitted changes — an
+   * in-app document edit/creation lands directly in this working tree, and
+   * `reset --hard` would silently discard it otherwise. A clean clone gets
+   * byte-identical behaviour to before (AC-53): same fetch, same reset, same
+   * returned head, no additional network call.
+   */
+  sync(repo: RepoRef, branch: string): Promise<{ head: string }>;
   currentHead(repo: RepoRef): Promise<string>;
   diff(repo: RepoRef, base: string, head: string): Promise<UnifiedDiff>;
   blame(repo: RepoRef, path: string): Promise<BlameLine[]>;

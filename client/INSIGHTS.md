@@ -224,6 +224,39 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   auto-promote a single candidate — that's a deliberate batch-then-promote
   UX, not a missing feature.
 
+- **Context-tab search keeps already-attached rows visible (AC-11).**
+  `matchesQuery` in both Skill and Agent `ContextTab/helpers.ts` is a
+  plain-text path/type matcher only — do not make it attached-aware.
+  Visibility is `attachedSet.has(p) || matchesQuery(...)` at the filter
+  call site (Skill `ContextTab.tsx`; Agent: inherited rows are attached
+  via an enabled skill so they skip the query filter entirely; direct
+  rows use `directSet.has(p) || matchesQuery(...)`). Typing in the search
+  box must not call the persist mutate. A self-check that asserts an
+  attached non-matching path disappears is wrong under AC-11 — prove
+  narrowing with an *unattached* non-matching row instead.
+
+- **Project Context lives in WORKSPACE, not SKILLS LAB.** The 2026-08-13
+  session put the `nav.ts` `context` item in SKILLS LAB because WI9 said
+  "like conventions". That copied the wrong neighbour: Conventions is a
+  Skills Lab tool; the design's main screen puts Project Context next to
+  Pull Requests (WORKSPACE), and Skills Lab only gets it as a **tab** on
+  SkillPreview / AgentEditor (already wired). A later user correction
+  moved the sidebar item into WORKSPACE and changed the page breadcrumb
+  from `Skills Lab > Project Context` to `repo full_name > Project
+  Context` (same shape as `/repos/:repoId/pulls`). Do not move it back
+  under SKILLS LAB to "match conventions". Tab labels on Skill/Agent
+  should say "Project Context", not a generic "Context", so the lab
+  surface is recognisably the same feature.
+
+- **Agent editor `?tab=` allow-list must be derived from `TABS`, not a
+  second handwritten array.** `/agents/[id]/page.tsx` used to keep
+  `VALID_TABS = ["config", "skills"]` while `AgentEditor/constants.ts`
+  already listed a `context` tab. Clicking Project Context wrote
+  `?tab=context`, the page rejected it, and the editor snapped back to
+  Config — so the tab looked missing. `TAB_KEYS` is now `TABS.map(t =>
+  t.key)` and the page reads that. Adding a tab only to `TABS` (or only
+  to the page allow-list) will recreate this.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -497,3 +530,171 @@ _(to be filled in)_
   Client: `useSmartDiff` + `SmartDiffViewer` on the Files changed tab with
   Smart/Original order toggle. Zero token cost. The previous Open Question
   claiming Smart Diff "needs a new LLM-backed server endpoint" was wrong.
+
+- 2026-08-13: Project Context (SPEC-01, plan `docs/plans/spec-01-project-context.md`)
+  client side — new repo-scoped route `repos/[repoId]/context/`
+  (`ProjectContextView`: master list + search + read-only preview, exactly
+  "N files indexed · ≈X tokens" per AC-6, no chunk count anywhere), new
+  Context tabs on `SkillPreview` and `AgentEditor` (`_components/ContextTab/`
+  each — Skill's is a flat searchable attach list; Agent's has TWO groups,
+  inherited-from-enabled-skills read-only vs. attached-directly editable,
+  enabled-only everywhere per E-7), new `lib/hooks/context.ts`
+  (`useContextDocuments`/`useContextDocument`/`useSkillContext`/
+  `useSetSkillContext`/`useAgentContext`/`useSetAgentContext`/
+  `useSkillContexts` — the last via react-query's `useQueries` since the
+  Agent Context tab needs one parallel query per enabled linked skill, a
+  count that varies per agent/render), and a `runs.json` label change +
+  new Configuration-panel row (`TraceBody.tsx`) so the trace shows injected
+  project-context documents in a row distinct from "Specs read" (ADR-0003).
+  Rewrote the pre-authored-but-stale `messages/en/context.json` in the
+  Spec's favor (R-A of the plan) — this is the one deliberate exception to
+  this file's own "pre-authored copy is authoritative" rule from above,
+  because the pre-authored copy predated SPEC-01's explicit, user-approved
+  D-3/D-4/D-5 decisions (broader `specs/docs/insights/` scope, token total
+  not chunk count, preview-only not edit) and would have shipped a UI that
+  contradicted them.
+  **Two dead hooks replaced in place, not left beside new ones**:
+  `useContextFiles`/`useReindexContext` in `hooks/core.ts` called a
+  `/repos/:id/context/reindex` route that never existed server-side and
+  assumed the old `SpecFile` contract (now `ContextDocument`) — deleted
+  outright, per the Spec's own Non-goals (no re-index step in this feature).
+  `client/src/lib/hooks/repo-intel.ts:28`'s doc comment ("The caller
+  (ProjectContextView) owns when to stop polling…") is now DOUBLY stale, not
+  fixed: a real `ProjectContextView` exists now, but it's this session's
+  unrelated Project Context page — it does not consume `useIndexState`/
+  `useResyncRepoIntel` at all. Don't assume that comment describes the
+  current `ProjectContextView` if you go looking for the repo-intel
+  index-state consumer it originally promised; none exists yet.
+  **Nav vendor-do-not-touch exception used a 4th time**: added a `context`
+  key (`icon: "Folder"`, `gKey: "x"`) to `src/vendor/ui/nav.ts`'s SKILLS LAB
+  group, right after `conventions` — same sanctioned exception as the
+  Skills/Conventions/SKILLS-LAB-split entries already documented above. The
+  nav key had to be exactly `context` to match `activeKeyFor`
+  (`components/app-shell/helpers.ts:30`), which was already pre-wired for
+  `pathname.includes("/context")` before this session even added the page —
+  same "pre-authored code anticipates the intended UX" pattern this file
+  already documents for i18n JSON, this time in a helper function instead.
+  Verified: `tsc --noEmit` clean, full Vitest green (23 files / 94 tests,
+  up from 19/85 — 4 new self-check test files this session), `smoke.test.tsx`
+  still passes with the new nav entry. **Known gap, not implemented**:
+  WI11's "show attachments belonging to other repos of the workspace, marked
+  as not injected for runs on this repo" sub-requirement was skipped — the
+  server's `GET /agents/:id/context` is deliberately repo-scoped (a
+  `repo_id` query param is required), and no endpoint exists to list a
+  surface's attachments across every repo of the workspace. Building one
+  would have meant relaxing `ContextRepository.listFor`'s required `repoId`
+  param back to optional, which conflicts with the fix noted in
+  `server/INSIGHTS.md`'s same-date entry. Flagged for `plan-verifier`/a
+  follow-up work item rather than silently dropped.
+
+- 2026-08-13: SPEC-01 fix pass after test-writer — AC-11 search now keeps
+  already-attached (Skill) / inherited-or-direct-attached (Agent) rows
+  visible when the typed query does not match. See Codebase Patterns
+  above. The Skill self-check was updated to prove narrowing via an
+  unattached non-matching row so it no longer contradicts the oracle.
+
+- 2026-08-13: SPEC-01 plan-verifier fix-loop iteration 1 — WI11 other-repo
+  group is now implemented *without* a 7th HTTP endpoint. The 2026-08-13
+  session note above that called this a known gap is superseded:
+  `ContextAttachmentSet` gained `other_repo_documents` (default `[]`) on
+  the existing `GET /agents/:id/context?repo_id=`. Agent `ContextTab` renders
+  a third read-only group after inherited + direct, using `s.otherRepoBadge`
+  and i18n `context.otherRepoGroup` / `context.notInjected`. Those rows are
+  not counted in `effectiveTotalTokens`. Skill tab ignores the field.
+  Do not add a workspace-wide attachments endpoint, and do not make
+  `listFor`'s `repoId` optional, to surface this — `listForAll` on the
+  port is the server-side split.
+
+- 2026-08-13: Project Context IA correction — sidebar item moved from
+  SKILLS LAB to WORKSPACE (`nav.ts`); page breadcrumb is now
+  `repo full_name > Project Context` like Pull Requests, not
+  `Skills Lab > …`; SkillPreview and AgentEditor tab labels renamed
+  from "Context" to "Project Context". The attach tabs themselves were
+  already wired; they were just in the wrong information architecture
+  relative to the design. Do not resurrect the mockup's Edit toggle,
+  coverage ring, or `.devdigest/specs/` path — those remain SPEC-01
+  Non-goals.
+
+- 2026-08-13: SkillPreview Context tab was in `PREVIEW_TABS` but easy to
+  miss: it sat third after "Version History", the panel had `maxWidth:
+  640`, and the tab body returned `null` while queries loaded. Moved
+  Context to the second slot (Overview / Context / Version History),
+  dropped the maxWidth, labelled the tab "Context" to match the design,
+  and replaced the null load with `context.loading`. Same null-load
+  trap existed on the Agent Context tab.
+
+
+- 2026-08-13: Agent editor Context tab was implemented in `TABS` but
+  invisible in practice — `/agents/[id]/page.tsx` still allowed only
+  `config` and `skills` in `?tab=`. Clicking Project Context reset to
+  Config. Allow-list is now `TAB_KEYS` derived from `TABS`.
+
+- 2026-08-13 (later, SPEC-01 amendment AC-29–AC-53, plan
+  `docs/plans/spec-01-project-context-authoring.md`, WI6–WI10) — **the
+  2026-08-13 entry above ("Do not resurrect the mockup's Edit toggle,
+  coverage ring, or `.devdigest/specs/` path — those remain SPEC-01
+  Non-goals") is SUPERSEDED for the Edit toggle and coverage ring.** The
+  product owner's amendment moved both from Non-goals into scope (AC-29–
+  AC-40); the `.devdigest/specs/` path remains out of scope and that part of
+  the old entry still holds. Built: `ProjectContextView/helpers.ts`'s
+  `computeCoverage` (excludes `missing: true` from both numerator and
+  denominator, E-24; returns `null` on zero eligible documents so the
+  header renders nothing, AC-32) feeding a `CircularScore` in the SAME
+  `filtered` array the AC-6/AC-7 summary already uses (AC-31/UX-17 — one
+  filter path, not two); new `_components/DocumentPanel` owns its own
+  `useContextDocument`/`useSaveContextDocument` calls (moved out of
+  `ProjectContextView.tsx`, which now only passes `repoId`/`path`) and the
+  Preview/Edit toggle, dirty-state dot, and a 409-vs-generic-error message
+  split (`ApiError.status === 409` → "changed on disk, reload" per AC-37,
+  distinct from AC-39's generic write-failure text); new
+  `_components/NewDocumentDialog` (root `SelectInput` over the new
+  `ContextListing.roots` field, Rec-4, + relative-path `TextInput` +
+  `Textarea`, auto-appending `.md`, UX-16 — client-side convenience only,
+  the server still validates independently, D-12); new
+  `_components/ResyncBlockedNotice` (see below).
+  **`useContextDocument`'s return type widened in place** (now
+  `ContextDocumentContent` = `{ path, content, revision }` instead of an
+  inline `{ path, content }` — the `revision` field is AC-37's staleness
+  token, sent back on `PUT`). **A component that starts calling a new hook
+  breaks an EXISTING test file's `vi.mock`, not just new tests**:
+  `ProjectContextView.test.tsx`'s hand-rolled `vi.mock("@/lib/hooks/
+  context", ...)` had to gain `useSaveContextDocument` (DocumentPanel calls
+  it unconditionally) and a whole new `vi.mock("@/lib/hooks/repo-intel",
+  ...)` (ResyncBlockedNotice calls `useRepoIntelStatus`/
+  `useResyncRepoIntel` unconditionally) — without the second mock the test
+  crashed with "No QueryClient set", not an obviously-hook-related error,
+  because the REAL `useQuery` ran against a component tree with no
+  `QueryClientProvider`. When a new child component is wired into an
+  existing page under test, check every hook IT calls, not just the props
+  the parent passes it.
+  **Deep `_components/<X>/_components/<Y>/` nesting uses the `@/` alias for
+  real (non-test) imports, not the parent's long relative-path style** —
+  confirmed precedent: `_components/BlastRadiusCard/_components/BlastPanel/
+  BlastPanel.tsx` and `BlastTree.tsx` both import via `@/lib`/`@/components`
+  even though sibling top-level `_components/<X>/<X>.tsx` files (one level
+  shallower, e.g. `ProjectContextView.tsx` itself) use the 6-`../` relative
+  form. `DocumentPanel`/`NewDocumentDialog`/`ResyncBlockedNotice` (one level
+  deeper than `ProjectContextView.tsx`) followed the `@/` precedent rather
+  than computing an 8-`../` relative path by hand.
+  Clone-integrity UI: new `_components/ResyncBlockedNotice` reads
+  `useRepoIntelStatus(repoId)`'s `reason` field for a `dirty_clone:<paths>`
+  prefix (server-persisted per `server/INSIGHTS.md`'s same-date entry) and
+  renders it as an instruction (warn-colored banner, distinct from
+  `ErrorState`'s crit-red look — AC-52's "visually distinct from a
+  network/fetch failure") rather than a failure, with a "Check again" button
+  that calls `useResyncRepoIntel` — re-attempting the resync is NOT a commit
+  or discard action (Non-goals still hold; the app never runs git write
+  commands), it just lets the user make the blocked state re-evaluate after
+  fixing it externally. This is the hook's first real consumer — see the
+  correction to `hooks/repo-intel.ts:28`'s comment in the same commit (the
+  comment previously said no `ProjectContextView` consumer existed; it does
+  now, and the corrected comment names which component and why `poll` isn't
+  passed).
+  Verified: `tsc --noEmit` clean; full Vitest green (24 files / 102 tests,
+  including the pre-existing `smoke.test.tsx` `/showcase` render with every
+  vendored UI component — `CircularScore`/`Modal`/`SelectInput`/`Textarea`
+  usage here didn't break it). Test authorship for the new components (AC-
+  29–AC-53 client half) is `test-writer`'s job next; the 5 tests updated in
+  `ProjectContextView.test.tsx` this session were fixes to keep the
+  PRE-EXISTING self-check tests compiling/passing against the new hook
+  surface, not new coverage.

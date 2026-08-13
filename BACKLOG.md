@@ -16,6 +16,32 @@ decaying into vague hopes.
   SPEC-02 itself. Revisit once repo-intel supports it.
   — recorded 2026-08-13, `specs/SPEC-02-onboarding-generator.md` D-1/Q6.
 
+## repo-intel — import-graph extraction
+
+- **`depgraph.buildEdges` writes zero edges for real, import-heavy repos.**
+  Confirmed on `AneliiaOleksiuk/dev-digest`'s own indexed clone (repo id
+  `04f27d46-ee19-406a-9e6a-77befcb1f706`): a `full` reindex at commit
+  `48bc3af` reports `filesIndexed: 525`, `symbolsWritten: 1550`,
+  `referencesWritten: 12912`, and `edgesWritten: 0` in
+  `repo_index_state.stats`, with no `graphFailed` key — the graph build ran
+  to completion without throwing, it just found no import relationships in
+  a 5-package TypeScript monorepo that plainly has thousands. Direct DB
+  check confirms `file_edges` has 0 rows for this repo, and `file_rank` has
+  525 rows but only 1 distinct percentile (a flat, uninformative ranking —
+  `computeFileRank`'s own degenerate-graph fallback, `pipeline/rank.ts:39-47`).
+  Downstream effect discovered via SPEC-02: `getCriticalPaths` returns `[]`
+  and the Onboarding Generator's own `flatRank` detection (`facts.ts:100`,
+  E-4) correctly refuses to present the flat rank as importance order — so
+  the feature degraded honestly, but the root cause is upstream. Suspect
+  area: `container.depgraph.buildEdges` (adapter, not indexed in this
+  session) possibly mishandling this repo's 5-separate-tsconfig,
+  no-workspace layout or its `@/` / cross-package import aliases. Needs
+  investigation in `repo-intel`/`adapters/depgraph` — starter infrastructure
+  no course lesson is meant to modify, so flagged here rather than fixed
+  inline.
+  — recorded 2026-08-14, found while manually verifying SPEC-02's
+  Onboarding Tour page against the live app.
+
 ## SPEC-01 — Project Context
 
 Flagged by `plan-verifier`'s Phase 1 as "required fixes," all pre-existing

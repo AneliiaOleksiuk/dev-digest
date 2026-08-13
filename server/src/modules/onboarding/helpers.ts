@@ -214,29 +214,60 @@ export interface DeterministicCommand {
 
 /** Deterministic "how to run locally" commands, with NO model: `package.json`
  *  scripts (attributed to their file), plus verbatim fenced-code lines from
- *  README/compose/`.env.example` (E-7, AC-8, AC-34). */
+ *  README/compose/`.env.example` (E-7, AC-8, AC-34).
+ *
+ *  Grouped per source, then interleaved round-robin (first command from
+ *  every source, then second from every source, ...) rather than
+ *  concatenated source-by-source — finding from manual verification: this
+ *  repo has 5 packages, and `client/package.json` alone has 5 scripts, so a
+ *  flat concatenation exhausts `MAX_RUN_LOCALLY_STEPS` before
+ *  `server/package.json` is ever reached. Round-robin guarantees every
+ *  discovered source contributes at least one command before any source's
+ *  later scripts do, as long as the step cap is at least the source count
+ *  (it is: 10 vs this repo's 5). */
 export function extractDeterministicCommands(sources: FileExcerpt[]): DeterministicCommand[] {
-  const out: DeterministicCommand[] = [];
+  const bySource: DeterministicCommand[][] = [];
   for (const source of sources) {
+    const commands: DeterministicCommand[] = [];
     if (source.path.endsWith('package.json')) {
       try {
         const pkg = JSON.parse(source.content) as { scripts?: Record<string, string> };
         for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
-          out.push({ command: `npm run ${name}  # ${script}`, source: source.path });
+          commands.push({ command: `npm run ${name}  # ${script}`, source: source.path });
         }
       } catch {
         // unparseable package.json — no scripts to extract, never throw
       }
-      continue;
-    }
-    for (const match of source.content.matchAll(FENCE_RE)) {
-      const code = match[2] ?? '';
-      for (const line of code.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
-        out.push({ command: trimmed, source: source.path });
+    } else {
+      for (const match of source.content.matchAll(FENCE_RE)) {
+        const code = match[2] ?? '';
+        for (const line of code.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+          commands.push({ command: trimmed, source: source.path });
+        }
       }
     }
+    if (commands.length > 0) bySource.push(commands);
+  }
+  return interleaveRoundRobin(bySource);
+}
+
+/** `[[a1,a2,a3],[b1],[c1,c2]]` → `[a1,b1,c1,a2,c2,a3]` — one item from every
+ *  still-non-empty group per round, in group order, until all are drained. */
+function interleaveRoundRobin<T>(groups: T[][]): T[] {
+  const out: T[] = [];
+  let round = 0;
+  let remaining = groups.some((g) => g.length > 0);
+  while (remaining) {
+    remaining = false;
+    for (const group of groups) {
+      if (round < group.length) {
+        out.push(group[round]!);
+        if (round + 1 < group.length) remaining = true;
+      }
+    }
+    round += 1;
   }
   return out;
 }

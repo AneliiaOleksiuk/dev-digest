@@ -146,4 +146,82 @@ describe("ProjectContextView", () => {
     // …with a "missing from disk" badge distinguishing it from a normal row.
     expect(screen.getByText("Missing from disk")).toBeInTheDocument();
   });
+
+  // test-writer addition — AC-29/AC-31/AC-32 (SPEC-01 amendment, WI7): the
+  // coverage indicator, computed over the SAME filtered array as the AC-6/
+  // AC-7 summary (UX-17), rendered via CircularScore's plain numeric score.
+  // Oracle: AC-29 ("4 present, 3 used → 75%"), AC-31 (recomputes with the
+  // filter), AC-32 (zero eligible documents → no percentage, never 0/NaN).
+  it("AC-29: coverage renders as a percentage of listed (non-missing) documents with used_by_agents > 0", () => {
+    const listing = {
+      documents: [
+        { path: "a.md", source_folder: "docs", type: "md", tokens: 10, bytes: 40, used_by_agents: 1, missing: false },
+        { path: "b.md", source_folder: "docs", type: "md", tokens: 10, bytes: 40, used_by_agents: 2, missing: false },
+        { path: "c.md", source_folder: "docs", type: "md", tokens: 10, bytes: 40, used_by_agents: 0, missing: false },
+        { path: "d.md", source_folder: "docs", type: "md", tokens: 10, bytes: 40, used_by_agents: 5, missing: false },
+        { path: "gone.md", source_folder: "", type: "md", tokens: 0, bytes: 0, used_by_agents: 1, missing: true },
+      ],
+      total_tokens: 40,
+      total_files: 5,
+      degraded_reason: null,
+      roots: ["specs", "docs", "insights"],
+    };
+    useContextDocuments.mockReturnValue({ data: listing, isLoading: false, isError: false, refetch: vi.fn() });
+    useContextDocument.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+
+    renderView();
+
+    expect(screen.getByText("75")).toBeInTheDocument();
+    expect(screen.getByText("3 of 4 documents attached to at least one agent")).toBeInTheDocument();
+  });
+
+  it("AC-31: typing a filter recomputes the coverage indicator together with the summary, over the SAME filtered subset", () => {
+    useContextDocuments.mockReturnValue({ data: LISTING, isLoading: false, isError: false, refetch: vi.fn() });
+    useContextDocument.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+
+    renderView();
+    // Before filtering: LISTING has 2 docs, 1 with used_by_agents > 0 → 50%.
+    expect(screen.getByText("50")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Search documents…"), { target: { value: "adr" } });
+
+    // After filtering to just the "adr" doc (used_by_agents: 1) → 100%.
+    expect(screen.getByText("100")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 documents attached to at least one agent")).toBeInTheDocument();
+    expect(screen.queryByText("50")).not.toBeInTheDocument();
+  });
+
+  it("AC-32/E-24: a listing of ONLY missing:true documents renders no coverage percentage (not 100%, not an error)", () => {
+    const listing = {
+      documents: [
+        { path: "gone-1.md", source_folder: "", type: "md", tokens: 0, bytes: 0, used_by_agents: 1, missing: true },
+        { path: "gone-2.md", source_folder: "", type: "md", tokens: 0, bytes: 0, used_by_agents: 3, missing: true },
+      ],
+      total_tokens: 0,
+      total_files: 2,
+      degraded_reason: null,
+      roots: ["specs", "docs", "insights"],
+    };
+    useContextDocuments.mockReturnValue({ data: listing, isLoading: false, isError: false, refetch: vi.fn() });
+    useContextDocument.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+
+    renderView();
+
+    expect(screen.queryByText(/documents attached to at least one agent/)).not.toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("AC-32/E-14: the zero-documents empty state renders no coverage indicator either", () => {
+    useContextDocuments.mockReturnValue({
+      data: { documents: [], total_tokens: 0, total_files: 0, degraded_reason: null, roots: ["specs", "docs", "insights"] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    useContextDocument.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+
+    renderView();
+
+    expect(screen.queryByText(/documents attached to at least one agent/)).not.toBeInTheDocument();
+  });
 });

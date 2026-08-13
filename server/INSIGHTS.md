@@ -87,6 +87,34 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the new `critical_count`/`warning_count`/`suggestion_count` fields added
   2026-07-30 — they're the severity breakdown of that SAME latest review,
   not summed across every agent/run on the PR.
+- **`pnpm arch:check` (dependency-cruiser) only matches specific filenames
+  — constructing a sibling module's concrete repository/adapter from
+  inside a service passes it while still violating onion in substance
+  (2026-08-14).** `.dependency-cruiser.cjs`'s four rules (`no-service-to-db`
+  etc.) match `service.ts`/`routes.ts`/`helpers.ts` by name. `new
+  RepoRepository(container.db)` called from `modules/onboarding/service.ts`
+  (to look up a sibling module's row) is service→service on paper — the
+  import path is `../repos/repository.js`, not `../../db/*` — so
+  `arch:check` reports clean, even though transitively that pulls
+  `drizzle-orm` and `src/db/schema` into the application layer exactly the
+  way the rule exists to prevent. `plan-verifier`'s Phase 2 caught this
+  reading the actual import graph, not the tool output. Same pattern
+  already exists at `modules/conventions/service.ts:56`, also unexempt and
+  also passing `arch:check`. If a new module needs data another module
+  owns, put the read behind that module's own port/facade (the way
+  `repoIntel.*` is meant to be consumed) rather than constructing its
+  concrete repository class directly — `arch:check` won't catch the
+  shortcut for you.
+- **A module's file-I/O layer (the `facts.ts`/`discover.ts`-shaped file
+  that keeps `helpers.ts` pure per the onion convention) is invisible to
+  every `arch:check` rule (2026-08-14).** The four dependency-cruiser
+  rules match only `service.ts`/`routes.ts`/`helpers.ts` by filename —
+  `modules/onboarding/facts.ts` (which does real `node:fs/promises` I/O
+  and takes the whole `Container`) is checked by none of them. Not a bug
+  in this session's code, but worth knowing before assuming a green
+  `arch:check` means every file in a new module was actually held to the
+  boundary rules — it means every file *matching one of the four regexes*
+  was.
 
 ## Codebase Patterns
 
@@ -489,6 +517,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   migration file by fighting the prompt. Used for the `conventions` table's
   `accepted` boolean → `category`/`status`/`skill_id` migration, 2026-08-02.
 
+- **`pnpm db:generate` writes three artifacts, not one — commit all three
+  together or the migration silently doesn't exist on a fresh checkout
+  (2026-08-14).** It writes the migration SQL file
+  (`src/db/migrations/NNNN_*.sql`), updates
+  `src/db/migrations/meta/_journal.json` to register it, and writes a new
+  `src/db/migrations/meta/NNNN_snapshot.json`. `drizzle`'s `migrate()`
+  (`src/db/migrate.ts`) reads `_journal.json` to know which migrations to
+  run — if only the `.sql` file gets `git add`ed/committed and the journal/
+  snapshot changes are left uncommitted (easy to miss: they're two levels
+  deep in `meta/` and don't look like "the migration" at a glance), a
+  fresh `pnpm db:migrate` on another checkout silently skips that
+  migration entirely, with no error. Caught by `plan-verifier`'s Phase 1
+  for the Onboarding Generator's 0017 migration — the columns existed on
+  the session's own disk (already migrated there) but the committed tree
+  couldn't produce them. Always `git status` the whole
+  `src/db/migrations/` tree (not just the `.sql` file you expect) after
+  `pnpm db:generate`, and stage the journal + every new/changed snapshot
+  alongside the migration in the same commit.
+
 ## Session Notes
 
 - 2026-08-01: Added `.claude/skills/onion-architecture` skill (forces
@@ -793,6 +840,23 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   orders/public import graph even after a full index on the PR tip? Name-
   matched callers paper over it; proper `decl_file` resolution is still the
   right long-term fix.
+  **Confirmed still broken on a real, large repo, with numbers (2026-08-14):**
+  this is not specific to the small `orders`/`public` demo fixture. Direct
+  DB query against `AneliiaOleksiuk/dev-digest`'s own indexed clone (repo
+  id `04f27d46-ee19-406a-9e6a-77befcb1f706`, a `full` index at commit
+  `48bc3af`, `repo_index_state.stats`: `filesIndexed: 525`,
+  `symbolsWritten: 1550`, `referencesWritten: 12912`) shows `file_edges`
+  has **0 rows**, with no `graphFailed` key in `stats` — `buildEdges` ran
+  to completion without throwing, it just found no import relationships in
+  a real 5-package TypeScript monorepo that plainly has thousands.
+  `file_rank` has 525 rows but only 1 distinct percentile (the degenerate-
+  graph fallback in `pipeline/rank.ts:39-47` correctly kicking in given
+  zero edges). Discovered downstream via the Onboarding Generator (SPEC-02)
+  while manually verifying the live "Critical paths" section, which
+  correctly reported "no usable import graph" rather than presenting the
+  flat rank as real — so the symptom is now reproducible from a live
+  feature, not just a DB query, if that helps debugging. Recorded in
+  `BACKLOG.md` under "repo-intel — import-graph extraction".
 - 2026-08-14: `test/project-context-run.it.test.ts`'s "AC-22: the second of
   two over-budget documents is dropped..." integration test fails
   (`Cannot read properties of undefined (reading 'map')` on

@@ -320,7 +320,55 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
 
 ## Recurring Errors & Fixes
 
-_(to be filled in)_
+- **A native `<select>`'s open dropdown popup renders unreadable
+  light-on-white text if the `<select>`'s own `background` is
+  `"transparent"` (2026-08-13).** `src/vendor/ui/kit/SelectInput.tsx` had
+  `background: "transparent"` on the `<select>` with no color set on its
+  `<option>` elements. The **closed** box looks fine (inherits the parent
+  div's dark background), but the browser paints the **open popup** using
+  the `<select>` element's own `background-color` — "transparent" falls
+  back to the OS/browser default (white) — so combined with the light
+  `--text-primary` color, every option was invisible until clicked at
+  random. Symptom as reported by a user: "can't select anything / nothing
+  seems clickable" — it wasn't a click-handling bug, the options were
+  simply unreadable. Fix: set an explicit `background` (e.g.
+  `var(--bg-elevated)`) on both the `<select>` and every `<option>`, not
+  just `color`. Verified via a real headless-Chromium screenshot of the
+  opened dropdown (not just reading the CSS) — this class of bug is easy
+  to miss by code review alone since the closed state looks correct.
+- **A bare `gridTemplateColumns: "1fr 1fr"` lets one column's unbreakable
+  content collapse its sibling to one character per line when combined
+  with `wordBreak: "break-all"` (2026-08-13).** Found in two places
+  independently (`app/skills/_components/SkillPreview/_components/
+  ContextTab/styles.ts` and the equivalent Agent Context tab) — selecting
+  an item with long preview content (a code block, a long URL) squeezed
+  the sibling list column down to a single character per row. Root cause:
+  a bare `1fr` grid track's `min-width` defaults to `auto`, i.e. its
+  content's min-content size — if the *other* column's content can't
+  shrink below some width (unbreakable text), the grid steals space from
+  the column that *can* shrink, and `wordBreak: break-all` lets that
+  shrinkage go all the way to single characters. Fix: always use
+  `minmax(0, 1fr)` instead of bare `1fr` for a two-column grid where
+  either side might hold long/unbreakable content — forces genuinely equal
+  track sizing regardless of content, each side then scrolls/wraps
+  internally instead of stealing from its sibling.
+- **Next.js dev server can serve a stale/confused bundle with zero console
+  errors after many new files are added while it's still running
+  (2026-08-13).** After an `implementer` agent added ~15 new component/
+  hook files to a running `pnpm dev` session, the live page got stuck
+  showing only its loading skeletons forever (3 `<Skeleton>` bars, no
+  content, no error) — reproducible via a real Playwright screenshot, not
+  just user report. `rm -rf client/.next` + restarting `pnpm dev` fixed
+  it (confirmed via a clean recompile log,
+  `✓ Compiled /repos/[repoId]/context in 586ms`). Cheap first thing to try
+  whenever a live page behaves inexplicably (stuck loading, partial
+  render) right after a session added a lot of new files to a dev server
+  that was never restarted — before spending time debugging application
+  code. Note: this was **not** the actual root cause of the bug report
+  that prompted it — the app relaunching fixed the caching symptom, but
+  the user's other complaints (unreadable dropdown, collapsed grid column)
+  turned out to be the two real bugs above, only discoverable once the
+  stale-bundle red herring was ruled out first.
 
 ## Session Notes
 

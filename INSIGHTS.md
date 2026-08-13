@@ -16,7 +16,26 @@ _(to be filled in)_
 
 ## What Doesn't Work
 
-_(to be filled in)_
+- **A Claude Code subagent calling `AskUserQuestion` does not get a live
+  answer (2026-08-14).** `implementation-planner` and `spec-creator` both
+  had explicit "call `AskUserQuestion`" instructions and, across four
+  separate invocations this session, none of them actually invoked it
+  interactively — every one instead wrote its questions as prose in the
+  final chat report and proceeded on its own best guess. One instance
+  said so directly in its own report: *"AskUserQuestion недоступний
+  усередині субагента, тому я записав рішення як припущення."* A subagent
+  spawned via the `Agent` tool runs non-interactively — it completes a
+  turn and returns a result, it cannot pause mid-run for a human reply —
+  so instructing it to "call AskUserQuestion" asks for something the
+  runtime doesn't support, regardless of how explicit the wording is.
+  **Fixed:** both personas (+ all 6 tool mirrors) now use a `## Blocking
+  questions` section instead — stop before guessing, end the response
+  with a structured question list in the same shape `AskUserQuestion`
+  itself takes (header/question/2-4 labeled options), and don't write the
+  plan/spec until resumed with the answers via a follow-up message. See
+  `agents/implementation-planner.md`/`agents/spec-creator.md`'s "Blocking
+  questions" section for the exact contract. Chat-native tools (Cursor,
+  Codex) were never affected — there, asking was already a normal reply.
 
 ## Codebase Patterns
 
@@ -28,6 +47,42 @@ _(to be filled in)_
   reason — no workspace, no publish step. The trade-off is real drift risk
   (`server/src/vendor/shared/adapters.ts` still has a stale `apps/api/` path
   comment from whatever repo it was copied from) with no tooling to catch it.
+- **`implementer`'s self-check split into per-item typecheck + one "Final
+  self-check" (2026-08-12):** `agents/implementer.md` (+ 3 mirrors) used to
+  run the full test suite and typecheck after *every* work item — for a
+  5-item plan touching one package that's 5× full `vitest run` + 5× `tsc`
+  output tokenized into context. Now: per-item is typecheck-only (cheap,
+  short output on success), the full test suite runs once at the end under
+  a new "Final self-check" section, with a quiet reporter
+  (`--reporter=dot`) on the first pass. Trade-off accepted deliberately: a
+  regression from an earlier work item may only surface at the end instead
+  of immediately after the item that caused it — token savings over
+  per-item fast feedback.
+- **`plan-verifier` now reads `test-writer`'s Test Report, not just
+  `implementer`'s (2026-08-12):** previously `test-writer`'s `Behavior
+  mismatches found` section (bugs caught via its independent test oracle)
+  had no defined downstream consumer — `plan-verifier`'s input contract
+  (`agents/plan-verifier.md` Hard constraints) only listed `implementer`'s
+  report. Fixed: a non-empty `Behavior mismatches found` entry is now a
+  required Phase 1 traceability row (own `MET`/`NOT MET`/`NOT VERIFIED`
+  verdict, evidence gathered independently — same context-decoupling rule,
+  never trusted as evidence on its own) and a confirmed mismatch loops back
+  to `implementer` exactly like a Phase 1 `FAIL`, per `agents/README.md`'s
+  handoff-chain bullet list. Note the ordering this depends on:
+  `test-writer` still runs *before* `plan-verifier` (unchanged) — Phase 1's
+  re-run of the plan's `Test plan` commands already incidentally exercises
+  test-writer's newly-added test files, so this fix formalizes what was
+  already happening mechanically into an explicit traceability item.
+- **`BACKLOG.md` (root, added 2026-08-14) tracks deferred follow-ups found
+  mid-task** — real, concrete, out-of-scope issues discovered while
+  executing an assigned task (a `plan-verifier` finding that's pre-existing
+  and unrelated to the plan under review, a bug in starter infrastructure
+  no lesson is meant to touch, a design decision explicitly deferred to a
+  later pass). Not a roadmap or a wishlist — every entry cites the task it
+  was found during and the exact file(s)/AC/commit involved, same
+  evidence discipline as everything else this repo's agent chain produces.
+  Distinct from `INSIGHTS.md`: this file is "things to do later," these
+  files are "things to know now."
 
 ## Tool & Library Notes
 
@@ -69,6 +124,21 @@ _(to be filled in)_
   `agents/README.md`'s directory list ever changes again, grep root
   `AGENTS.md` for the old paths too — nothing keeps the two in sync
   automatically.
+- **`git commit` with no pathspec commits the WHOLE staged index, not just
+  what you `git add`ed in the current call (2026-08-13).** After `git add
+  specs/SPEC-01-project-context.md` followed by plain `git commit -m
+  "..."`, the resulting commit unexpectedly included 4 unrelated file
+  renames (`planner.md` → `implementation-planner.md` across `.claude/`,
+  `.codex/`, `.cursor/`, `agents/`) that had been staged in an earlier,
+  separate piece of work and were still sitting in the index. `git commit`
+  commits the full index by default — `git add` only adds to it, it
+  doesn't scope the next `commit` call. **Fix used afterward:** `git
+  commit -- <exact paths>` (or `git commit <exact paths>`, no `--` needed)
+  commits only those paths and leaves the rest of the index staged for a
+  later commit, without needing to `git reset` first. Always check `git
+  status`/`git diff --cached --stat` immediately before a commit intended
+  to be narrowly scoped, especially in a long session where earlier
+  `git add` calls (yours or a prior session's) may still be pending.
 
 ## Session Notes
 
@@ -127,7 +197,8 @@ _(to be filled in)_
   assembly docs in `docs/agent-prompts/README.md`.
 
 - 2026-08-07: Cut token cost of the `agents/` dev-subagent chain
-  (planner → implementer → test-writer → plan-verifier → doc-writer),
+  (planner → implementer → test-writer → plan-verifier → doc-writer;
+  `planner` renamed `implementation-planner` 2026-08-12, see below),
   purely repo-tooling, zero product code touched. Four changes, in order
   of what actually moved the needle:
   1. **Dropped GitHub Copilot mirroring entirely** — `.github/agents/`
@@ -157,7 +228,7 @@ _(to be filled in)_
      diff arrives inlined or self-fetched. Self-fetching remains the
      fallback when nothing was inlined, so every agent still works
      standalone.
-  4. **Shortened static boilerplate** in `planner`/`implementer`'s report
+  4. **Shortened static boilerplate** in `planner`(now `implementation-planner`)/`implementer`'s report
      formats (the "Explicitly out of scope"/"Out of scope (deferred)"
      sections were restating the same fixed list every single run) to a
      one-line pointer at `agents/README.md`#handoff-chain.
@@ -204,6 +275,108 @@ _(to be filled in)_
   with a non-zero exit as expected, then was fully reverted (`git diff`
   confirmed clean) before finishing. See the Tool & Library Notes entry
   above for the `.bin` shim nuance this surfaced.
+
+- 2026-08-12: Renamed `planner` → `implementation-planner` across all four
+  files (canonical `agents/` + three tool mirrors) plus every cross-referencing
+  file (`agents/README.md` and its three mirrors, `agents/implementer.md`,
+  `agents/doc-writer.md`, `agents/plan-verifier.md`, and their mirrors) —
+  not just a label change: the persona now explicitly never authors, edits,
+  or completes anything under `specs/`, closing a real ambiguity where
+  `doc-writer.md` described `specs/` as `human/planner`-owned (implying
+  shared ownership). It's now `human-owned` only. Two new required steps
+  were added to the persona: a "Requirements review" step (read `specs/*.md`
+  if one exists, ask about gaps, and surface a `Recommendations` section —
+  not just transcribe the request) and an "Execution mode" question, asked
+  once before saving the plan, choosing multi-agent (full handoff chain) vs.
+  single-agent (one pass, no downstream agents) — the choice is recorded
+  under `Scope` in the Development Plan report so `implementer` doesn't have
+  to guess it. Historical dated entries above (2026-08-07) were left as
+  `planner` with an inline rename note rather than rewritten, since they
+  describe what was true at that time.
+  **Concurrent-work note:** mid-session, untracked `agents/spec-creator.md`
+  (+3 mirrors) appeared — a new agent, apparently authored in a parallel
+  session, that owns `specs/` as the *one* automated writer of it (SDD:
+  `spec-creator` → `implementation-planner` → `implementer` → ...). Its
+  `planner`-era references were updated to `implementation-planner` too,
+  and it independently converged on citing this session's new
+  "Not responsible for: specifications" section almost verbatim — treat
+  `spec-creator.md` as the authoritative owner of the `specs/` template/
+  workflow going forward, not something this entry's author designed.
+
+- 2026-08-12: Audited the SDD agent chain
+  (`spec-creator` → `implementation-planner` → `implementer` → `test-writer`
+  → `plan-verifier` → `doc-writer`) on user request and made two targeted
+  changes across canonical `agents/*.md` + all 9 mirror files (`.claude/`,
+  `.codex/`, `.cursor/` × `implementer`/`plan-verifier`, plus 3 `README.md`
+  files): (1) `implementer`'s test/typecheck self-check moved from
+  per-work-item to once-at-the-end, to cut token cost of re-running full
+  suites repeatedly; (2) `plan-verifier`'s input contract now explicitly
+  includes `test-writer`'s Test Report, with a required Phase 1
+  traceability row for any `Behavior mismatches found` and an explicit
+  loop-back rule. See the two new Codebase Patterns entries above for the
+  full rationale. Confirmed during the audit: the existing order
+  (`test-writer` before `plan-verifier`, not after) should stay as-is — no
+  change made there, just documented why.
+
+- 2026-08-13: Project Context (SPEC-01) built server+client per
+  `docs/plans/spec-01-project-context.md` (WI1–WI12 of 13; WI13 — live
+  grounding verification on PR #3 — deliberately not attempted this session,
+  see below). Makes a repo's own `specs/`/`docs/`/`insights/` Markdown
+  discoverable, attachable to a Skill or Agent, and injected into the
+  already-existing `PromptParts.specs` prompt slot at run time —
+  `reviewer-core/` untouched throughout (confirmed via `git diff --stat`).
+  Package detail in `server/INSIGHTS.md` and `client/INSIGHTS.md` (2026-08-13
+  entries). Cross-cutting takeaway: extending a Zod contract with a new
+  non-optional-with-`.default()` field (here, `RunTrace.project_context_docs`)
+  ripples into every hand-typed object literal built against that schema's
+  *output* type, not just its `.parse()` call sites — on both the server
+  (`platform/trace-builder.ts`) and the client (a test fixture) this session,
+  confirming the same pattern `server/INSIGHTS.md` already recorded for
+  `PrIntentRecord`/`risk_areas`.
+  **WI13 status**: Docker/Postgres was confirmed running this session
+  (`docker ps`), but WI13's own approval gate — explicit human confirmation
+  of the exact diff before pushing a commit to the real, shared
+  `AneliiaOleksiuk/dev-digest#3` PR branch — could not be obtained within a
+  single agent turn, so no push, no live LLM run, and no `eval_cases`/
+  `eval_runs` rows were attempted. Reported as a blocked work item, not done
+  and not silently skipped, per the plan's own instruction for this case.
+
+- 2026-08-13: SPEC-01 plan-verifier fix-loop iteration 1 — four Phase-1
+  NOT MET rows plus one approved Phase-2 Major. Cross-cutting: (1) vendored
+  `trace.ts` comment drift (`T1.3`/`T3` vs `repo-intel`) is now reconciled
+  by copying server comments onto client — `git diff --no-index` of the two
+  files must stay empty; the older "don't fix this as a drive-by" note in
+  `server/INSIGHTS.md` still applies to *unrelated* work. (2) Extending
+  `ContextAttachmentSet` with `other_repo_documents: z.array(…).default([])`
+  lets the Agent Context tab show other-repo attachments without a 7th
+  HTTP endpoint; `.default([])` keeps Skill-tab fixtures parsing. Same
+  `z.infer` output-type ripple as `project_context_docs` — test mocks that
+  hand-build the object need the new field.
+
+- 2026-08-14: Full SDD pipeline run for two features in one long session.
+  **Track A** — amended SPEC-01 with three new decisions (coverage
+  indicator, in-app document editing with a write-back-to-working-copy
+  ADR, manual document creation), ran the whole chain (spec → plan → code
+  → tests → plan-verifier PASS WITH REQUIRED FIXES, all three fixes
+  pre-existing/out-of-scope, deferred to `BACKLOG.md` → docs), pushed
+  `L05-SDD` merged into `main` on `origin` (the user's fork) so a
+  resynced repo clone could actually see the new specs/plans for live
+  testing. **Track B** — wrote SPEC-02 (Onboarding Generator) grounding
+  a feature request against already-shipped-but-unwired scaffolding
+  (`onboarding` table, `Onboarding*` contracts, a `FEATURE_MODELS` slot,
+  a system prompt template, two unused `repoIntel` facade methods), ran
+  the same chain through `plan-verifier`, which returned **VERDICT: FAIL**
+  with 7 real findings (most severe: the Drizzle migration journal/
+  snapshots were never committed, so the feature's DB columns don't exist
+  on a fresh checkout) — captured as
+  `docs/plans/spec-02-onboarding-generator-fixes.md` for the next
+  fix-loop iteration rather than fixed same-session. Found and fixed two
+  live bugs outside the plan via direct manual verification in a real
+  browser (`client/INSIGHTS.md`, `server/INSIGHTS.md` have the specifics)
+  and one confirmed pre-existing `repo-intel` bug (`depgraph.buildEdges`
+  writes zero edges for a real, import-heavy repo — `BACKLOG.md`). Also
+  fixed the `AskUserQuestion`-in-subagents problem across both planner
+  personas (see What Doesn't Work) after the user noticed the pattern.
 
 ## Open Questions
 

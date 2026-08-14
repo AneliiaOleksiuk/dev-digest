@@ -39,6 +39,10 @@ import type { ContextRepository } from '../modules/project-context/repository.js
 import { DrizzleContextRepository } from '../modules/project-context/repository.drizzle.js';
 import type { OnboardingRepository } from '../modules/onboarding/repository.js';
 import { DrizzleOnboardingRepository } from '../modules/onboarding/repository.drizzle.js';
+import type { BriefRepository } from '../modules/brief/repository.js';
+import { DrizzleBriefRepository } from '../modules/brief/repository.drizzle.js';
+import type { BriefSources } from '../modules/brief/sources.js';
+import { NodeBriefSources } from '../modules/brief/sources.node.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -67,6 +71,8 @@ export interface ContainerOverrides {
   tokenizer?: Tokenizer;
   contextRepo?: ContextRepository;
   onboardingRepo?: OnboardingRepository;
+  briefRepo?: BriefRepository;
+  briefSources?: BriefSources;
 }
 
 export class Container {
@@ -95,6 +101,8 @@ export class Container {
   private _blastRepo?: BlastRepository;
   private _contextRepo?: ContextRepository;
   private _onboardingRepo?: OnboardingRepository;
+  private _briefRepo?: BriefRepository;
+  private _briefSources?: BriefSources;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -147,6 +155,16 @@ export class Container {
   get onboardingRepo(): OnboardingRepository {
     if (this.overrides.onboardingRepo) return this.overrides.onboardingRepo;
     return (this._onboardingRepo ??= new DrizzleOnboardingRepository(this.db));
+  }
+
+  get briefRepo(): BriefRepository {
+    if (this.overrides.briefRepo) return this.overrides.briefRepo;
+    return (this._briefRepo ??= new DrizzleBriefRepository(this.db));
+  }
+
+  get briefSources(): BriefSources {
+    if (this.overrides.briefSources) return this.overrides.briefSources;
+    return (this._briefSources ??= new NodeBriefSources(this));
   }
 
   get reviewRepo(): ReviewRepository {

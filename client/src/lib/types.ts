@@ -52,6 +52,20 @@ export { ONBOARDING_SECTION_KINDS } from "@devdigest/shared";
 export type { Review, Finding, Severity, Verdict } from "@devdigest/shared";
 export type { PrBrief, SmartDiff } from "@devdigest/shared";
 
+export type {
+  Brief,
+  ReviewFocusItem,
+  Risk,
+  RiskSeverity,
+  BriefInputStatus,
+  BriefUsage,
+  BriefRecord,
+  BriefState,
+  BriefResponse,
+  BriefTimelineEntry,
+  BriefTimelineResponse,
+} from "@devdigest/shared";
+
 /** What a findings-deep-link click should focus: a run, a severity, a
  *  single finding, or any combination — driven from the PR list hover
  *  preview, the Timeline, a Review-runs header badge, or a diff-line tag. */
@@ -59,4 +73,13 @@ export interface FocusFindingsOptions {
   runId?: string | null;
   severity?: string | null;
   findingId?: string | null;
+}
+
+/** What a review-focus deep-link click should land on in the Files-changed
+ *  tab: a specific `path:line` (SPEC-03 AC-30). Distinct from
+ *  `FocusFindingsOptions` — this one drives the diff-viewer's expand+scroll,
+ *  not the Findings tab's run/severity filter. */
+export interface FocusDiffLineOptions {
+  path: string;
+  line: number;
 }

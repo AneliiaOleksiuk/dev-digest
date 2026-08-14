@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Finding, Verdict } from './findings.js';
-import { BlastRadius, Intent, SmartDiff } from './brief.js';
+import { BlastRadius, Brief, Intent, RiskSeverity, SmartDiff } from './brief.js';
 
 /**
  * A2 — Review-Core API surface contracts. These extend the core
@@ -104,3 +104,115 @@ export const BlastRadiusResponse = BlastRadius.extend({
   prior_prs: z.array(PriorPr),
 });
 export type BlastRadiusResponse = z.infer<typeof BlastRadiusResponse>;
+
+// ---- SPEC-03: PR Brief & Why Timeline ----
+
+/**
+ * What a generation's inputs actually looked like — provenance for the card's
+ * collapsed "Inputs" disclosure (UX-12) and the Q-4 grounding-drop line.
+ * `intent_status`/`linked_issue_status` mirror AC-6/E-3 and AC-4's degrade-
+ * not-classify rule: a brief composed with no intent or no issue must say so
+ * rather than reading as merely terse. `dropped_inputs[]` is AC-24/AC-26's
+ * whole-item budget-trim log (e.g. "spec file docs/x.md dropped (sub-cap)",
+ * "linked issue dropped (budget)") — distinct from `BriefUsage`'s
+ * `dropped_risk_refs`/`dropped_focus_items`, which count AC-18/AC-19
+ * grounding drops of the model's *output*, not budget drops of the *input*.
+ */
+export const BriefInputStatus = z.object({
+  intent_status: z.enum(['used', 'missing', 'stale']),
+  blast_status: z.enum(['full', 'partial', 'degraded']),
+  changed_file_count: z.number().int(),
+  spec_files_used: z.array(z.string()),
+  spec_files_unresolved: z.array(z.string()),
+  linked_issue_status: z.enum(['used', 'unresolved', 'not_referenced']),
+  dropped_inputs: z.array(z.string()),
+});
+export type BriefInputStatus = z.infer<typeof BriefInputStatus>;
+
+/**
+ * Generation usage/cost (AC-10) plus the AC-18/AC-19 grounding-drop counts
+ * (AC-22) — how many `risks[].file_refs`/`review_focus[]` entries were
+ * discarded after the call because they didn't cite a real changed file/line.
+ * `tokens_in`/`tokens_out`/`cost_usd` are nullable (E-20, same contract as
+ * `OnboardingGenerationUsage`) — a provider that doesn't report cost must not
+ * be rendered as free. `input_tokens` is always present: it's the pre-call
+ * measurement this module made itself (AC-23), not something the provider
+ * returns.
+ */
+export const BriefUsage = z.object({
+  provider: z.string(),
+  model: z.string(),
+  input_tokens: z.number().int(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
+  cost_usd: z.number().nullable(),
+  dropped_risk_refs: z.number().int(),
+  dropped_focus_items: z.number().int(),
+});
+export type BriefUsage = z.infer<typeof BriefUsage>;
+
+/** The `Brief` plus everything needed to render/audit it: which commit it
+ *  describes, what its inputs looked like, and what generating it cost. */
+export const BriefRecord = Brief.extend({
+  pr_id: z.string(),
+  head_sha: z.string(),
+  generated_at: z.string(),
+  input_status: BriefInputStatus,
+  usage: BriefUsage,
+});
+export type BriefRecord = z.infer<typeof BriefRecord>;
+
+/**
+ * `BriefState` is deliberately split into persisted and transient values.
+ * `'current' | 'stale' | 'absent' | 'corrupt'` are READ states — derivable
+ * from storage alone, returned by `GET /pulls/:id/brief`. `'budget_exceeded'
+ * | 'failed'` are TRANSIENT GENERATE-ONLY outcomes, returned only by
+ * `POST …/generate` with `record: null`, and are never persisted: AC-25
+ * requires the floor-exceeded case to make zero calls, and AC-42 requires a
+ * failed attempt to persist nothing and leave any prior row untouched — so by
+ * construction there is no row to read either state back from later. Mirrors
+ * `OnboardingTourResponse.status`, which likewise carries `llm_failed` as a
+ * response state rather than throwing (`onboarding/service.ts:202-222`).
+ */
+export const BriefState = z.enum(['current', 'stale', 'absent', 'corrupt', 'budget_exceeded', 'failed']);
+export type BriefState = z.infer<typeof BriefState>;
+
+/** `GET /pulls/:id/brief` and `POST /pulls/:id/brief/generate` share this
+ *  response shape (AC-11, the `IntentService.getOrClassify` `{record,
+ *  reused}` precedent). `reason` carries the human explanation for a
+ *  non-`current` state (stale-since-commit, corrupt-row, budget-exceeded,
+ *  failed-attempt) — `null` only when `state === 'current'`. */
+export const BriefResponse = z.object({
+  state: BriefState,
+  current_head_sha: z.string(),
+  record: BriefRecord.nullable(),
+  reused: z.boolean(),
+  reason: z.string().nullable(),
+});
+export type BriefResponse = z.infer<typeof BriefResponse>;
+
+/** One row of the Why Timeline (D-3 — "Why Timeline" is the product name;
+ *  the identifier is `BriefTimeline*`, never `Why*`, which already means
+ *  git-blame). `record` carries the FULL persisted `BriefRecord` (the
+ *  "two endpoints, not three" decision) so activating a historical entry
+ *  costs zero additional requests. `risk_changed` compares this entry's
+ *  `risk_level` to the next-older entry's (AC-33). */
+export const BriefTimelineEntry = z.object({
+  head_sha: z.string(),
+  generated_at: z.string(),
+  risk_level: RiskSeverity,
+  is_current_head: z.boolean(),
+  risk_changed: z.boolean(),
+  record: BriefRecord,
+});
+export type BriefTimelineEntry = z.infer<typeof BriefTimelineEntry>;
+
+/** `GET /pulls/:id/brief/timeline`. `brief_count`/`commit_count` back the
+ *  AC-34/UX-8 honest-gap disclosure ("3 briefs generated across 12
+ *  commits") — the timeline never implies it covers every commit. */
+export const BriefTimelineResponse = z.object({
+  entries: z.array(BriefTimelineEntry),
+  brief_count: z.number().int(),
+  commit_count: z.number().int(),
+});
+export type BriefTimelineResponse = z.infer<typeof BriefTimelineResponse>;

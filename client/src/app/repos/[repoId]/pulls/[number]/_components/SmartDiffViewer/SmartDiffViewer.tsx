@@ -10,7 +10,7 @@ import type {
   SmartDiffRole,
 } from "@devdigest/shared";
 import type { DiffCommentApi } from "@/components/diff-viewer";
-import type { FocusFindingsOptions } from "@/lib/types";
+import type { FocusDiffLineOptions, FocusFindingsOptions } from "@/lib/types";
 import { RoleGroup, defaultFileOpen } from "./_components/RoleGroup";
 import { SplitSuggestionBanner } from "./_components/SplitSuggestionBanner";
 import { s } from "./styles";
@@ -54,6 +54,7 @@ export function SmartDiffViewer({
   commenting,
   onFocusFindings,
   showSplitBanner = true,
+  externalFocus,
 }: {
   smartDiff: SmartDiffResponse;
   files: PrFile[];
@@ -62,6 +63,10 @@ export function SmartDiffViewer({
   onFocusFindings?: (opts: FocusFindingsOptions) => void;
   /** When false, DiffTab owns the banner (both order modes). */
   showSplitBanner?: boolean;
+  /** A `path:line` to expand-then-scroll to (SPEC-03 AC-30) — drives the
+   *  SAME `onJumpToLine` this viewer already uses internally for its own
+   *  finding-badge clicks. `null`/`undefined` — no pending focus. */
+  externalFocus?: FocusDiffLineOptions | null;
 }) {
   const groups = React.useMemo(
     () => withCoverageFallback(smartDiff.groups, files),
@@ -98,6 +103,17 @@ export function SmartDiffViewer({
       });
     });
   };
+
+  // AC-30/E-22 — jump on mount and whenever the external focus target
+  // changes; no-op when the path isn't part of this PR's loaded files.
+  React.useEffect(() => {
+    if (!externalFocus) return;
+    if (!fileByPath.has(externalFocus.path)) return;
+    onJumpToLine(externalFocus.path, externalFocus.line);
+    // onJumpToLine is a stable closure over setOpenMap; keying on the focus
+    // value itself is what should re-trigger the jump.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalFocus?.path, externalFocus?.line, fileByPath]);
 
   const { too_big, total_lines, proposed_splits } = smartDiff.split_suggestion;
 

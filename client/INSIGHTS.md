@@ -277,6 +277,40 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   never renders blank (same "never an empty card" contract `hasBody` already
   had).
 
+- **Adding a single-item "expand + scroll to it" deep-link to an already-
+  uncontrolled list-of-`FileCard`s viewer does NOT require lifting the whole
+  list into controlled state (2026-08-14, SPEC-03 AC-30/E-22,
+  `components/diff-viewer/DiffViewer/DiffViewer.tsx`).** `DiffViewer` had no
+  jump capability at all before this — every `FileCard` was fully
+  uncontrolled (auto-expand based on `AUTO_EXPAND_MAX_LINES`). Rather than
+  building a full `openMap` (the shape `SmartDiffViewer` already has, since
+  it needed per-file control anyway), track only a single `forcedOpenPath`
+  in local state; when rendering the file list, spread `FileCard`'s existing
+  controlled `open`/`onOpenChange` props onto ONLY the one file matching that
+  path, and pass NEITHER prop for every other file (leaving them in their
+  normal uncontrolled mode, `AUTO_EXPAND_MAX_LINES` default intact). This is
+  the general technique for adding a single-item focus/deep-link feature to
+  an already-shipped uncontrolled list component without regressing every
+  other item's existing behavior — reach for it before reaching for a full
+  controlled-map rewrite. `SmartDiffViewer` needed no new pattern here — it
+  already had per-file `openMap` state for its own finding-badge clicks, so
+  the deep-link was just a `useEffect` invoking its existing internal
+  `onJumpToLine(path, line)` whenever an external `externalFocus` prop
+  changes (guarded by `fileByPath.has(path)` so an absent path is a safe
+  no-op, matching `DiffViewer`'s equivalent `files.some(...)` guard).
+
+- **A history/timeline list endpoint that returns each entry's FULL nested
+  record (not a summary row) lets the client render a historical entry with
+  ZERO additional requests (2026-08-14, SPEC-03 Why Timeline,
+  `PrBriefCard`'s `BriefTimeline`).** `GET /pulls/:id/brief/timeline` returns
+  `entries[].record: BriefRecord` inline — a server design choice ("two
+  endpoints, not three") — so clicking an older Why Timeline row just swaps
+  local component state to that entry's already-fetched `record`; no new
+  fetch, no loading state, no risk of the detail view disagreeing with the
+  list view. Worth defaulting to this shape for any future "browse a bounded
+  history, then drill into one entry" feature (the list here is capped at 50
+  rows) rather than a summary-list + per-item-detail-fetch split.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -967,3 +1001,32 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   sub-headings) would have caught bug (1) without needing a live regenerate.
   Verified: `tsc --noEmit` clean; full onboarding suite green (57 tests, same
   1 pre-existing known-stale case).
+
+- 2026-08-14: SPEC-03 PR Brief & Why Timeline (plan
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md`) client side, WI9-WI14 —
+  new `lib/hooks/brief.ts` (`usePrBrief`/`usePrBriefTimeline`/
+  `useGeneratePrBrief`); `PrBriefCard` (replaces `PrBriefBanner`, deleted
+  outright incl. its test — see below) with a nested `BriefTimeline`
+  (`_components/BriefTimeline/`, the Why Timeline, D-3); a new `?file=&line=`
+  URL-param pair + `focusDiffLine` helper in `page.tsx` (same pattern as the
+  existing findings deep-link contract this file already documents); `?file`/
+  `?line` threaded through `DiffTab` → whichever viewer is active
+  (`SmartDiffViewer` gained an `externalFocus` prop hooking into its existing
+  `onJumpToLine`; `DiffViewer` gained jump capability from scratch — see
+  Codebase Patterns above for both). `useGeneratePrBrief`'s `onSuccess`
+  deliberately does NOT call `qc.setQueryData` for a `budget_exceeded`/
+  `failed` response (neither state is ever persisted server-side) — instead
+  `PrBriefCard` reads the mutation's own `generate.data` directly to render a
+  transient banner IN PLACE over whatever good `record` the `pr-brief` query
+  cache already holds, so a failed regenerate attempt never wipes a
+  previously-good brief off the card. `PrBriefBanner/` deleted in full
+  (component + styles + index + its pre-existing test) per the plan's
+  explicit WI11 file list — not new test authorship, a specified deletion of
+  an obsolete component's test alongside the component itself. Verified:
+  `tsc --noEmit` clean; full Vitest green except the ONE pre-existing
+  known-stale `SectionCard.test.tsx` AC-12 case (server/INSIGHTS.md's FIX-8
+  entry — confirmed untouched via `git status`, unrelated to this session);
+  `smoke.test.tsx` still passes. Server-side WI1-WI8 is `server/INSIGHTS.md`'s
+  entry for the same date. New-test authorship for `PrBriefCard`/
+  `BriefTimeline`/the `DiffViewer` focus overlay is `test-writer`'s job next,
+  not attempted here beyond the pre-existing suites passing.

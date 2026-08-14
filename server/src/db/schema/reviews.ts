@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision, primaryKey } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -71,9 +71,53 @@ export const prIntent = pgTable('pr_intent', {
   classifiedAt: timestamp('classified_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const prBrief = pgTable('pr_brief', {
-  prId: uuid('pr_id')
-    .primaryKey()
-    .references(() => pullRequests.id, { onDelete: 'cascade' }),
-  json: jsonb('json').notNull(),
-});
+/**
+ * SPEC-03 — one row per (PR, head_sha), NOT one row per PR (D-4). Repurposed
+ * from a never-written `pr_id`-primary-key/single-`json` shape: no
+ * repository/service/route referenced it anywhere in `server/src` before
+ * this, so the key change costs nothing (no rows to migrate, no reader to
+ * break). Composite PK serves both access paths (exact `(prId, headSha)`
+ * lookup, and a `prId`-prefix scan for the Why Timeline) and gives
+ * `onConflictDoUpdate` a natural target so AC-13's "replace, never append"
+ * is enforced by the database itself.
+ *
+ * `json` holds the model-authored `Brief` fields (`what`/`why`/`risk_level`/
+ * `risks`/`review_focus`) PLUS a nested `input_status` object (everything in
+ * `BriefInputStatus` except `dropped_inputs`, which gets its own column
+ * below) — re-parsed against the module's own stored-json contract on every
+ * read (AC-40), same "corrupted row degrades, never crashes" contract
+ * `onboarding.json` already has. Usage/cost columns mirror `agent_runs`
+ * field-for-field (`doublePrecision` for `costUsd`, per server/INSIGHTS.md).
+ */
+export const prBrief = pgTable(
+  'pr_brief',
+  {
+    prId: uuid('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    headSha: text('head_sha').notNull(),
+    json: jsonb('json').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    /** Pre-call measurement of the fully assembled input (AC-23) — always
+     *  present once a generation succeeds, unlike the provider-reported
+     *  tokensIn/tokensOut below. */
+    inputTokens: integer('input_tokens'),
+    tokensIn: integer('tokens_in'),
+    tokensOut: integer('tokens_out'),
+    costUsd: doublePrecision('cost_usd'),
+    /** AC-22 grounding-drop counts — how many risks[].file_refs / review_focus[]
+     *  entries were discarded after the call for citing an ungrounded path/line. */
+    droppedRiskRefs: integer('dropped_risk_refs').notNull().default(0),
+    droppedFocusItems: integer('dropped_focus_items').notNull().default(0),
+    /** AC-24/AC-26 — human strings naming which whole INPUTS the 8k budget
+     *  dropped (spec file / linked issue / hunk headers / file list tail).
+     *  Distinct from the grounding-drop counts above, which are about the
+     *  model's OUTPUT, not its input. */
+    droppedInputs: jsonb('dropped_inputs').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.prId, t.headSha] }),
+  }),
+);

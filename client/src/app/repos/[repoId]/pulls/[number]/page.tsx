@@ -21,7 +21,7 @@ import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } 
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
-import type { FocusFindingsOptions } from "../../../../../lib/types";
+import type { FocusDiffLineOptions, FocusFindingsOptions } from "../../../../../lib/types";
 import type { FindingRecord } from "@devdigest/shared";
 
 // WI11 (L04 follow-ups): the 3 tabs left once the Blast tab is deleted —
@@ -78,6 +78,12 @@ export default function PRDetailPage() {
   const focusRunId = search.get("run");
   const focusSeverity = search.get("severity");
   const focusFindingId = search.get("finding");
+  // Review-focus deep-link (SPEC-03 AC-30/UX-6): `?file=&line=` alongside the
+  // findings-focus params above, so a PrBriefCard review-focus click is
+  // shareable/reload-safe the same way `run`/`severity`/`finding` already are.
+  const focusFile = search.get("file");
+  const focusLineRaw = search.get("line");
+  const focusLine = focusLineRaw != null && !Number.isNaN(Number(focusLineRaw)) ? Number(focusLineRaw) : null;
   const setParams = (patch: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
     for (const [key, val] of Object.entries(patch)) {
@@ -96,6 +102,10 @@ export default function PRDetailPage() {
       finding: opts.findingId ?? null,
     });
   const clearFocus = () => focusFindings({});
+  // AC-30/UX-6 — lands on the Files-changed tab, expand-then-scroll to the
+  // exact line, via URL params so the link survives reload/is shareable.
+  const focusDiffLine = (opts: FocusDiffLineOptions) =>
+    setParams({ tab: "diff", file: opts.path, line: String(opts.line) });
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -171,6 +181,8 @@ export default function PRDetailPage() {
             repoFullName={repoFullName}
             repoId={repoId}
             blastReady
+            changedFilePaths={pr.files.map((f) => f.path)}
+            onFocusDiffLine={focusDiffLine}
           />
         )}
 
@@ -210,6 +222,7 @@ export default function PRDetailPage() {
             canComment={pr.status === "open"}
             findings={allFindings}
             onFocusFindings={focusFindings}
+            diffFocus={focusFile && focusLine != null ? { path: focusFile, line: focusLine } : null}
           />
         )}
       </div>

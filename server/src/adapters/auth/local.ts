@@ -36,7 +36,3 @@ export class LocalNoAuthProvider implements AuthProvider {
     return this.cachedWorkspace;
   }
 }
-
-export function getUserById(db, id: string) {
-  return db.query(`SELECT * FROM users WHERE id = '${id}'`);
-}

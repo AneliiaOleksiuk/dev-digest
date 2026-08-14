@@ -257,6 +257,26 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   t.key)` and the page reads that. Adding a tab only to `TABS` (or only
   to the page allow-list) will recreate this.
 
+- **`critical_paths`/`reading_path`/`run_locally` `OnboardingSection.body` is
+  markdown-only — there is no structured per-row field for these three kinds**
+  (unlike `first_tasks`, which got a real `tasks[]` array in FIX-8 — see the
+  entry below). The design's file-row/numbered-circle/per-command-copy layout
+  has to be recovered by PARSING that markdown client-side:
+  `SectionCard/parseSection.ts`'s `parseListItems(body)` groups top-level
+  bullet/numbered lines (a continuation line belongs to the preceding item,
+  same rule as the server's own `capBulletItems`/`groundBulletItemPaths` in
+  `server/src/modules/onboarding/helpers.ts`) and pulls the first inline-code
+  span out as `path`. `run_locally` needs a SECOND shape entirely:
+  `parseRunLocallyCommands(body)` reads fenced-code lines when the LLM
+  actually ran (`groundRunLocallyBody` only ever fences), but falls back to
+  the bullet-list-of-inline-code shape `buildSkeletonSections` emits for
+  `run_locally` (`` - `command` (from `path`) ``, never fenced) — the
+  deterministic skeleton and the real LLM output are NOT the same markdown
+  shape for this one section kind. Both parsers fall back to the plain
+  `Markdown` render when they find zero rows, so an unexpected body shape
+  never renders blank (same "never an empty card" contract `hasBody` already
+  had).
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -317,6 +337,16 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   enough to honor the pre-authored `blast.json` `graph.ariaLabel`/
   `graph.empty` keys; don't expect it to scale to a real force-directed
   layout without a real library.
+
+- **`--border` (#2a2a2a) is too subtle against `--bg-elevated` (#1c1c1c) for a
+  card/row that needs to read as visibly outlined** — barely distinguishable
+  in practice. `--border-strong` (#3a3a3a) is the token this codebase already
+  uses when an outline needs to actually be seen (e.g. `Button`'s `secondary`
+  kind, `SectionCard`'s `openButton`). Onboarding's `taskCard`/`fileRow`/
+  `commandRow` (2026-08-14, design fix-up after a user screenshot comparison)
+  switched from `--border` to `--border-strong` for exactly this reason —
+  reach for `--border-strong` by default for any new bordered card/row on a
+  dark elevated surface, not `--border`.
 
 ## Recurring Errors & Fixes
 
@@ -795,3 +825,145 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   test authorship for `OnboardingTourView`/`SectionCard`/
   `RegenerateConfirmModal`/`helpers.ts` is `test-writer`'s job next).
   `smoke.test.tsx` still passes.
+
+- 2026-08-14 (fix-loop iteration 1, remediating `plan-verifier`'s Phase 1
+  FAIL) — two client-touching fixes:
+  - **FIX-4 (client half)**: `sections.length === 0` was the WRONG signal for
+    "show degraded copy" — the server skeleton always returns exactly five
+    sections (`helpers.ts` `buildSkeletonSections`), so that branch was
+    provably dead on the main path and the whole `empty.*` message block
+    (no-clone/not-indexed/never-generated/llm-failed copy) never rendered.
+    Replaced with a status/reason row sourced DIRECTLY from `tour.status` +
+    `tour.reason` (a `Badge` + the server's own reason sentence), shown
+    whenever `status !== "ok"`, right in the header alongside the existing
+    age/files-indexed/stale row. Collapsed the four per-status `empty.*.title/
+    body` i18n keys down to one generic `empty.generic.title` (with
+    `tour.reason` as the body) — that branch is now reserved for the
+    genuinely-empty case (a corrupted stored row, E-15's `sections: []`
+    degrade-on-read path), not a stand-in for every degraded status.
+  - **FIX-6**: confirmation (`RegenerateConfirmModal`) is now required before
+    the FIRST generation too, not only Regenerate — `handleGenerateClick`
+    always opens the modal now; it never calls `mutate()` directly. The modal
+    gained a `mode: "generate" | "regenerate"` prop swapping in first-
+    generation copy (`confirm.firstTitle`/`firstBody`/`firstConfirmCta`) so
+    "regenerate"/"replaces the tour" doesn't read wrong when there's no
+    existing tour to replace yet — both modes still show the shared
+    `confirm.outboundNotice` line (NFR A04).
+  **Known regression, by design** (same pattern as the 2026-08-07 IntentCard/
+  BlastRadiusCard entries above): `OnboardingTourView.test.tsx`'s third case
+  ("a FIRST-EVER generation... skips the confirm gate — Generate calls
+  mutate() directly") now fails, because it encodes the EXACT pre-FIX-6
+  behavior FIX-6 exists to change. Left failing intentionally rather than
+  hand-edited, since updating a pre-existing self-check test's assertions to
+  match new behavior is `test-writer`'s job, not this session's — see FIX-6's
+  own text in `docs/plans/spec-02-onboarding-generator-fixes.md`. Verified:
+  `tsc --noEmit` clean; full Vitest run is 158 passed / 1 known-failing (the
+  case above) — every other file, including `OnboardingTourView/helpers.test.ts`,
+  `SectionCard.test.tsx`, and `RegenerateConfirmModal.test.tsx`, stayed green
+  with zero changes needed. The pre-existing SectionCard nested-`<button>`
+  HTML-validity console warning (visible in this run's stderr) is a known,
+  already-flagged Phase-2 Minor finding out of this fix plan's scope — not
+  something this session introduced or should silently "fix" as a drive-by.
+
+- 2026-08-14 (FIX-8, mid-loop addition after FIX-1..7, spotted by the product
+  owner comparing the live page to the reference screenshot) — "First tasks"
+  now renders a per-task card GRID (bold title, monospace path, a per-task
+  complexity `Badge`) instead of one markdown `body` blob with a single
+  header-level "Model estimate" badge. **This SUPERSEDES the 2026-08-14
+  entry above** ("AC-12's 'First tasks' badge is section-level, not
+  per-task-card ... `OnboardingSection` has no structured per-task array")
+  — FIX-8 added exactly that array (`OnboardingTask`, server `INSIGHTS.md`'s
+  same-date entry) and the badge moved from the section header into each
+  task card. The old `firstTasksBadge` prop on `SectionCard` and the
+  `section.firstTasksBadge`/`section.firstTasksBadgeTooltip` i18n keys are
+  DELETED, not deprecated-in-place — they described a design that no longer
+  exists, and keeping them around would have looked like a second, competing
+  badge mechanism next to the new per-task one.
+  **`Badge` (`vendor/ui/primitives/Badge.tsx`) needed ZERO edit for the
+  green/amber complexity pill** — it already takes `color`/`bg` as direct
+  props (not a named "variant" enum), and this codebase already has an
+  established green/amber semantic-token PAIR for exactly this purpose:
+  `--ok`/`--ok-bg` (green, `styles.css`) is already used via
+  `<Badge color="var(--ok)" bg="var(--ok-bg)">` in `IntentCard.tsx`,
+  `TraceBody.tsx`, `VerdictBanner`/`RunHistory`/`pulls/constants.ts`, and
+  `--warn`/`--warn-bg` (amber) the same way for warnings elsewhere in this
+  file's own entries. Before reaching for a new CSS variable or an inline
+  `style` override on `Badge` (which `vendor/ui`'s do-not-touch status would
+  make awkward to justify), check whether `--ok`/`--warn`/`--crit`/`--sugg`/
+  `--info` in `vendor/ui/styles.css` already covers the semantic you need —
+  there is NO `--success`/`--green` name; `--ok` IS the green token.
+  **`tsc --noEmit` catches a removed prop as a hard type error, not just a
+  stale runtime assertion** — unlike FIX-6's `mode` prop addition (backward
+  compatible, old test call sites kept compiling), deleting `firstTasksBadge`
+  from `SectionCard`'s props broke `SectionCard.test.tsx`'s two AC-12 call
+  sites at the TYPE level. Fixed by removing only the now-nonexistent prop
+  from those two call sites (an object-literal edit, not new test content)
+  so the file keeps compiling; left the resulting stale assertion
+  (`getByText("Model estimate")`, which no longer renders anywhere) failing
+  intentionally, per this file's own FIX-6/IntentCard precedent for "the
+  compile-fix and the behavior-fix are different jobs." Verified: `tsc
+  --noEmit` clean; full Vitest run is 178 passed / 1 known-failing (that one
+  AC-12 case, named above) — the sibling AC-12 case ("a non-first_tasks
+  section never renders the badge") still passes, now vacuously, since
+  "Model estimate" doesn't render anywhere at all post-FIX-8.
+
+- 2026-08-14 (design-conformance fix, user-reported: "sections don't match
+  the design at all, you're just dumping raw markdown") — `critical_paths`,
+  `reading_path`, and `run_locally` now render through the same structured-
+  row treatment `first_tasks` already had, instead of the generic `Markdown`
+  fallback. New `SectionCard/parseSection.ts` (+ `parseSection.test.ts`, see
+  Codebase Patterns above for the two `run_locally` body shapes it has to
+  handle) is a pure client-side markdown parser — no server/contract change,
+  since `body` was already carrying everything needed, just unparsed.
+  `critical_paths` → one bordered row per parsed item (file icon, mono path,
+  description, an "Open" link via the existing `githubBlobUrl` — reusing the
+  previously-unwired `section.openAction` i18n key, and `actions.open`, both
+  of which existed in `messages/en/onboarding.json` with no call site before
+  this). `reading_path` → the same row shape with a numbered circle badge
+  instead of a file icon. `run_locally` → one bordered row per command with a
+  PER-ROW copy button. **This supersedes the 2026-08-14 entry above**
+  ("`run_locally`'s copy-to-clipboard button copies the WHOLE section body,
+  not a per-command button ... a single section-level copy action satisfies
+  [AC-34] without needing per-line UI") — that header-level copy button is
+  now removed entirely (the design has no header copy icon for this section);
+  every command gets its own. Also added `actions.copy` to
+  `messages/en/onboarding.json` (`"Copy"`) — the pre-existing header copy
+  button's `aria-label` had been wired to `actions.export` ("Export as
+  Markdown"), a mislabel now fixed since the same `IconBtn` pattern moved
+  per-row. `architecture` (prose + `MermaidDiagram`, already bordered) needed
+  no change — it already matched the reference design. Verified:
+  `tsc --noEmit` clean; `SectionCard`/`parseSection` test files green (58
+  tests, only the pre-existing FIX-8 known-stale "Model estimate" case still
+  failing, unrelated to this change) — no live browser click-through this
+  session (would require a stored/generated onboarding tour and a running
+  API+DB; RTL's rendered-DOM assertions covered the new structure instead).
+
+- 2026-08-14 (design-conformance fix, part 2 — user regenerated the tour and
+  screenshotted the real result) — two bugs surfaced by REAL LLM-generated
+  content that the hand-written unit-test fixtures above hadn't exercised:
+  (1) `parseListItems`'s `description` field is rendered as plain text (not
+  through `Markdown`), so a body like `` - `path` — **Server entry**: loads
+  config`` showed literal `**asterisks**` instead of bold — the LLM's own
+  formatting habit (bold sub-headings inline, per `onboarding.system.md:22`'s
+  "short Markdown **bold sub-headings**" instruction) leaked straight through
+  as raw syntax. Fixed with a new `stripMarkdownEmphasis` in `parseSection.ts`
+  (strips `**bold**`/`__bold__`/`*italic*`, deliberately SKIPS single
+  `_italic_` because this codebase's real paths/identifiers are commonly
+  snake_case — `run_logger.ts` — and a naive strip would corrupt them).
+  (2) The generic `section.links[]` list at the bottom of the card was
+  rendering the SAME file paths a second time once `critical_paths`/
+  `reading_path` had their own parsed rows (each already carrying its own
+  "Open" link) — visibly duplicated in the user's screenshot (4 rows above,
+  the same 4 filenames again as a compact link list below). Suppressed via a
+  new `rowsCoverLinks` check in `SectionCard.tsx` (only when
+  `criticalPathRows`/`readingPathRows` actually produced rows — the generic
+  links list still renders as a fallback for kinds/cases where structured
+  parsing found nothing, e.g. an unparseable body). **Lesson for next time**:
+  the original parser tests (this file's entry above) only used hand-crafted
+  bullet text without markdown emphasis and without a populated `links[]`
+  alongside a parseable `body` — both gaps only surfaced once the user
+  actually clicked Regenerate and compared a REAL LLM response against the
+  design; a fixture closer to the prompt's own documented style (bold
+  sub-headings) would have caught bug (1) without needing a live regenerate.
+  Verified: `tsc --noEmit` clean; full onboarding suite green (57 tests, same
+  1 pre-existing known-stale case).

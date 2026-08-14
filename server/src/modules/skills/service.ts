@@ -2,6 +2,7 @@ import type { Skill, SkillSource, SkillType, SkillVersion } from '@devdigest/sha
 import type { SkillsRepository } from './repository.js';
 import { toSkillDto, toSkillVersionDto, deriveNameFromBody } from './helpers.js';
 import type { SkillUrlFetcher } from './url-fetcher.js';
+import type { ContextRepository } from '../project-context/repository.js';
 
 export interface CreateSkillInput {
   name: string;
@@ -26,6 +27,7 @@ export class SkillsService {
   constructor(
     private repo: SkillsRepository,
     private urlFetcher: SkillUrlFetcher,
+    private contextRepo: ContextRepository,
   ) {}
 
   async list(workspaceId: string): Promise<Skill[]> {
@@ -68,8 +70,12 @@ export class SkillsService {
     return row ? toSkillDto(row) : undefined;
   }
 
+  /** Also explicitly deletes this skill's project-context attachment rows —
+   *  `surfaceId` there carries no FK (R-D, docs/plans/spec-01-project-context.md). */
   async delete(workspaceId: string, id: string): Promise<boolean> {
-    return this.repo.deleteById(workspaceId, id);
+    const ok = await this.repo.deleteById(workspaceId, id);
+    if (ok) await this.contextRepo.deleteForSurface(workspaceId, 'skill', id);
+    return ok;
   }
 
   /** Import a skill from pasted/uploaded markdown. Trusted enough to enable

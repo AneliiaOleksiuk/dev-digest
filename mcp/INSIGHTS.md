@@ -219,6 +219,29 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   via `registerTool` wrapper + split `tsconfig.cli.json` + 6GB heap.
   `npm run typecheck` + `npm test` (35) green locally.
 
+- 2026-08-11: Mentor review on L04-MCP flagged two gaps: no `config.ts`
+  (raw `process.env` reads, no validation/throw) and no root `.mcp.json`.
+  Checking `docs/plans/mcp-server.md` WI8 showed the root `.mcp.json` was
+  **originally planned** but the implementation session substituted
+  `scripts/mcp-on.sh`/`mcp-off.sh` (on-demand, `--scope local`, never
+  committed) without a recorded decision — this session restores WI8's
+  original intent. Added `src/config.ts` (`getApiBase`/`getRunTimeoutMs`,
+  throw `ConfigError` on a set-but-invalid value, read fresh per call — not
+  memoized — so existing tests that mutate `process.env` between cases keep
+  working unchanged) and a committed root `.mcp.json`. One non-obvious fix
+  needed in `run-agent-on-pr.ts`: `errors.ts`'s own docblock says a tool must
+  **never** let a thrown error cross the protocol boundary
+  ("`isError: true`", not a thrown exception) — so `getRunTimeoutMs()`'s
+  throw had to be caught inside `runAgentOnPrHandler` and turned into
+  `toolError(...)`, and the read was moved to the very top of the handler
+  (before `resolveRepo`/`api.post`) so an invalid timeout config fails
+  *before* a review run is started server-side, not after. `getApiBase()`'s
+  throw needed no such handling — it fires once at server-construction time
+  (`createApiClient()`'s default param, called from `index.ts`'s `main()`),
+  so it's already caught by `main()`'s existing `.catch()` → stderr + `exit(1)`.
+  `scripts/mcp-on.sh`/`mcp-off.sh` were kept (user decision) as a documented
+  manual alternative for user-scope registration outside this project.
+
 ## Open Questions
 
 _(to be filled in)_

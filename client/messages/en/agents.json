@@ -46,6 +46,7 @@
     "tabs": {
       "config": "Config",
       "skills": "Skills",
+      "context": "Context",
       "evals": "Evals",
       "stats": "Stats",
       "ci": "CI"
@@ -95,5 +96,21 @@
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "context": {
+    "title": "Attached documents",
+    "noRepo": "Select a repo to manage attached documents.",
+    "searchPlaceholder": "Search documents…",
+    "attachedTotal": "Effective total: ≈{tokens} tokens",
+    "inheritedGroup": "Inherited from enabled skills",
+    "directGroup": "Attached directly",
+    "noInherited": "No documents inherited from this agent's enabled skills.",
+    "viaSkill": "via {skill}",
+    "outboundNotice": "Attached documents are sent to the model provider on every run of this agent.",
+    "serializesAs": "Serializes as \"## Project context\"",
+    "previewPlaceholder": "Select a document to preview it.",
+    "loading": "Loading documents…",
+    "otherRepoGroup": "Attached on other repos",
+    "notInjected": "not injected for runs on this repo"
   }
 }

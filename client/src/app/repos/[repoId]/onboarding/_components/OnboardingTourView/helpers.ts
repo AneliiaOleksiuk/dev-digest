@@ -56,7 +56,17 @@ export function toMarkdown(
 
   for (const section of orderedSections(tour)) {
     lines.push(`## ${sectionTitle(section.kind)}`, '');
-    lines.push(section.body.trim().length > 0 ? section.body : '_No content available for this section yet._', '');
+    const hasTasks = section.kind === "first_tasks" && (section.tasks?.length ?? 0) > 0;
+    if (hasTasks) {
+      // FIX-8: first_tasks' value now lives in structured `tasks`, not
+      // `body` — export those, not the (possibly empty) prose intro.
+      lines.push(
+        ...section.tasks!.map((task) => `- **${task.title}** — \`${task.path}\` (${task.complexity} complexity)`),
+        '',
+      );
+    } else {
+      lines.push(section.body.trim().length > 0 ? section.body : '_No content available for this section yet._', '');
+    }
     if (section.diagram) {
       lines.push('```mermaid', section.diagram, '```', '');
     }

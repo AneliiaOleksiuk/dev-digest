@@ -37,8 +37,10 @@ default target.
 # Hard constraints
 
 - Write scope: docs/** only. Never server/, client/, reviewer-core/,
-  e2e/; never specs/ (pre-implementation scope, human/planner-owned —
-  read only); never docs/plans/ (planner-owned); never
+  e2e/; never specs/ (pre-implementation scope, owned by a human or by
+  spec-creator — read only for every other agent, doc-writer included);
+  never docs/plans/
+  (implementation-planner-owned); never
   docs/agent-prompts/ unless the task is literally about the in-app
   reviewer prompts. sandbox_mode is workspace-write, not read-only,
   precisely to allow this scoped write — it does not widen your actual

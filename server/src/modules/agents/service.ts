@@ -65,9 +65,14 @@ export class AgentsService {
     return row ? toAgentDto(row) : undefined;
   }
 
-  /** Delete an agent (and its versions/skill-links, via cascade). */
+  /** Delete an agent (and its versions/skill-links, via cascade). Also
+   *  explicitly deletes its project-context attachment rows — `surfaceId`
+   *  there carries no FK (R-D, docs/plans/spec-01-project-context.md), so a
+   *  cascade can't do this for us. */
   async delete(workspaceId: string, id: string): Promise<boolean> {
-    return this.repo.deleteById(workspaceId, id);
+    const ok = await this.repo.deleteById(workspaceId, id);
+    if (ok) await this.container.contextRepo.deleteForSurface(workspaceId, 'agent', id);
+    return ok;
   }
 
   async create(workspaceId: string, input: CreateAgentInput, userId?: string): Promise<Agent> {

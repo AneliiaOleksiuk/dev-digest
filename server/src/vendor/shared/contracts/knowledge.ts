@@ -32,12 +32,29 @@ export const OnboardingLink = z.object({
 });
 export type OnboardingLink = z.infer<typeof OnboardingLink>;
 
+/** One structured "first task" card (FIX-8, AC-12/AC-4/UX-5) — `first_tasks`
+ *  ONLY; every other `OnboardingSection.kind` must leave `tasks` null/omitted.
+ *  `complexity` is the model's own subjective estimate, not a measurement
+ *  (AC-12) — only `low`/`medium` per the Spec's literal "Low/Medium" wording
+ *  (design note under AC-12); do not add `high` without a Spec citation. */
+export const OnboardingTask = z.object({
+  title: z.string(),
+  path: z.string(),
+  complexity: z.enum(['low', 'medium']),
+});
+export type OnboardingTask = z.infer<typeof OnboardingTask>;
+
 export const OnboardingSection = z.object({
   kind: z.string(),
   title: z.string(),
   body: z.string(), // markdown
   diagram: z.string().nullish(), // mermaid
   links: z.array(OnboardingLink),
+  /** Per-task structured cards — `first_tasks` only (FIX-8). Additive/
+   *  nullish so every other kind (and every pre-FIX-8 stored row) is
+   *  unaffected, the same pattern `diagram` already uses for being
+   *  architecture-only. */
+  tasks: z.array(OnboardingTask).nullish(),
 });
 export type OnboardingSection = z.infer<typeof OnboardingSection>;
 

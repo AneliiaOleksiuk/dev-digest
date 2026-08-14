@@ -866,4 +866,118 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `project-context/**`, `run-executor.ts`, or `trace-builder.ts`; the latter
   shows modified from an EARLIER uncommitted session, not this one). Left
   unresolved — it belongs to whichever session left `trace-builder.ts` mid-
-  edit, not to onboarding.
+  edit, not to onboarding. **Reconfirmed 2026-08-14 (fix-loop iteration 1
+  below)**: still the only integration failure, still traced to the same
+  uncommitted `trace-builder.ts`, still out of this session's scope.
+
+- 2026-08-14 (SPEC-02 fix-loop iteration 1, remediating `plan-verifier`'s
+  Phase 1 FAIL against commits `e8ca0ec`/`ea93e4d`/`8f04d73`) — six
+  server-touching fixes:
+  - **FIX-1 widened past what the fix plan described.** The plan assumed
+    only migration `0017`'s journal/snapshot bookkeeping was missing. In
+    fact TWO migrations were uncommitted: `0017_sweet_rachel_grey.sql`
+    (onboarding — `.sql` itself WAS committed in `e8ca0ec`, only its
+    journal entry/snapshot were missing, as the plan said) AND
+    `0016_colossal_professor_monster.sql` (the SPEC-01
+    `project_context_attachments` table — its `.sql` file itself was
+    **also** never committed, from an entirely earlier, unrelated session;
+    `git log -- <path>` shows zero commits touching it at all). Confirmed by
+    dropping a scratch DB (`devdigest_scratch_fix1`) and running
+    `pnpm db:migrate`-equivalent (`tsx src/db/migrate.ts` with
+    `DATABASE_URL` pointed at the scratch DB) against the current working
+    tree's `migrations/` folder as-is: both tables land correctly (all ten
+    onboarding columns + `project_context_attachments` with its FKs/indexes),
+    and the three snapshot files' `id`/`prevId` chain (`0015`→`0016`→`0017`)
+    is internally consistent — so the CONTENT is correct, only the git
+    history is missing it. Left uncommitted per this run's instructions (no
+    commit requested), but flagged here since a future session might assume
+    "0017's bookkeeping" is the whole story and miss that 0016's own `.sql`
+    is homeless too.
+  - **FIX-2**: `groundBulletItemPaths` (`onboarding/helpers.ts`) closes the
+    W7 gap — AC-7 grounding previously only filtered `section.links`, never
+    scanned `section.body` prose for invented paths. Scans single-backtick
+    inline-code tokens per bullet/numbered item (reusing the existing
+    `BULLET_RE` line-ownership logic from `capBulletItems` and the existing
+    `knownPaths(facts)` allowlist); a token that "looks like a path"
+    (contains `/`, or ends in a recognized source/doc extension) and isn't
+    in the allowlist drops the WHOLE item, not just the token. Applied only
+    to `critical_paths`/`reading_path`/`first_tasks` (per the fix plan's
+    explicit scoping) — `run_locally` keeps its own verbatim-match grounding,
+    `architecture` is deliberately untouched. Order matters: grounding runs
+    BEFORE `capBulletItems`, so the render cap counts only survivors.
+  - **FIX-3**: `OnboardingService.getTour`'s no-stored-row branch now calls
+    the SAME `deriveStatus(indexState, facts)` the below-minimum generation
+    branch already used, instead of hardcoding `never_generated` — this was
+    `test-writer`'s own intentionally-failing oracle test
+    (`onboarding.it.test.ts:234`, "no local clone renders `no_clone`, not
+    `never_generated`, on the FIRST GET"); it now passes with zero test
+    changes, exactly as the fix plan predicted.
+  - **FIX-4 (server half)**: added `IndexState.bounded?: boolean` — a NEW
+    field on an EXISTING return type, deliberately not a new facade method
+    (judgment call: the Plan's Non-goal only forbade new facade *methods*).
+    `RepoIntelRepository.tryGetIndexState` derives it from
+    `stats.bounded > 0` (`pipeline/walk.ts`'s `WalkStats.bounded`, already
+    persisted into `repo_index_state.stats` but never read back out before
+    this fix). `onboarding/helpers.ts`'s `deriveStatus` now treats
+    `indexState.bounded` the same as `status === 'partial'` — a `status:
+    'full'` index that was walk-bounded at `MAX_INDEXED_FILES` now correctly
+    reports `partial_index` to the Onboarding Generator instead of an
+    unqualified "full index" claim (E-5/AC-15). This field is additive/
+    optional — no ripple into any hand-built `IndexState` literal elsewhere.
+  - **FIX-5**: `groundRunLocallyBody` now attributes each surviving,
+    verbatim-matched command line with a trailing shell comment
+    (`  # from <path>`) instead of just the skeleton path having
+    attribution — deliberately NOT the skeleton's `(from \`path\`)`
+    markdown-bullet convention, since that syntax would break INSIDE a
+    fenced code block; a shell `#` comment is both valid shell syntax and
+    consistent with `extractDeterministicCommands`' existing
+    `npm run <script>  # <script body>` style.
+  Client-side FIX-4/FIX-6 work is `client/INSIGHTS.md`'s entry for the same
+  date. Verified: `pnpm arch:check` clean; server `tsc --noEmit` clean
+  (except the one PRE-EXISTING `adapters/auth/local.ts:40` error, confirmed
+  via `git status` as belonging to an unrelated concurrent session, not
+  touched here); full onboarding unit + `.it.test.ts` suites green
+  (27 + 19 tests, including the now-passing former "known failing" AC-18
+  case); only pre-existing failures elsewhere (`indexer-pipeline.test.ts`'s
+  documented Windows flake, `project-context-run.it.test.ts`'s AC-22 case
+  above) — both confirmed unrelated via `git status` before and after.
+- 2026-08-14 (FIX-8, mid-loop addition after FIX-1..7): `OnboardingSection`
+  gained a `tasks: z.array(OnboardingTask).nullish()` field (both vendor
+  `knowledge.ts` copies) so `first_tasks` can carry structured per-task cards
+  (title/path/complexity) instead of only prose — same additive/nullish
+  pattern `diagram` already uses for being architecture-only. **A per-kind
+  constraint on an array item that must still share one object shape with
+  its siblings composes better as `.superRefine` on the item schema than as
+  a discriminated union**: `OnboardingLlmResponse`'s existing order/length
+  check already does `sections[i].kind === ONBOARDING_SECTION_KINDS[i]`
+  across ALL five items uniformly, so narrowing `OnboardingLlmSection` into a
+  discriminated union keyed on `kind` (to make `tasks` required-only-for-
+  `first_tasks` at the type level) would have fought that existing array-wide
+  check rather than compose with it. `OnboardingLlmSection`'s own
+  `.superRefine` instead enforces both directions post-hoc: `first_tasks`
+  MUST have a non-empty `tasks` array, every other kind MUST leave it
+  null/omitted — same one-schema-object shape, no union needed.
+  **This ripples into `server/test/onboarding.it.test.ts`'s shared
+  `VALID_SECTIONS`/`VALID_FIXTURE` fixture (line ~72), exactly the "extending
+  a Zod contract ripples into every hand-typed object literal" pattern this
+  file already documents for `PrIntentRecord`/`risk_areas`** — that fixture's
+  `first_tasks` entry has no `tasks` field, so EVERY "successful generation"
+  in that file now fails the new `superRefine` and falls through to the
+  `llm_failed`/skeleton path instead of persisting a real tour. Confirmed via
+  a live run: exactly 8 of 21 tests fail as a result (all downstream of "the
+  fixture's generation never actually succeeds," not 8 independent bugs) —
+  `AC-5`, `AC-23`, `AC-26`, `AC-28`, `AC-36`, `AC-21 (the marquee sequence)`,
+  `D-13`, and `FIX-4 (bounded index)`. The fix is a ONE-LINE addition to the
+  shared fixture (give its `first_tasks` entry a non-empty `tasks: [...]`),
+  not 8 separate test rewrites — `test-writer`'s job next, flagged here so it
+  isn't mistaken for a real regression in each of those 8 ACs individually.
+  Grounding: `groundTasks(kind, tasks, paths)` in `helpers.ts` applies the
+  SAME discard contract AC-7/D-8 already require for `links[].path`, to
+  `tasks[].path`, then caps at the EXISTING `MAX_FIRST_TASK_CARDS` (no second
+  cap invented). Client-side FIX-8 work (per-task card grid replacing the
+  single header badge) is `client/INSIGHTS.md`'s entry for the same date.
+  Verified: `pnpm typecheck`/`pnpm arch:check` both clean; onboarding unit
+  suites (`onboarding-helpers.test.ts`, `onboarding-prompt.test.ts`) fully
+  green (46/46, zero changes needed); `onboarding.it.test.ts` shows exactly
+  the 8 predicted failures above, all traced to the one fixture gap, not
+  fixed here per this fix-loop's own "test-writer's job next" convention.

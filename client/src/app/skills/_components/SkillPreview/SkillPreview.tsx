@@ -4,6 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Tabs } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
+import { ContextTab } from "./_components/ContextTab";
 import { OverviewTab } from "./_components/OverviewTab";
 import { VersionHistoryTab } from "./_components/VersionHistoryTab";
 import { PREVIEW_TABS } from "./constants";
@@ -20,9 +21,17 @@ export function SkillPreview({ skill }: { skill: Skill }) {
         <h2 style={s.title}>{skill.name}</h2>
         <Badge mono>{t("preview.version", { version: skill.version })}</Badge>
       </div>
-      <Tabs tabs={tabs} value={tab} onChange={setTab} pad="0 24px" />
+      <div style={s.tabsBar}>
+        <Tabs tabs={tabs} value={tab} onChange={setTab} pad="0 24px" />
+      </div>
       <div style={s.content}>
-        {tab === "history" ? <VersionHistoryTab skill={skill} /> : <OverviewTab skill={skill} />}
+        {tab === "history" ? (
+          <VersionHistoryTab skill={skill} />
+        ) : tab === "context" ? (
+          <ContextTab skill={skill} />
+        ) : (
+          <OverviewTab skill={skill} />
+        )}
       </div>
     </div>
   );

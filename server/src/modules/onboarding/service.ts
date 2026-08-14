@@ -18,6 +18,12 @@ import { buildOnboardingMessages } from './prompt.js';
 import { buildSkeletonSections, deriveStatus, groundAndCapSections, isBelowMinimum } from './helpers.js';
 import type { OnboardingRepository, OnboardingRow } from './repository.js';
 
+const OnboardingLlmTask = z.object({
+  title: z.string(),
+  path: z.string(),
+  complexity: z.enum(['low', 'medium']),
+});
+
 /**
  * Module-local response schema for the single structured call (AC-4): exactly
  * five sections whose `kind`s equal `ONBOARDING_SECTION_KINDS` IN ORDER — a
@@ -25,14 +31,43 @@ import type { OnboardingRepository, OnboardingRow } from './repository.js';
  * validation before persistence. `OnboardingSection.kind` itself stays
  * `z.string()` in the shared contract (reused as-is); this is the module's
  * own narrowing.
+ *
+ * FIX-8: `tasks` is per-kind constrained via `superRefine` rather than a
+ * discriminated union on `kind` — `OnboardingLlmResponse`'s own order/length
+ * refinement already needs every section to share one object shape (it
+ * indexes `sections[i]` against `ONBOARDING_SECTION_KINDS[i]`), so narrowing
+ * `kind` into a discriminated union here would fight that existing check
+ * rather than compose with it. `first_tasks` MUST carry a non-empty `tasks`
+ * array; every other kind MUST leave it null/omitted — a response that gets
+ * this backwards fails validation before persistence, same AC-4 discipline
+ * already applied to section count/order.
  */
-const OnboardingLlmSection = z.object({
-  kind: OnboardingSectionKind,
-  title: z.string(),
-  body: z.string(),
-  diagram: z.string().nullish(),
-  links: z.array(z.object({ label: z.string(), path: z.string() })),
-});
+const OnboardingLlmSection = z
+  .object({
+    kind: OnboardingSectionKind,
+    title: z.string(),
+    body: z.string(),
+    diagram: z.string().nullish(),
+    links: z.array(z.object({ label: z.string(), path: z.string() })),
+    tasks: z.array(OnboardingLlmTask).nullish(),
+  })
+  .superRefine((section, ctx) => {
+    if (section.kind === 'first_tasks') {
+      if (!section.tasks || section.tasks.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'first_tasks section must include a non-empty tasks array',
+          path: ['tasks'],
+        });
+      }
+    } else if (section.tasks != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `tasks must be null/omitted for kind "${section.kind}"`,
+        path: ['tasks'],
+      });
+    }
+  });
 
 const OnboardingLlmResponse = z.object({
   sections: z
@@ -76,20 +111,28 @@ export class OnboardingService {
       return responseFromRow(row, indexState);
     }
 
-    // never_generated — still collect deterministic facts (facade + bounded
+    // No stored row yet — still collect deterministic facts (facade + bounded
     // clone reads, NO model call) so the first-visit skeleton is useful
-    // rather than an empty box (AC-22).
+    // rather than an empty box (AC-22). Derive the status via the SAME
+    // `deriveStatus` the below-minimum generation branch already uses
+    // (AC-17, AC-18) — a no-clone/not-indexed repo's first GET must be
+    // distinguishable from an ordinary never-generated repo; only fall back
+    // to `never_generated` once `deriveStatus` says the repo is otherwise
+    // fine (`ok`/`partial_index`) and generation genuinely just hasn't
+    // happened yet.
     const facts = await collectFacts(this.container, repoId, repoRow.clonePath);
+    const derived = deriveStatus(facts.indexState, facts);
+    const isRepoFine = derived.status === 'ok' || derived.status === 'partial_index';
     return {
       sections: buildSkeletonSections(facts),
-      status: 'never_generated',
+      status: isRepoFine ? 'never_generated' : derived.status,
       generated_at: null,
       files_indexed: facts.indexState.filesIndexed,
       index_status: facts.indexState.status,
       index_sha: facts.indexState.lastIndexedSha || null,
       stale: false,
       usage: null,
-      reason: 'No onboarding tour has been generated for this repo yet.',
+      reason: isRepoFine ? 'No onboarding tour has been generated for this repo yet.' : derived.reason,
     };
   }
 

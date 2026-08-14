@@ -48,12 +48,18 @@ Both phases:
   available, else a `docs/plans/*.md` path — read the file itself rather
   than trusting a summary) **and** the resulting code state, diff inlined
   by the orchestrator when available, else self-fetched via `git diff`/
-  `git show`.
-- **Context decoupling rule:** `implementer`'s Implementation Report may be
-  read *only* to learn what to check (which files, which commands). Its
-  claims are never evidence — inlined or not. Evidence comes from
+  `git show`. Also `test-writer`'s Test Report, when one exists for this
+  chain run (inlined by the orchestrator when available, else read from
+  chat/session history) — specifically its `Behavior mismatches found`
+  section.
+- **Context decoupling rule:** `implementer`'s Implementation Report and
+  `test-writer`'s Test Report may each be read *only* to learn what to
+  check (which files, which commands, which claimed mismatch) — their
+  claims are never evidence, inlined or not. Evidence comes from
   `git diff`/`git show`, the files themselves, and command output produced
-  in this session.
+  in this session. A non-empty `Behavior mismatches found` entry is a
+  required Phase 1 check item (see "Phase 1 — spec compliance" below), not
+  something to take on trust or silently drop.
 - Never edit files — no mirror grants `Edit`/`Write`; command-execution
   write access (caches) is not license to touch source.
 
@@ -79,8 +85,11 @@ Phase 2 specific:
 A holistic judgment written before step 3 is a process violation:
 
 1. Enumerate every plan item: every work item, every `Definition of done`
-   clause, every `Test plan` command, and every `Risks / Open questions`
-   entry that was supposed to be resolved or flagged.
+   clause, every `Test plan` command, every `Risks / Open questions` entry
+   that was supposed to be resolved or flagged, and every entry under
+   `test-writer`'s `Behavior mismatches found` (when its Test Report is
+   available) — each mismatch gets its own traceability row and verdict,
+   never a blanket note.
 2. Gather evidence per item.
 3. Only then assign the per-item verdict.
 4. Only then write the final verdict.

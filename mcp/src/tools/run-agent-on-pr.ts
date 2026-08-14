@@ -3,6 +3,7 @@ import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/proto
 import type { CallToolResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { ReviewRecord, ReviewRunResponse, RunSummary } from '@devdigest/shared';
 import type { ApiClient } from '../api-client.js';
+import { getRunTimeoutMs } from '../config.js';
 import { apiFailureToolError, buildResult, toolError } from '../errors.js';
 import { toVerdictResult } from '../project.js';
 import { resolveAgent, resolvePr, resolveRepo } from '../resolve.js';
@@ -12,15 +13,8 @@ import { registerTool } from './register.js';
 const DESCRIPTION =
   'Run a code review on a pull request using the given agent, wait for it to finish, and return the verdict with findings. Args: repo (owner/name), pr (PR number), agent (id from list_agents).';
 
-const DEFAULT_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled']);
-
-function getTimeoutMs(): number {
-  const raw = process.env.DEVDIGEST_MCP_RUN_TIMEOUT_MS;
-  const parsed = raw !== undefined ? Number(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +48,13 @@ export async function runAgentOnPrHandler(
   input: RunAgentOnPrInput,
   extra: ToolExtra,
 ): Promise<CallToolResult> {
+  let timeoutMs: number;
+  try {
+    timeoutMs = getRunTimeoutMs();
+  } catch (err) {
+    return toolError(err instanceof Error ? err.message : String(err));
+  }
+
   const repoResolved = await resolveRepo(api, input.repo);
   if (!repoResolved.ok) return repoResolved.result;
   const repo = repoResolved.value;
@@ -80,7 +81,6 @@ export async function runAgentOnPrHandler(
     );
   }
   const runId = target.run_id;
-  const timeoutMs = getTimeoutMs();
   const startedAt = Date.now();
 
   let run: RunSummary | undefined;

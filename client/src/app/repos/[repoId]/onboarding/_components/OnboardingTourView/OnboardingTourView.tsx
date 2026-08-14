@@ -50,11 +50,11 @@ export function OnboardingTourView() {
   }
 
   function handleGenerateClick() {
-    if (storedTourExists) {
-      setConfirmOpen(true);
-      return;
-    }
-    generateMutation.mutate();
+    // FIX-6: confirmation is required before EVERY paid, outbound-data-
+    // sending call — not only Regenerate. The Spec's own Non-goals ("only on
+    // an explicit, confirmed user action, because it costs money") and NFR
+    // A04 are not scoped to repos that already have a stored tour.
+    setConfirmOpen(true);
   }
 
   function handleConfirmed() {
@@ -108,6 +108,15 @@ export function OnboardingTourView() {
             </div>
           )}
 
+          {tour && tour.status !== "ok" && (
+            <div style={s.statusRow}>
+              <Badge color={statusBadgeColor(tour.status)} icon={statusBadgeIcon(tour.status)}>
+                {t(`status.${tour.status}` as "status.ok")}
+              </Badge>
+              <span style={s.statusText}>{tour.reason}</span>
+            </div>
+          )}
+
           {tour && storedTourExists && (
             <div style={s.costRow}>
               <span style={s.costText}>
@@ -125,7 +134,11 @@ export function OnboardingTourView() {
         </div>
 
         {confirmOpen && (
-          <RegenerateConfirmModal onConfirm={handleConfirmed} onClose={() => setConfirmOpen(false)} />
+          <RegenerateConfirmModal
+            mode={storedTourExists ? "regenerate" : "generate"}
+            onConfirm={handleConfirmed}
+            onClose={() => setConfirmOpen(false)}
+          />
         )}
 
         {isLoading ? (
@@ -137,11 +150,11 @@ export function OnboardingTourView() {
         ) : isError ? (
           <ErrorState body={error instanceof ApiError ? error.message : t("unknownError")} onRetry={() => refetch()} />
         ) : sections.length === 0 && tour ? (
-          <EmptyState
-            icon="Workflow"
-            title={t(emptyTitleKey(tour.status))}
-            body={t(emptyBodyKey(tour.status))}
-          />
+          // Genuinely empty (e.g. a corrupted stored row, E-15) — every other
+          // status still renders the 5-section skeleton server-side, so this
+          // is not where per-status copy belongs (AC-16); the status/reason
+          // row above already sourced tour.status/tour.reason directly.
+          <EmptyState icon="Workflow" title={t("empty.generic.title")} body={tour.reason} />
         ) : (
           <div style={s.sectionList}>
             {sections.map((section, i) => (
@@ -152,7 +165,6 @@ export function OnboardingTourView() {
                 defaultOpen={i === 0}
                 repoFullName={activeRepo?.full_name ?? null}
                 defaultBranch={activeRepo?.default_branch ?? "main"}
-                firstTasksBadge={section.kind === "first_tasks"}
               />
             ))}
           </div>
@@ -162,16 +174,14 @@ export function OnboardingTourView() {
   );
 }
 
-function emptyTitleKey(status: string): "empty.noClone.title" | "empty.notIndexed.title" | "empty.neverGenerated.title" | "empty.llmFailed.title" {
-  if (status === "no_clone") return "empty.noClone.title";
-  if (status === "not_indexed") return "empty.notIndexed.title";
-  if (status === "llm_failed") return "empty.llmFailed.title";
-  return "empty.neverGenerated.title";
+/** Badge styling per AC-17 status — distinct enough that no_clone/not_indexed
+ *  (informational) don't read as alarming as llm_failed (a real failure). */
+function statusBadgeColor(status: string): string {
+  if (status === "llm_failed") return "var(--crit)";
+  if (status === "partial_index") return "var(--warn)";
+  return "var(--text-secondary)";
 }
 
-function emptyBodyKey(status: string): "empty.noClone.body" | "empty.notIndexed.body" | "empty.neverGenerated.body" | "empty.llmFailed.body" {
-  if (status === "no_clone") return "empty.noClone.body";
-  if (status === "not_indexed") return "empty.notIndexed.body";
-  if (status === "llm_failed") return "empty.llmFailed.body";
-  return "empty.neverGenerated.body";
+function statusBadgeIcon(status: string): "AlertTriangle" | "Info" {
+  return status === "llm_failed" || status === "partial_index" ? "AlertTriangle" : "Info";
 }

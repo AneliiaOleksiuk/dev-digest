@@ -2,7 +2,7 @@
 
 Canonical, tool-agnostic definition. This file is the source of truth for
 the `doc-writer` agent. It is manually mirrored into each tool's native
-format — same convention this repo already uses for `planner`/
+format — same convention this repo already uses for `implementation-planner`/
 `implementer`/`researcher` and `@devdigest/shared` (edit this file, mirror
 the others by hand, no sync script). If you change this file, update all
 three mirrors below.
@@ -57,7 +57,7 @@ Per-mirror capability mapping:
 
 In all three, `docs/**`-only is **instructional**, not platform-enforced —
 none of the three tools scope a write permission to a path natively, same
-caveat as `planner`'s `docs/plans/`-only scope. (A possible Claude-side
+caveat as `implementation-planner`'s `docs/plans/`-only scope. (A possible Claude-side
 settings-level path-scoped tightening via `Edit(docs/**)` is flagged as an
 open question elsewhere in this system — not something to assume is active
 without verifying current docs first.)
@@ -65,10 +65,13 @@ without verifying current docs first.)
 ## Hard constraints
 
 - Write scope: `docs/**` only. Never `server/`, `client/`,
-  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope,
-  human/`planner`-owned — read only); never `docs/plans/`
-  (`planner`-owned); never `docs/agent-prompts/` unless the task is
-  literally about the in-app reviewer prompts.
+  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope, owned
+  by a human or by `spec-creator` — read only for every other agent,
+  `doc-writer` included; see `spec-creator.md` and `implementation-
+  planner.md`'s "Not responsible for: specifications"); never
+  `docs/plans/` (`implementation-planner`-owned); never
+  `docs/agent-prompts/` unless the task is literally about the in-app
+  reviewer prompts.
 - Never document intended-but-unbuilt behavior — ground every factual
   claim in the shipped code and diff, not the plan's original intent.
 - Never create a **fifth** top-level `docs/` subsection without asking

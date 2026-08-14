@@ -117,4 +117,94 @@ describe("SectionCard", () => {
     const anchor = screen.getByText("server entry").closest("a");
     expect(anchor).not.toHaveAttribute("href");
   });
+
+  // ------------------------------------------------------------------ AC-12
+  // FIX-8 KNOWN-STALE (implementer, not fixed here — test-writer's job next):
+  // these two assertions still encode the OLD one-badge-in-header design
+  // (a single "Model estimate" badge shown once for the whole section). FIX-8
+  // replaced it with a per-task complexity badge inside each task card, so
+  // `firstTasksBadge` no longer exists as a prop at all (a TYPE error, not
+  // just a stale assertion) — removed from the call sites below only so this
+  // file keeps compiling; the assertions themselves are left failing
+  // intentionally, same pattern as this repo's other known-regression fixes
+  // (see client/INSIGHTS.md's FIX-6/IntentCard entries).
+  it("AC-12: the First-tasks badge is labelled as a model ESTIMATE, not an unqualified measured property, and its tooltip states that", () => {
+    renderCard({ section: section({ kind: "first_tasks", title: "First tasks" }) });
+    const badge = screen.getByText("Model estimate");
+    expect(badge).toBeInTheDocument();
+    // The tooltip lives on the wrapping element's `title` attribute.
+    expect(badge.closest("[title]")).toHaveAttribute(
+      "title",
+      "Task ordering is the model's own estimate, not a measured property.",
+    );
+  });
+
+  it("AC-12: a section that is NOT first_tasks never renders the badge, even if firstTasksBadge were mistakenly passed true", () => {
+    renderCard({ section: section({ kind: "architecture" }) });
+    expect(screen.queryByText("Model estimate")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------- design conformance
+  it("critical_paths: a parseable bullet body renders file rows with an Open link, not raw markdown", () => {
+    renderCard({
+      section: section({
+        kind: "critical_paths",
+        body: "- `src/server.ts` — App bootstrap + middleware chain",
+      }),
+    });
+    expect(screen.getByText("src/server.ts")).toBeInTheDocument();
+    expect(screen.getByText(/App bootstrap \+ middleware chain/)).toBeInTheDocument();
+    const openLink = screen.getByRole("link", { name: /Open/ });
+    expect(openLink).toHaveAttribute("href", "https://github.com/acme/widgets/blob/main/src/server.ts");
+  });
+
+  it("critical_paths: an unparseable body (no bullets) falls back to Markdown, never blank", () => {
+    renderCard({ section: section({ kind: "critical_paths", body: "Just prose, no bullets." }) });
+    expect(screen.getByText("Just prose, no bullets.")).toBeInTheDocument();
+  });
+
+  it("critical_paths: the generic links list is suppressed once rows render — it would just repeat the same paths", () => {
+    renderCard({
+      section: section({
+        kind: "critical_paths",
+        body: "- `src/server.ts` — App bootstrap + middleware chain",
+        links: [{ label: "server.ts", path: "src/server.ts" }],
+      }),
+    });
+    // Exactly one Open-style link for src/server.ts (the row's own), not two.
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByText("server.ts")).not.toBeInTheDocument();
+  });
+
+  it("critical_paths: the generic links list still renders when the body doesn't parse into rows", () => {
+    renderCard({
+      section: section({
+        kind: "critical_paths",
+        body: "Just prose, no bullets.",
+        links: [{ label: "server.ts", path: "src/server.ts" }],
+      }),
+    });
+    expect(screen.getByText("server.ts")).toBeInTheDocument();
+  });
+
+  it("reading_path: a numbered body renders a numbered badge per entry", () => {
+    renderCard({
+      section: section({
+        kind: "reading_path",
+        body: "1. `src/server.ts` — See the whole request lifecycle in one file",
+      }),
+    });
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("src/server.ts")).toBeInTheDocument();
+    expect(screen.getByText("See the whole request lifecycle in one file")).toBeInTheDocument();
+  });
+
+  it("run_locally: a fenced command body renders one row per command with a per-row copy action, and no header copy button", () => {
+    renderCard({
+      section: section({ kind: "run_locally", body: "```bash\npnpm install\npnpm dev\n```" }),
+    });
+    expect(screen.getByText("pnpm install")).toBeInTheDocument();
+    expect(screen.getByText("pnpm dev")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+  });
 });

@@ -213,17 +213,15 @@ d('Onboarding (SPEC-02) routes + generation', () => {
   });
 
   // --------------------------------------------------------------- AC-18
-  // KNOWN FAILING (Phase-1 oracle, kept intentionally — see the Test Report's
-  // "Behavior mismatches found"): `OnboardingService.getTour`'s no-stored-row
-  // branch hardcodes `status: 'never_generated'` instead of calling the same
+  // FIX-3 (fix plan for the prior plan-verifier Phase 1 FAIL): this test used
+  // to fail — `OnboardingService.getTour`'s no-stored-row branch used to
+  // hardcode `status: 'never_generated'` instead of calling the same
   // `deriveStatus(indexState, facts)` helper `runGeneration`'s below-minimum
-  // branch already uses. A no-clone repo's very first GET therefore reads as
-  // a generic "never generated" (Generate CTA) rather than AC-17's distinct
-  // `no_clone` status, even though `facts.noClone` is already known at that
-  // point. Per AC-17 ("one enumerated status ... distinguishing at minimum
-  // ... no clone ... never generated") and the sequence diagram (GET already
-  // returns "tour + status" on page load), the first GET should be able to
-  // tell these apart without requiring a POST first.
+  // branch already uses, so a no-clone repo's very first GET read as a
+  // generic "never generated" rather than AC-17's distinct `no_clone` status.
+  // `getTour` now calls `deriveStatus` too, falling back to `never_generated`
+  // only when the derived status is `ok`/`partial_index` — confirmed green
+  // below with NO change to this test's assertions.
   it('AC-18: no local clone renders a skeleton and skips the LLM call entirely — zero model calls', async () => {
     const repo = await makeRepo({ clonePath: null });
     const { llm, appPromise } = appWith({ structured: VALID_FIXTURE });
@@ -238,6 +236,41 @@ d('Onboarding (SPEC-02) routes + generation', () => {
     expect(postRes.statusCode).toBe(200);
     expect((postRes.json() as OnboardingTourResponse).status).toBe('no_clone');
     expect(llm.calls).toEqual([]);
+
+    await app.close();
+  });
+
+  // ----------------------------------------------------- FIX-3 (AC-17/AC-18)
+  it('FIX-3: a repo WITH a clone and a healthy (ok) index, but genuinely never generated, reads as never_generated — not no_clone/not_indexed', async () => {
+    const repo = await makeRepo(); // has a clone (beforeAll's clonePath) + the above-minimum stub index
+    const { llm, appPromise } = appWith({ structured: VALID_FIXTURE });
+    const app = await appPromise;
+
+    const getRes = await app.inject({ method: 'GET', url: `/repos/${repo.id}/onboarding` });
+    expect(getRes.statusCode).toBe(200);
+    const body = getRes.json() as OnboardingTourResponse;
+    expect(body.status).toBe('never_generated');
+    expect(body.generated_at).toBeNull();
+    expect(llm.calls).toEqual([]);
+
+    await app.close();
+  });
+
+  // -------------------------------------------------------------- FIX-4/AC-15
+  it("FIX-4: a walk bounded at MAX_INDEXED_FILES (IndexState.bounded: true) derives partial_index EVEN THOUGH IndexState.status is 'full' — a full-status index can still be an alphabetically-truncated slice (E-5)", async () => {
+    const repo = await makeRepo();
+    const boundedRepoIntel = aboveMinimumRepoIntel({
+      getIndexState: async () => indexState({ status: 'full', bounded: true, filesIndexed: 5000 }),
+    });
+    const { llm, appPromise } = appWith({ structured: VALID_FIXTURE, repoIntel: boundedRepoIntel });
+    const app = await appPromise;
+
+    const res = await app.inject({ method: 'POST', url: `/repos/${repo.id}/onboarding/generate` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as OnboardingTourResponse;
+    expect(body.status).toBe('partial_index');
+    expect(body.reason.toLowerCase()).toContain('partial');
+    expect(llm.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
 
     await app.close();
   });

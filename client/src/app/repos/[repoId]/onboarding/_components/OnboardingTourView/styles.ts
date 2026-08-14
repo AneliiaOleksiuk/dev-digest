@@ -17,6 +17,8 @@ export const s = {
   metaText: { fontSize: 13, color: "var(--text-secondary)" } satisfies CSSProperties,
   costRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } satisfies CSSProperties,
   costText: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  statusRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } satisfies CSSProperties,
+  statusText: { fontSize: 13, color: "var(--text-secondary)" } satisfies CSSProperties,
   resyncNote: { fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 } satisfies CSSProperties,
   loadingStack: { display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
   sectionList: { display: "flex", flexDirection: "column", gap: 12 } satisfies CSSProperties,

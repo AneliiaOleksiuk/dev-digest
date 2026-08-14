@@ -33,8 +33,10 @@
       "provider": "Provider",
       "memoryPulled": "Memory pulled",
       "specsRead": "Specs read",
+      "projectContextDocs": "Project context documents",
       "items": "{count, plural, one {# item} other {# items}}",
-      "none": "none"
+      "none": "none",
+      "docSize": "{tokens} tok / {chars} ch"
     },
     "stat": {
       "duration": "DURATION",
@@ -47,7 +49,7 @@
       "skills": "Skills (dynamic)",
       "memory": "Memory (dynamic)",
       "repoMap": "Repo skeleton — repo-intel (dynamic)",
-      "specs": "Project context (dynamic)",
+      "specs": "Project context — attached specs (untrusted)",
       "callers": "Callers of changed symbols — repo-intel (dynamic)",
       "intent": "Derived intent & scope (dynamic)",
       "user": "User / diff (dynamic)",

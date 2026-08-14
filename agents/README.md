@@ -39,17 +39,21 @@ dropped from this set on 2026-08-07 — see root
 
 | Agent | Responsibility | Capabilities (tool-agnostic) | Model | Reads (input) | Produces (output) |
 |---|---|---|---|---|---|
-| [planner](planner.md) | Turns a feature/task request into a structured **Development Plan** grounded in real files, `AGENTS.md`/`INSIGHTS.md` constraints, do-not-touch paths, and the skills catalog. Never writes code, never executes the plan. | Read/search the repo, read-only git history; write exactly one file per run (`docs/plans/<slug>.md`) — no other path, ever; ask a clarifying question before starting if the task is vague | Opus (or the calling tool's strongest reasoning tier) — planning quality is the bottleneck this agent protects | Task/feature request; root + package `AGENTS.md`/`INSIGHTS.md`; target module code; `.claude/skills/*/SKILL.md` catalog | Development Plan (chat) + saved copy at `docs/plans/<slug>.md` |
+| [spec-creator](spec-creator.md) | Turns a feature/task request into a **Spec** (SDD — problem, goals/non-goals, EARS acceptance criteria, edge cases, NFRs, cross-module interaction, UX) grounded in real code, existing specs, and any design assets provided. Runs before `implementation-planner`. `specs/` is otherwise human-authored, read-only to every other agent in this set — this is the one sole exception. Invokes `security` (grounds NFRs/Untrusted inputs in OWASP concerns) and `mermaid-diagram` (optional diagram for any multi-step/branching section). Delegates external/investigative sub-questions it has no tool for (an external design link, an ambiguous cross-module question) to `researcher`, in parallel when the sub-questions are independent. Runs a self-check checklist and fills a traceability table (`Inputs and provenance`) before reporting. Never writes code, never produces a Development Plan. | Read/search the repo, read design assets (pasted images, repo files); invoke the `security`/`mermaid-diagram` skills; delegate to `researcher` (Claude Code: `Agent` tool, optionally several in parallel) for anything requiring an external fetch or deeper investigation; write exactly one file per run under `specs/` — a `specs/<module>/` subfolder for a single-module Spec, top-level `specs/` for a cross-module one — no other path, ever; draft in chat and get explicit approval before writing; ask clarifying questions for anything ungrounded | Opus — Spec quality is the bottleneck the rest of the SDD chain depends on | Task/feature request; design assets; root + package `AGENTS.md`/`INSIGHTS.md` (touched modules only); existing `specs/*.md`; `docs/adr/**`/`docs/features/**`; `researcher` reports when delegated | Spec draft (chat, incl. traceability table + self-check) + saved copy at `specs/SPEC-NN-<slug>.md` |
+| [implementation-planner](implementation-planner.md) | Turns an already-scoped feature/task request into a structured **Development Plan** grounded in real files, `AGENTS.md`/`INSIGHTS.md` constraints, do-not-touch paths, and the skills catalog; reads existing `specs/*.md` as requirements input and surfaces its own approach recommendations, but never authors, edits, or completes a spec. Confirms multi-agent vs. single-agent execution mode before saving the plan. Never writes code, never executes the plan. | Read/search the repo, read-only git history; write exactly one file per run (`docs/plans/<slug>.md`) — no other path, ever, and never `specs/`; ask a clarifying question before starting if the task or its requirements are unclear, and once to confirm execution mode | Opus (or the calling tool's strongest reasoning tier) — planning quality is the bottleneck this agent protects | Task/feature request; `specs/SPEC-NN-*.md` if `spec-creator` produced one; root + package `AGENTS.md`/`INSIGHTS.md`; target module code; `.claude/skills/*/SKILL.md` catalog | Development Plan (chat, incl. `Recommendations` + chosen execution mode) + saved copy at `docs/plans/<slug>.md` |
 | [implementer](implementer.md) | Executes an already-approved Development Plan across `client/`/`server/`: applies each work item's specified skills, edits code, runs tests, self-checks the diff. No architecture/security review. | Read/edit/write repo files; run shell commands (installs, tests, typecheck, build — never destructive git ops without confirmation); invoke skills per work item, not preloaded | Sonnet (or the calling tool's mid-to-high tier) — correctness matters more than raw cost here | A Development Plan (pasted inline by the orchestrator when available, else a `docs/plans/*.md` path); package `INSIGHTS.md` (inlined by the orchestrator when available, else read directly) | Code changes; test results; updated `INSIGHTS.md`; Implementation Report (chat) |
 | [researcher](researcher.md) | Read-only investigation in two modes — **repository research** or **external research** — for questions that need investigating before anyone changes code. | Read/search the repo and git history; fetch/search external web sources; ask a clarifying question before starting if the task is vague; never writes/edits/deletes anything | Mid-tier reasoning model (Sonnet or equivalent) — research/synthesis, not a task needing the largest model | A concrete, checkable question; scope (repo/external/both) | Repository Research or External Research report (chat only — never a file) |
 | [test-writer](test-writer.md) | Writes tests for code `implementer` already shipped, as a separate post-implementation pass with a two-phase oracle-independence rule (derive expected behavior from the plan/spec/contract before reading implementation). `e2e/` is out of scope. | Read/search the repo, the plan, specs, contracts; write test files only (`server/test/**`, colocated `client` `*.test.tsx`, `reviewer-core/test/**`); run test commands; invoke `react-testing-library`/`react-best-practices`/`fastify-best-practices`/`drizzle-orm-patterns`/`typescript-expert`/`zod` per test class | Sonnet (`inherit` in Cursor) | A Development Plan + spec (if any), inlined by the orchestrator when available; the shipped code (for wiring facts only) | Test files; Test Report (chat) |
-| [plan-verifier](plan-verifier.md) | Two-phase gate that runs after `test-writer`: **Phase 1 — spec compliance**, per-item traceability of the Development Plan against observable evidence (`git diff`, command output), binary verdicts, non-hedgeable final verdict (`PASS`/`FAIL`/`PASS WITH REQUIRED FIXES`), locked before Phase 2 starts. **Phase 2 — architecture review**, the semantic judgment layer above the deterministic `depcruise` check (`server/arch:check`) — reports only import-legal boundary violations `depcruise` can't express, never re-reporting what the tool already caught. | Read/search/`git diff`/`git show`; command execution for tests, typecheck, and `pnpm arch:check` (no `Edit`/`Write` in any mirror) | Opus, prefer a different model family than the implementer where possible | A Development Plan + the resulting code state, diff inlined by the orchestrator when available; `implementer`'s report (for what to check only, never as evidence); `server/.dependency-cruiser.cjs` | Plan Verification report (`VERDICT: PASS`/`FAIL`/`PASS WITH REQUIRED FIXES`) immediately followed, in the same response, by an Architecture Review section (findings table) — chat only |
+| [plan-verifier](plan-verifier.md) | Two-phase gate that runs after `test-writer`: **Phase 1 — spec compliance**, per-item traceability of the Development Plan against observable evidence (`git diff`, command output), binary verdicts, non-hedgeable final verdict (`PASS`/`FAIL`/`PASS WITH REQUIRED FIXES`), locked before Phase 2 starts. **Phase 2 — architecture review**, the semantic judgment layer above the deterministic `depcruise` check (`server/arch:check`) — reports only import-legal boundary violations `depcruise` can't express, never re-reporting what the tool already caught. | Read/search/`git diff`/`git show`; command execution for tests, typecheck, and `pnpm arch:check` (no `Edit`/`Write` in any mirror) | Opus, prefer a different model family than the implementer where possible | A Development Plan + the resulting code state, diff inlined by the orchestrator when available; `implementer`'s report and `test-writer`'s Test Report (for what to check only, never as evidence — see Context decoupling rule); `server/.dependency-cruiser.cjs` | Plan Verification report (`VERDICT: PASS`/`FAIL`/`PASS WITH REQUIRED FIXES`) immediately followed, in the same response, by an Architecture Review section (findings table) — chat only |
 | [doc-writer](doc-writer.md) | Documents already-implemented, already-verified features per a 7-branch Diátaxis placement rule. Runs last in the chain. | Read/search the repo, the plan, `implementer`'s report `Deviations`; write scoped to `docs/**` only; invokes `mermaid-diagram` | Sonnet | Shipped code/diff (inlined by the orchestrator when available); Development Plan; `plan-verifier`'s Phase 2 findings | New file(s) under `docs/**`; Documentation Report (chat) |
 
 ## Handoff chain
 
 ```
-user/orchestrator → planner → Development Plan (docs/plans/<slug>.md)
+user/orchestrator → spec-creator → Spec (specs/SPEC-NN-<slug>.md)
+                                        │            (optional — see below)
+                                        ▼
+                          implementation-planner → Development Plan (docs/plans/<slug>.md)
                                         │
                                         ▼
                                   implementer → code + INSIGHTS.md
@@ -76,13 +80,23 @@ user/orchestrator → planner → Development Plan (docs/plans/<slug>.md)
                                     doc-writer → docs/** only
 ```
 
+- `spec-creator` is the only **optional** step at the front of the chain —
+  `implementation-planner` works from a `specs/*.md` file when one exists,
+  but also accepts a bare task description directly, same as before
+  `spec-creator` existed. Run it first when the feature is non-trivial
+  enough to be worth a decision record; skip it for small, already-obvious
+  changes.
 - `researcher` remains outside the chain — it's invoked independently,
   whenever a step in any workflow needs an investigated answer rather than
   a plan or a code change.
 - A `FAIL` from `plan-verifier`'s Phase 1, or a `Critical` from its Phase 2,
   loops back to **`implementer`** against the *same* plan — not to
-  `planner` — unless the finding is that the plan itself was wrong, which
-  is the only case that re-enters at `planner`.
+  `implementation-planner` — unless the finding is that the plan itself was
+  wrong, which is the only case that re-enters at `implementation-planner`.
+- A non-empty `Behavior mismatches found` from `test-writer`, once
+  `plan-verifier` confirms it with its own evidence, becomes a Phase 1
+  `NOT MET` row and follows the same loop-back to `implementer` — it never
+  reaches `doc-writer` unaddressed.
 - Phase 1's verdict must be written and locked **before** Phase 2 begins —
   merging the two phases into one agent must not let architecture findings
   bleed into or soften the spec-compliance verdict. See "Why plan-verifier
@@ -141,7 +155,7 @@ invokes it**, instead of being told to go fetch them itself via `git diff`/
 
 - Each agent still forms its **own independent judgment** from that inlined
   content — `implementer` still reviews `INSIGHTS.md` itself rather than
-  trusting `planner`'s summary of it; `plan-verifier` still never treats
+  trusting `implementation-planner`'s summary of it; `plan-verifier` still never treats
   `implementer`'s narrative claims as evidence, inlined diff or not.
 - Every agent still works standalone if invoked directly (e.g. a human
   pastes a `docs/plans/*.md` path into Cursor with no orchestrator) — inline
@@ -158,7 +172,7 @@ invokes it**, instead of being told to go fetch them itself via `git diff`/
 None of the three mirrored tools support scoping a write permission to a
 single path natively: Claude Code's `tools:` list, Codex's `sandbox_mode`,
 and Cursor's `readonly` are all repo-wide read-only/read-write toggles, not
-per-path grants. So `planner`'s "`docs/plans/` only" boundary, and
+per-path grants. So `implementation-planner`'s "`docs/plans/` only" boundary, and
 `implementer`'s "manual approval expected," are **instructional** boundaries
 here — enforced by the agent following them, not by a technical sandbox in
 any of the three tools. Each tool directory's own README
@@ -176,7 +190,7 @@ The two boundary shapes the four newer personas add:
   `pnpm arch:check` report anything" must be observed by actually running
   commands in this session, not assumed.
 - **Path-scoped write** (`test-writer` → test files only; `doc-writer` →
-  `docs/**` only) — same shape as `planner`'s `docs/plans/`-only scope:
+  `docs/**` only) — same shape as `implementation-planner`'s `docs/plans/`-only scope:
   instructional in all three mirrors, since none of them support scoping a
   write permission to a path natively (see Risks #2 in the plan that
   introduced these personas for one documented exception worth
@@ -189,7 +203,43 @@ or external sources, not invented rules. A change to any of these sources
 is a signal to revisit the corresponding file here (and then all three
 mirrors).
 
-**planner** (`planner.md`):
+**spec-creator** (`spec-creator.md`):
+- User-provided EARS reference (Mavin/Wilkinson/Harwood/Novak, IEEE RE'09)
+  — source of the five acceptance-criteria patterns and their English
+  trigger words (`WHEN`/`WHILE`/`IF...THEN`/`WHERE`, "shall").
+- User-provided Spec template (header fields + 11-section body) — source of
+  the exact section order this agent writes verbatim, in English; extended
+  with two sections (`Module interaction / API contracts`, `UX
+  improvements`) and a `Modules:` header field per decisions made when this
+  persona was designed (see this file's own commit history for the session
+  that produced it).
+- `docs/adr/NNNN-title.md` naming convention — source of the
+  `specs/SPEC-NN-<slug>.md` filename shape.
+- `.claude/skills/security/SKILL.md` — source of the OWASP-grounding step
+  this agent runs before finalizing `Non-functional requirements` and
+  `Untrusted inputs`.
+- `.claude/skills/mermaid-diagram/SKILL.md` — source of the optional
+  diagram this agent produces for `Module interaction / API contracts`
+  when the interaction is non-trivial, same skill `doc-writer` already uses
+  for its own diagrams.
+- `pr-description` skill's "draft in chat, wait for approval" convention —
+  source of this agent's own draft-then-write rule.
+- `implementation-planner.md`'s "Not responsible for: specifications" and
+  `doc-writer.md`'s `specs/` read-only boundary — the human-authored-only
+  rule this agent is the sole, explicitly carved-out exception to.
+- `researcher.md`'s "invoked independently, outside the chain" pattern —
+  source of how this agent handles an investigative gap it has no tool
+  for (an external design link, an ambiguous cross-module question):
+  delegate to `researcher` (parallel instances per independent
+  sub-question in Claude Code) rather than guessing, instead of being
+  granted a web-fetch tool of its own.
+- `plan-verifier.md`'s Phase 1 Requirements Traceability Matrix pattern —
+  source of this agent's own traceability table (`Inputs and provenance`
+  as Section → Grounded-in, not free prose) and its pre-report self-check
+  checklist, the same "evidence before judgment" discipline applied to a
+  Spec instead of a Development Plan.
+
+**implementation-planner** (`implementation-planner.md`):
 - Root [`AGENTS.md`](../AGENTS.md) — "read `INSIGHTS.md` before starting
   work" convention; per-package do-not-touch lists; the package layout the
   plan's `Scope` section reflects.
@@ -200,16 +250,24 @@ mirrors).
   name an exact skill. (The catalog itself lives under `.claude/`, but it's
   shared across all three tools — none of the others have a native skills
   mechanism of their own.)
+- `spec-creator.md` — source of the `specs/SPEC-NN-<slug>.md` shape this
+  agent reads as requirements input; `specs/skills-feature.md` and
+  `specs/conventions-extractor.md` predate `spec-creator` and don't follow
+  that shape (no `Spec ID`/`Status`/EARS) — still readable as legacy
+  context, not as the current template. Source of the "read specs as
+  requirements input, never author one" boundary in "Not responsible for:
+  specifications".
 
 **implementer** (`implementer.md`):
-- Root [`AGENTS.md`](../AGENTS.md) — same do-not-touch lists as `planner`;
-  the "update `INSIGHTS.md` before ending a session" convention that drives
-  the End-of-session step.
+- Root [`AGENTS.md`](../AGENTS.md) — same do-not-touch lists as
+  `implementation-planner`; the "update `INSIGHTS.md` before ending a
+  session" convention that drives the End-of-session step.
 - `engineering-insights` skill — defines what's worth recording in
   `INSIGHTS.md` and the append-only format `implementer` follows there.
-- `planner`'s own Development Plan report format — `implementer`'s entire
-  input contract (work items, `Applicable skills`, `Definition of done`) is
-  defined by `planner.md`, not chosen independently.
+- `implementation-planner`'s own Development Plan report format —
+  `implementer`'s entire input contract (work items, `Applicable skills`,
+  `Definition of done`) is defined by `implementation-planner.md`, not
+  chosen independently.
 - Each tool's own docs on subagent permission models — cited per-mirror,
   not here, since the caveat is different in each tool (see each mirror
   directory's README).

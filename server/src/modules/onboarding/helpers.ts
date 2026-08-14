@@ -4,7 +4,7 @@
  * `no-helpers-to-io`); `facts.ts` is a plain sibling import (fact collection
  * already happened by the time these run).
  */
-import type { OnboardingLink, OnboardingSection, OnboardingStatus } from '@devdigest/shared';
+import type { OnboardingLink, OnboardingSection, OnboardingStatus, OnboardingTask } from '@devdigest/shared';
 import { ONBOARDING_SECTION_KINDS } from '@devdigest/shared';
 import type { IndexState } from '../repo-intel/types.js';
 import type { CollectedFacts, FileExcerpt } from './facts.js';
@@ -71,10 +71,16 @@ export function deriveStatus(indexState: IndexState, facts: CollectedFacts): Der
         'This repo has not been indexed yet — the tour is built from a bounded, deterministic file sample instead of the import graph.',
     };
   }
-  if (indexState.status === 'partial') {
+  // A `full` index can still be built over an alphabetically-truncated slice
+  // of a very large repo (E-5, `pipeline/walk.ts` `MAX_INDEXED_FILES`) — that
+  // must read as partial too, not as an unqualified "full index" claim
+  // (AC-15).
+  if (indexState.status === 'partial' || indexState.bounded) {
     return {
       status: 'partial_index',
-      reason: `Generated from a partial index of ${indexState.filesIndexed} files — some files may be missing.`,
+      reason: indexState.bounded
+        ? `Generated from a partial index of ${indexState.filesIndexed} files — this repo is larger than the indexer's file cap, so some files were left out.`
+        : `Generated from a partial index of ${indexState.filesIndexed} files — some files may be missing.`,
     };
   }
   return { status: 'ok', reason: `Generated from a full index of ${indexState.filesIndexed} files.` };
@@ -101,16 +107,30 @@ const FENCE_RE = /```([a-zA-Z0-9]*)\n([\s\S]*?)```/g;
  *  real run-locally source file (AC-8) — checked per fenced-code-block line;
  *  a line not found (trimmed, substring match) anywhere in the sources is
  *  dropped, and a fence left with nothing but blank/comment lines is removed
- *  entirely rather than rendered empty. */
+ *  entirely rather than rendered empty.
+ *
+ *  Every surviving command line is attributed to its matching source file as
+ *  a trailing shell comment (`  # from <path>`) — a real command someone can
+ *  copy-paste, so AC-34's "make clear they originate from the repository"
+ *  has to survive the copy, not just sit beside it as page chrome. Same
+ *  `# comment` attribution convention `extractDeterministicCommands` already
+ *  uses for `npm run <script>  # <script body>`; the deterministic skeleton's
+ *  own bullet-list `(from \`path\`)` suffix isn't reused here because it
+ *  would break out of the fenced code block's own syntax. */
 export function groundRunLocallyBody(body: string, sources: FileExcerpt[]): string {
-  const haystack = sources.map((s) => s.content).join('\n');
   return body.replace(FENCE_RE, (whole, lang: string, code: string) => {
     const lines = code.split('\n');
-    const kept = lines.filter((line) => {
+    const kept: string[] = [];
+    for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed.length === 0 || trimmed.startsWith('#')) return true;
-      return haystack.includes(trimmed);
-    });
+      if (trimmed.length === 0 || trimmed.startsWith('#')) {
+        kept.push(line);
+        continue;
+      }
+      const source = sources.find((s) => s.content.includes(trimmed));
+      if (!source) continue; // not verbatim-matched to any real source — dropped
+      kept.push(`${line}  # from ${source.path}`);
+    }
     if (kept.every((l) => l.trim().length === 0 || l.trim().startsWith('#'))) return '';
     return '```' + lang + '\n' + kept.join('\n') + '```';
   });
@@ -161,6 +181,85 @@ export function capBulletItems(body: string, maxItems: number): string {
   return out.join('\n');
 }
 
+/** Inline-code spans as used throughout this module's own generated bodies
+ *  (`` `path/to/file.ts` ``) — single backticks, not triple-fenced blocks
+ *  (those are `run_locally`'s own concern via `groundRunLocallyBody`). */
+const INLINE_CODE_RE = /`([^`\n]+)`/g;
+
+/** Heuristic: does an inline-code token look like it names a file path,
+ *  rather than an identifier, command or library name? Every path this
+ *  module ever cites is either nested (`server/src/...`) or a recognizable
+ *  root file with a source/doc extension (`README.md`, `package.json`). */
+function looksLikePath(token: string): boolean {
+  if (token.includes('/')) return true;
+  return /\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|ya?ml|py|go|rs|java|rb|php|c|cpp|h|hpp|css|scss|html|sql|sh|toml)$/i.test(
+    token,
+  );
+}
+
+/**
+ * Drop any top-level bullet/numbered item (and its continuation lines) whose
+ * text names a path-shaped inline-code token that is NOT present in
+ * `knownPaths(facts)` (AC-7, AC-10, W7) — grounding the section BODY itself,
+ * not only `links[]`. A model that invents a plausible file path in prose
+ * (rather than as a structured link) is exactly the failure AC-6/AC-7 exist
+ * to prevent — same discard contract as `conventions/service.ts:141-166`.
+ * Applied to `critical_paths`, `reading_path` and `first_tasks` only, the
+ * three kinds whose Spec text requires per-item/per-row grounding
+ * (`run_locally` has its own verbatim-match grounding already).
+ */
+export function groundBulletItemPaths(body: string, paths: Set<string>): string {
+  const lines = body.split('\n');
+  const out: string[] = [];
+  let itemLines: string[] = [];
+
+  const flush = () => {
+    if (itemLines.length === 0) return;
+    let ungrounded = false;
+    for (const line of itemLines) {
+      for (const match of line.matchAll(INLINE_CODE_RE)) {
+        const token = match[1]!.trim();
+        if (looksLikePath(token) && !paths.has(token)) {
+          ungrounded = true;
+          break;
+        }
+      }
+      if (ungrounded) break;
+    }
+    if (!ungrounded) out.push(...itemLines);
+    itemLines = [];
+  };
+
+  for (const line of lines) {
+    if (BULLET_RE.test(line)) {
+      flush();
+      itemLines.push(line);
+    } else if (itemLines.length > 0) {
+      itemLines.push(line); // continuation of the current item
+    } else {
+      out.push(line); // non-list prose outside any item — untouched
+    }
+  }
+  flush();
+
+  return out.join('\n');
+}
+
+/** Drop any `first_tasks` task whose `path` is not in `knownPaths(facts)` —
+ *  the SAME discard contract AC-7/D-8 already require for `links[]` (FIX-8),
+ *  applied to `tasks[].path` instead — then cap the survivors at
+ *  `MAX_FIRST_TASK_CARDS` (reusing the existing render cap, not a second
+ *  one). `null` for every kind but `first_tasks`, matching how `diagram` is
+ *  forced null for every kind but `architecture`. */
+export function groundTasks(
+  kind: string,
+  tasks: OnboardingTask[] | null | undefined,
+  paths: Set<string>,
+): OnboardingTask[] | null {
+  if (kind !== 'first_tasks') return null;
+  return (tasks ?? []).filter((task) => paths.has(task.path)).slice(0, MAX_FIRST_TASK_CARDS);
+}
+
 /** Grounding + capping for one LLM-authored section (AC-7, AC-8, AC-14, D-8)
  *  — pure, no I/O. `diagram` is forced to `null` for every kind but
  *  `architecture`, matching the template's own rule regardless of what the
@@ -179,10 +278,13 @@ export function groundAndCapSection(
     body = groundRunLocallyBody(body, facts.runLocallySources);
     body = capRunLocallySteps(body, MAX_RUN_LOCALLY_STEPS);
   } else if (section.kind === 'reading_path') {
+    body = groundBulletItemPaths(body, paths);
     body = capBulletItems(body, MAX_READING_PATH_ENTRIES);
   } else if (section.kind === 'critical_paths') {
+    body = groundBulletItemPaths(body, paths);
     body = capBulletItems(body, MAX_CRITICAL_PATH_ROWS);
   } else if (section.kind === 'first_tasks') {
+    body = groundBulletItemPaths(body, paths);
     body = capBulletItems(body, MAX_FIRST_TASK_CARDS);
   }
 
@@ -192,6 +294,7 @@ export function groundAndCapSection(
     body,
     diagram: section.kind === 'architecture' ? (section.diagram ?? null) : null,
     links,
+    tasks: groundTasks(section.kind, section.tasks, paths),
   };
 }
 
@@ -337,5 +440,8 @@ export function buildSkeletonSections(facts: CollectedFacts): OnboardingSection[
     body: sections[kind].body,
     diagram: null,
     links: [],
+    // The skeleton never invents content (AC-22) — `first_tasks` gets an
+    // empty array (never fabricated tasks), every other kind stays null.
+    tasks: kind === 'first_tasks' ? [] : null,
   }));
 }

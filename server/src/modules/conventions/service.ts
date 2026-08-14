@@ -77,7 +77,11 @@ export class ConventionsService {
 
   /** Bundle accepted candidates into one real skill, then link them to it. */
   async promote(workspaceId: string, input: PromoteInput): Promise<Skill> {
-    const skillsService = new SkillsService(this.container.skillsRepo, this.container.skillUrlFetcher);
+    const skillsService = new SkillsService(
+      this.container.skillsRepo,
+      this.container.skillUrlFetcher,
+      this.container.contextRepo,
+    );
     const skill = await skillsService.create(workspaceId, {
       name: input.skill.name,
       description: input.skill.description,

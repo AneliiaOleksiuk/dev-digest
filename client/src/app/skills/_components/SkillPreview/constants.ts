@@ -8,12 +8,13 @@ export const TYPE_OPTIONS = [
 ] as const;
 
 export interface PreviewTab {
-  key: "overview" | "history";
+  key: "overview" | "history" | "context";
   labelKey: string;
   icon: IconName;
 }
 
 export const PREVIEW_TABS: readonly PreviewTab[] = [
   { key: "overview", labelKey: "preview.tabs.overview", icon: "FileText" },
+  { key: "context", labelKey: "preview.tabs.context", icon: "Folder" },
   { key: "history", labelKey: "preview.tabs.history", icon: "History" },
 ];

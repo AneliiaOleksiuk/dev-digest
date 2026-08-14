@@ -41,6 +41,7 @@ export type {
   Onboarding,
   OnboardingSection,
   OnboardingLink,
+  OnboardingTask,
   OnboardingSectionKind,
   OnboardingStatus,
   OnboardingGenerationUsage,

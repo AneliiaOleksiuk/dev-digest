@@ -34,6 +34,10 @@ const EnvSchema = z.object({
   API_PORT: z.coerce.number().int().default(3001),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
+  // Project Context (SPEC-01): comma-separated search-root folder names,
+  // walked recursively for `.md` documents. A server config value per D-3 —
+  // not a per-repo UI setting.
+  PROJECT_CONTEXT_ROOTS: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   // `.env` (and .env.example) ship `LOG_LEVEL=` empty; an empty string is not a
   // valid enum member, so coerce '' → undefined to fall through to the default.
@@ -71,6 +75,9 @@ export type AppConfig = {
    * stray `PROMPT_LOG_VERBOSE=true` in a deployed env can never enable it.
    */
   promptLogVerbose: boolean;
+  /** Search-root folder names walked recursively for `.md` project-context
+   *  documents (default: specs, docs, insights — D-3). */
+  projectContextRoots: string[];
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -90,5 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
     promptLogVerbose: parsed.PROMPT_LOG_VERBOSE === 'true' && parsed.NODE_ENV !== 'production',
+    projectContextRoots: (parsed.PROJECT_CONTEXT_ROOTS ?? 'specs,docs,insights')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

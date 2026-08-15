@@ -19,12 +19,17 @@ export function usePrBrief(prId: string | null | undefined) {
 }
 
 /** GET /pulls/:id/brief/timeline — every persisted brief for the PR, newest
- *  first. Lazy: only fetched once the Why Timeline disclosure is opened. */
+ *  first. Lazy: only fetched once the Why Timeline disclosure is opened.
+ *  `staleTime: Infinity` — the cache is only ever invalidated explicitly, by
+ *  `useGeneratePrBrief`'s `onSuccess` below, not by the global 30s default;
+ *  otherwise closing and reopening the disclosure after a short pause
+ *  re-fetches even though nothing changed. */
 export function usePrBriefTimeline(prId: string | null | undefined, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["pr-brief-timeline", prId],
     queryFn: () => api.get<BriefTimelineResponse>(`/pulls/${prId}/brief/timeline`),
     enabled: !!prId && (options?.enabled ?? false),
+    staleTime: Infinity,
   });
 }
 

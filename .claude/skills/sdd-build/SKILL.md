@@ -1,6 +1,6 @@
 ---
 name: sdd-build
-description: "Runs an already-approved Development Plan through implementer -> plan-verifier (Critical-only fix-loop, capped at 3 iterations) -> doc-writer. Pauses for approval after every phase. Use when the user asks to run/build/execute a Development Plan under docs/plans/, or invokes /sdd-build. Never invokes spec-creator or implementation-planner -- both run separately, by hand, before this skill starts. Skips test-writer; runs plan-verifier on Sonnet for this skill's calls only (cost override -- the plan-verifier persona itself stays on Opus)."
+description: "Runs an already-approved Development Plan through implementer -> plan-verifier (Critical-only fix-loop, capped at 3 iterations) -> doc-writer -> a live smoke check against the real running app. Pauses for approval after every phase. Use when the user asks to run/build/execute a Development Plan under docs/plans/, or invokes /sdd-build. Never invokes spec-creator or implementation-planner -- both run separately, by hand, before this skill starts. Skips test-writer; runs plan-verifier on Sonnet for this skill's calls only (cost override -- the plan-verifier persona itself stays on Opus)."
 ---
 
 # SDD Build
@@ -76,6 +76,34 @@ Show the user what was written and where. Close out with a short summary:
 what shipped, what's now documented, and any non-blocking `Major`/`Minor`
 findings from Phase 2 that were noted but not fixed.
 
+## Phase 4 -- Smoke
+
+Only once Phase 3 (Docs) is done: exercise the actual feature through the
+real, running app -- not Phase 1-2's automated checks, which run against
+this repo's mocked adapters (`MockLLMProvider`, `MockGitClient`,
+`MockGitHubClient` -- see `server/src/adapters/mocks.ts`) and therefore
+cannot catch a live-only failure: an exhausted or misconfigured provider
+API key, a caching/timing behavior that only "feels wrong" to a real user
+in a real browser, a real GitHub API quirk. A `PASS` Phase-2 verdict proves
+the code is correct as written -- not that it works against this session's
+actual credentials, with a human clicking through it.
+
+Follow the `run` skill (it finds and prefers any project-specific run
+skill first) to launch the app for real -- `pnpm dev` for both
+`server`/`client`, Postgres up via Docker, real secrets from
+`~/.devdigest/secrets.json` or `.env`. Drive the ONE interaction path the
+plan actually changed: for a client-visible feature, open the real page
+and click through it (a browser tool, or `curl` against the real API if
+there's no UI surface yet); for a server-only feature, hit the real
+endpoint against the real running dev server and real DB, not `vitest`.
+
+If this surfaces a real defect, treat it exactly like a Phase 2 Critical
+finding: loop back to `implementer` (or fix it directly with the user's
+explicit approval, if it's small and obviously scoped) before calling the
+plan done -- never let a live-only bug ride along "because Phase 1-3 were
+green." Show the user exactly what was exercised, what was found, and
+what (if anything) needed a follow-up fix.
+
 ## Rules
 
 - Never invoke `spec-creator` or `implementation-planner` -- run manually,
@@ -83,4 +111,7 @@ findings from Phase 2 that were noted but not fixed.
 - Never invoke `test-writer` -- intentionally out of scope here (cost).
 - Never skip an approval checkpoint, even when a phase looks obviously
   fine.
+- Never skip Phase 4 (Smoke), even when Phases 1-3 all came back clean --
+  the automated checks run against mocked adapters and cannot see a
+  live-only failure by construction (see Phase 4).
 - Never exceed the 3-iteration fix-loop cap without stopping to ask.

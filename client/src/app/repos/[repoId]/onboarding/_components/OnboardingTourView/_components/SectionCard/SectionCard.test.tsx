@@ -119,29 +119,34 @@ describe("SectionCard", () => {
   });
 
   // ------------------------------------------------------------------ AC-12
-  // FIX-8 KNOWN-STALE (implementer, not fixed here — test-writer's job next):
-  // these two assertions still encode the OLD one-badge-in-header design
-  // (a single "Model estimate" badge shown once for the whole section). FIX-8
-  // replaced it with a per-task complexity badge inside each task card, so
-  // `firstTasksBadge` no longer exists as a prop at all (a TYPE error, not
-  // just a stale assertion) — removed from the call sites below only so this
-  // file keeps compiling; the assertions themselves are left failing
-  // intentionally, same pattern as this repo's other known-regression fixes
-  // (see client/INSIGHTS.md's FIX-6/IntentCard entries).
-  it("AC-12: the First-tasks badge is labelled as a model ESTIMATE, not an unqualified measured property, and its tooltip states that", () => {
-    renderCard({ section: section({ kind: "first_tasks", title: "First tasks" }) });
-    const badge = screen.getByText("Model estimate");
+  // FIX-8 replaced the single header "Model estimate" badge with a per-task
+  // complexity badge inside each task card (`section.tasks`, `first_tasks`
+  // only) — these assertions target that design.
+  it("AC-12: a first task's complexity badge is labelled as a model ESTIMATE, not an unqualified measured property, and its tooltip states that", () => {
+    renderCard({
+      section: section({
+        kind: "first_tasks",
+        title: "First tasks",
+        tasks: [{ title: "Read the entry point", path: "src/server.ts", complexity: "low" }],
+      }),
+    });
+    const badge = screen.getByText("Low complexity");
     expect(badge).toBeInTheDocument();
     // The tooltip lives on the wrapping element's `title` attribute.
     expect(badge.closest("[title]")).toHaveAttribute(
       "title",
-      "Task ordering is the model's own estimate, not a measured property.",
+      "This is the model's own estimate, not a measured property.",
     );
   });
 
-  it("AC-12: a section that is NOT first_tasks never renders the badge, even if firstTasksBadge were mistakenly passed true", () => {
-    renderCard({ section: section({ kind: "architecture" }) });
-    expect(screen.queryByText("Model estimate")).not.toBeInTheDocument();
+  it("AC-12: a section that is NOT first_tasks never renders a task complexity badge, even if tasks were mistakenly populated", () => {
+    renderCard({
+      section: section({
+        kind: "architecture",
+        tasks: [{ title: "Read the entry point", path: "src/server.ts", complexity: "low" }],
+      }),
+    });
+    expect(screen.queryByText("Low complexity")).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------- design conformance

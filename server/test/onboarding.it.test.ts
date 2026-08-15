@@ -70,7 +70,17 @@ function aboveMinimumRepoIntel(overrides: Partial<RepoIntel> = {}): RepoIntel {
 }
 
 const VALID_SECTIONS = (['architecture', 'critical_paths', 'run_locally', 'reading_path', 'first_tasks'] as const).map(
-  (kind) => ({ kind, title: kind, body: `body for ${kind}`, diagram: null, links: [] }),
+  (kind) => ({
+    kind,
+    title: kind,
+    body: `body for ${kind}`,
+    diagram: null,
+    links: [],
+    tasks:
+      kind === 'first_tasks'
+        ? [{ title: 'Read the entry point', path: 'src/server.ts', complexity: 'low' as const }]
+        : null,
+  }),
 );
 const VALID_FIXTURE = { sections: VALID_SECTIONS };
 

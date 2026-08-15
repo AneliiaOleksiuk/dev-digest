@@ -214,20 +214,18 @@ describe("SmartDiffViewer", () => {
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
-  // BEHAVIOR MISMATCH (reported, not fixed here — see Test Report): AC-30
-  // requires a review-focus click to "land on the correct path:line target"
-  // for any file really in the diff. `onJumpToLine` only forces the FILE's
-  // own `openMap` entry — it never touches `RoleGroup`'s own `groupOpen`
-  // state (`_components/RoleGroup/RoleGroup.tsx`'s
-  // `useState(() => role === "core" || role === "wiring")`), which starts
-  // COLLAPSED for `boilerplate`. A review_focus item citing a boilerplate
-  // file (a common case — lockfiles, generated config) never becomes
-  // visible: `<FileCard>` for that path isn't even rendered while its
-  // enclosing group is collapsed, so `document.querySelector` finds nothing
-  // and scrollIntoView silently never fires. No error, no visible file —
-  // this test asserts the CORRECT (spec) behavior and is left FAILING
-  // on purpose, per this agent's "fix the code, not the test" rule.
-  it("AC-30 (currently FAILING — implementation bug): externalFocus for a file in an initially-collapsed role group (boilerplate) still expands the group and scrolls to it", async () => {
+  // Previously a documented FAILING implementation-bug test: `onJumpToLine`
+  // used to force only the FILE's own `openMap` entry, never the enclosing
+  // `RoleGroup`'s `groupOpen` state, so a `boilerplate`-role file (default
+  // collapsed) was never mounted and the scroll target was never found.
+  // `implementer` fixed this by lifting `groupOpen` into `SmartDiffViewer`
+  // as `groupOpenMap`, with `onJumpToLine` now opening both the group and
+  // the file before scrolling. As with the sibling ALREADY-OPEN-GROUP test
+  // above, "{}" appears twice when open (the added line AND FileCard's
+  // "what this does" preview badge derived from the same patch) — assert
+  // via the anchor DOM contract itself (`data-diff-line`, `CodeLine.tsx`)
+  // rather than a duplicated text match.
+  it("AC-30: externalFocus for a file in an initially-collapsed role group (boilerplate) still expands the group and scrolls to it", async () => {
     render(
       <NextIntlClientProvider locale="en" messages={{ prReview: prReviewMessages, shell: shellMessages }}>
         <SmartDiffViewer
@@ -238,7 +236,11 @@ describe("SmartDiffViewer", () => {
         />
       </NextIntlClientProvider>,
     );
-    expect(await screen.findByText("{}")).toBeInTheDocument();
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.querySelector('[data-diff-line="package-lock.json:1"]')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
   it("AC-31/E-22 safe no-op: externalFocus naming a path NOT in this PR's files neither scrolls nor throws, nor force-opens anything", () => {

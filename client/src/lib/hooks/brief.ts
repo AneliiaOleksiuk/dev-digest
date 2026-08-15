@@ -38,13 +38,16 @@ export function useGeneratePrBrief(prId: string | null | undefined) {
         force: input.force,
       }),
     onSuccess: (data) => {
-      qc.setQueryData(["pr-brief", prId], data);
       // A `budget_exceeded`/`failed` outcome persists nothing server-side —
-      // invalidating the timeline for those would just re-fetch the exact
-      // same rows, so skip it.
-      if (data.state !== "budget_exceeded" && data.state !== "failed") {
-        qc.invalidateQueries({ queryKey: ["pr-brief-timeline", prId] });
-      }
+      // its `record` is always null. Writing it into the SAME cache key
+      // usePrBrief() reads would silently replace a good, previously-
+      // persisted brief with nothing. Consumers (PrBriefCard) read this
+      // transient outcome from the mutation's own `data` instead, so the
+      // read-cache — and the timeline, which would just re-fetch the exact
+      // same rows — are both left untouched for these two states.
+      if (data.state === "budget_exceeded" || data.state === "failed") return;
+      qc.setQueryData(["pr-brief", prId], data);
+      qc.invalidateQueries({ queryKey: ["pr-brief-timeline", prId] });
     },
   });
 }

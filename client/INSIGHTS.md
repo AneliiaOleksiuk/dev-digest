@@ -1030,3 +1030,70 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   entry for the same date. New-test authorship for `PrBriefCard`/
   `BriefTimeline`/the `DiffViewer` focus overlay is `test-writer`'s job next,
   not attempted here beyond the pre-existing suites passing.
+
+- 2026-08-14 (fix-loop iteration 1, `plan-verifier` Phase 3 required fixes):
+  **the entry directly above was WRONG about `useGeneratePrBrief`'s
+  `onSuccess`** — it actually called `qc.setQueryData(["pr-brief", prId],
+  data)` unconditionally, for every mutation result including
+  `budget_exceeded`/`failed` ones, whose `record` is always `null`. Since
+  `usePrBrief()` reads that exact same cache key, a failed/budget-exceeded
+  regenerate attempt silently overwrote a good, previously-persisted brief
+  with `{state: 'failed', record: null}` in the read-cache — and because no
+  `PrBriefCard` render branch matches `state === 'failed'`/`'budget_exceeded'`
+  directly (only `absent`/`current`/`stale`/`corrupt` do), the card lost its
+  Generate/Regenerate footer entirely with no way to recover short of a hard
+  refresh (`providers.tsx`'s `staleTime: 30_000, refetchOnWindowFocus: false`
+  meant it wouldn't even self-correct on next focus). **Fix**:
+  `hooks/brief.ts`'s `onSuccess` now early-returns before `setQueryData` (and
+  before the timeline invalidation) whenever `data.state` is
+  `budget_exceeded`/`failed` — one guard covers both, cache and timeline
+  fully untouched for those two states. `PrBriefCard`'s transient-outcome
+  banner already read `generate.data` (the mutation's own state) rather than
+  the read-cache, so no client component code needed to change for the read
+  side — only the write. **Lesson**: a code comment or INSIGHTS.md entry
+  asserting "X never happens" for a specific state-machine branch is not a
+  substitute for grep-checking every `setQueryData`/cache-write call site
+  against that same key — the assertion here was directionally right (the
+  DESIGN intent was correct) but didn't match the actual code, and nothing
+  caught it until `plan-verifier`'s Phase 3 traced the render-branch dead-end
+  by hand. Also wired the 3 previously-dead `brief.json` i18n keys this bug
+  surfaced (`card.retry`, `generate.lastCost`, `timeline.toggle`) into
+  `PrBriefCard`'s transient banner (retry button + last-known-cost line, both
+  reading the untouched `record` still in cache) and `BriefTimeline`'s
+  disclosure summary.
+
+- 2026-08-14 (same fix-loop iteration): **`SmartDiffViewer`'s per-file
+  `openMap` (parent-owned) and `RoleGroup`'s per-group collapse state
+  (previously a PRIVATE `useState` inside `RoleGroup`) must be owned by the
+  SAME component, or nothing external can force-open a file inside a
+  collapsed group.** `onJumpToLine`/`externalFocus` (AC-30 deep-link) only
+  ever set `openMap[path]`, which controls whether `FileCard` renders
+  *expanded* — but `RoleGroup` gated whether `<FileCard>` **mounted at all**
+  behind its own `groupOpen` state, defaulting closed for the `boilerplate`
+  role (`useState(() => role === "core" || role === "wiring")`) and for any
+  group the user collapsed by hand. Result: a deep-link into a collapsed
+  group's file found nothing in the DOM (`document.querySelector('[data-
+  diff-line=...]')` came back null) and `scrollIntoView` silently no-op'd —
+  no error, no visible failure, just nothing happening. **Fix**: lifted
+  `groupOpenMap` (keyed by role) into `SmartDiffViewer` alongside `openMap`,
+  same pattern (`initialGroupOpenMap`/`setGroupOpen`), and changed
+  `RoleGroup` from owning `[groupOpen, setGroupOpen] = useState(...)` to
+  accepting both as controlled props. `onJumpToLine` now resolves the
+  target file's role via a `roleByPath` map and calls `setGroupOpen(role,
+  true)` in the same tick as `setFileOpen(path, true)`, before the rAF×2
+  scroll. **Test-authoring gotcha found while verifying the fix**: the
+  `SmartDiffViewer.test.tsx` AC-30 boilerplate-group test asserts via
+  `screen.findByText("{}")` (single match) — but `FileCard`'s own
+  "What this does" summary-badge preview duplicates the exact diff-line text
+  whenever a single-line patch's added content matches its own generated
+  summary (here, `package-lock.json`'s one-line `+{}` patch). Both spans
+  render once the file genuinely opens, so `findByText` throws "found
+  multiple elements," not "not found" — this is the SAME duplicate-text
+  class the sibling (already-passing) `AC-30: ...ALREADY-OPEN-GROUP (core)`
+  test explicitly avoids by querying `document.querySelector('[data-diff-
+  line="path:line"]')` instead of matching visible text. Flagged for
+  `test-writer` to apply the same query pattern here rather than fixed
+  inline (implementer's do-not-touch-test-files constraint) — the underlying
+  architecture bug this test targets IS fixed and verified (failure mode
+  changed from "element not found" to "multiple elements found," proving the
+  group+file now mount correctly).

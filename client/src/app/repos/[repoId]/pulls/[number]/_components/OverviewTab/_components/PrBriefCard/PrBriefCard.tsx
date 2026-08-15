@@ -252,7 +252,20 @@ export function PrBriefCard({
               {transientOutcome.reason ??
                 (transientOutcome.state === "budget_exceeded" ? t("card.budgetExceededBody") : t("card.failedBody"))}
             </div>
+            {record?.usage.cost_usd != null && (
+              <div style={s.bannerBody}>{t("generate.lastCost", { cost: formatCost(record.usage.cost_usd) })}</div>
+            )}
           </div>
+          <Button
+            kind="secondary"
+            size="sm"
+            icon="RefreshCw"
+            loading={generate.isPending}
+            disabled={generate.isPending}
+            onClick={() => doGenerate(record != null)}
+          >
+            {t("card.retry")}
+          </Button>
         </div>
       )}
 

@@ -44,8 +44,7 @@ export function BriefTimeline({
       onToggle={(e) => setOpen(e.currentTarget.open)}
     >
       <summary style={s.summary}>
-        {t("timeline.title")}
-        {data ? ` (${data.brief_count})` : ""}
+        {data ? t("timeline.toggle", { count: data.brief_count }) : t("timeline.title")}
       </summary>
 
       {open &&

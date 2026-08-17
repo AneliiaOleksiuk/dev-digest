@@ -317,6 +317,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   of the drift is still there — don't assume the client `adapters.ts` mirror
   is otherwise in sync with the server one.
 
+- **A Zod contract state enum can mix persisted and deliberately-transient
+  values without the transient ones ever touching a repository write
+  (2026-08-14, SPEC-03 `BriefState`).** `BriefState = 'current' | 'stale' |
+  'absent' | 'corrupt' | 'budget_exceeded' | 'failed'` — the first four are
+  READ states, always derivable from row-presence + a `safeParse` outcome
+  (`modules/brief/helpers.ts`'s `deriveBriefState`); the last two are
+  GENERATE-ONLY outcomes AC-25/AC-42 require to never be persisted (a
+  floor-exceeded budget check makes zero calls; a failed/schema-invalid call
+  must leave any prior row untouched). Implementation: `BriefService.generate`
+  constructs `budget_exceeded`/`failed` as literal `BriefResponse` objects
+  directly inside its budget-check and `catch` branches — never round-tripped
+  through `BriefRepository.upsertBrief`. Keeps "a corrupted stored row
+  degrades on read" (the `onboarding.json` pattern, `mapRowToRecord`
+  returning `null`) fully separate from "this one attempt failed" — the two
+  read as the same shape to the client (`record: null`, a `reason` string)
+  but have entirely different code paths and different persistence
+  consequences. Worth this shape for any future feature with a similarly
+  strict "some outcomes must produce zero DB writes" requirement.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -535,6 +554,51 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `src/db/migrations/` tree (not just the `.sql` file you expect) after
   `pnpm db:generate`, and stage the journal + every new/changed snapshot
   alongside the migration in the same commit.
+
+- **`pnpm db:generate` cannot auto-resolve an unnamed single-column PRIMARY
+  KEY's constraint name when the schema change replaces it with a composite
+  key (2026-08-14, SPEC-03 WI2, `pr_brief`'s `pr_id`-only PK → `(pr_id,
+  head_sha)`).** The generated `.sql` contains a commented-out `-- ALTER
+  TABLE "x" DROP CONSTRAINT "<constraint_name>";` placeholder plus its own
+  header comment admitting it can't fill in the name yet, and — worse — puts
+  the `ADD CONSTRAINT ... PRIMARY KEY(...)` statement BEFORE the `ADD COLUMN`
+  statement for the new key column the constraint depends on. Running it
+  as-generated fails twice over: Postgres allows only one PRIMARY KEY per
+  table (the old one is still there), and the new column referenced by the
+  composite key doesn't exist yet at that point in the script. Fix: query the
+  live DB for the real name — `SELECT constraint_name FROM
+  information_schema.table_constraints WHERE table_schema='public' AND
+  table_name='<table>' AND constraint_type='PRIMARY KEY'` (came back
+  `pr_brief_pkey`, Postgres's own default-naming convention for an unnamed
+  single-column PK) — then hand-reorder the generated SQL: `ADD COLUMN`s
+  first, then `DROP CONSTRAINT "<real_name>"`, then `ADD CONSTRAINT ...
+  PRIMARY KEY(...)`. This is a sanctioned COMPLETION of what drizzle-kit
+  itself flagged as a manual TODO in its own comment, not a violation of
+  "never hand-edit migrations" — the file is still the one `db:generate`
+  produced, just finished. Confirmed correct by dropping/reapplying against
+  live Docker Postgres (`src/db/migrations/0018_real_iceman.sql`). Any future
+  primary-key-shape change (not just a column rename/drop, per the two
+  interactive-prompt entries above) should expect this same gap.
+
+- **`arch:check`'s `no-helpers-to-io` rule is STRICTER than
+  `no-service-to-db` about `src/db/rows.ts` (2026-08-14, SPEC-03
+  `modules/brief/helpers.ts`).** `no-service-to-db`'s `to.path` regex
+  (`.dependency-cruiser.cjs`) explicitly carves out `db/rows.ts` — a
+  `service.ts` may import a plain Drizzle-inferred row type from there (it's
+  treated like a DTO at the port boundary, per the rule's own comment).
+  `no-helpers-to-io`'s `to.path` has NO such carve-out — it blocks ALL of
+  `^src/db/`, full stop. A new module's `helpers.ts` needing a DB row's shape
+  to type a pure function (e.g. `mapRowToRecord(row: XRow): Y | null`) must
+  NOT `import type { XRow } from '../../db/rows.js'`, even though the import
+  is type-only and the row itself is plain data — `pnpm arch:check` fails
+  with one `no-helpers-to-io` violation, immediately, one-line cause. Fix:
+  define a LOCAL, structurally-identical interface in `helpers.ts` instead of
+  importing the real one — TypeScript's structural typing means the actual
+  Drizzle-inferred row is still assignable to it with zero cast needed. See
+  `server/src/modules/brief/helpers.ts`'s `BriefRow` (local mirror) vs.
+  `server/src/db/rows.ts`'s `PrBriefRow` (the real type, used freely by
+  `repository.ts`/`repository.drizzle.ts`/`service.ts`, none of which match
+  the helpers-only rule).
 
 ## Session Notes
 
@@ -833,6 +897,42 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   per-task badges (Recommendation 4's rank-percentile alternative), that
   needs a contract change (a structured `tasks[]` field) which is out of
   this iteration's scope.
+
+- 2026-08-14: SPEC-03 PR Brief & Why Timeline (plan
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md`) server side, WI1-WI8 —
+  `Brief`/`ReviewFocusItem`/`BriefInputStatus`/`BriefUsage`/`BriefRecord`/
+  `BriefState`/`BriefResponse`/`BriefTimelineEntry`/`BriefTimelineResponse`
+  added to both vendored contract copies (`brief.ts`/`review-api.ts`, D-1);
+  `pr_brief` table repurposed from one-row-per-PR to one-row-per-(PR,
+  head_sha) (migration `0018_real_iceman.sql`, composite PK — see Recurring
+  Errors & Fixes for the hand-completed DROP/ADD CONSTRAINT step); new
+  `modules/brief/` (onion: `constants.ts`, `repository.ts`/
+  `repository.drizzle.ts`, `sources.ts`/`sources.node.ts` for the non-DB
+  input port, `prompt.ts`/`budget.ts`/`grounding.ts` all pure, `helpers.ts`,
+  `service.ts`, `routes.ts`), `container.briefRepo`/`container.briefSources`.
+  `grounding.ts` mirrors `reviewer-core/src/grounding.ts`'s `buildLineIndex`
+  rule locally rather than importing it (E-9 — not re-exported by the package
+  barrel, and Brief's items aren't `Finding`s). `budget.ts`'s spec-file
+  sub-cap (2 500 tokens, whole-document admission only) and its four-stage
+  AC-24 trim order (spec excerpts → linked issue → collapsed hunk headers →
+  binary-searched file-list truncation) are unit-testable independent of any
+  I/O, per the plan's own `count: (s: string) => number` DI-tokenizer
+  parameter. `sources.node.ts` re-resolves the full `PullRow`/`repos` row via
+  a fresh `ReviewRepository(container.db)` inside `loadDiff` rather than
+  widening `BriefPull`/`BriefRepoRow` to match `diff-loader.ts`'s literal
+  `PullRow` param type — a deliberate small redundant read (cheap relative to
+  the LLM call the generation is about to make) that keeps the module's own
+  port types narrow. Verified: `pnpm typecheck` clean, `pnpm arch:check`
+  clean (see Recurring Errors & Fixes for the `no-helpers-to-io` gotcha this
+  surfaced), full unit suite green except the pre-existing
+  `indexer-pipeline.test.ts` Windows flake (confirmed via `git status` —
+  untouched file), and the full `.it.test.ts` suite green except the
+  pre-existing 8-test `onboarding.it.test.ts` fixture gap (confirmed
+  pre-existing and unrelated via `git status` — matches the exact 8 tests
+  server/INSIGHTS.md's FIX-8 entry already documents). Client-side WI9-WI14
+  is `client/INSIGHTS.md`'s entry for the same date. Test authorship
+  (`test-writer`'s job next) not attempted beyond the pre-existing suites
+  passing.
 
 ## Open Questions
 

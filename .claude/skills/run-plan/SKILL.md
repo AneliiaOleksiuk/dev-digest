@@ -1,6 +1,6 @@
 ---
 name: run-plan
-description: "Runs an already-approved Development Plan through the full back half of this repo's SDD chain: implementer -> test-writer -> plan-verifier (Critical/FAIL fix-loop, capped at 3 iterations) -> doc-writer. Pauses for approval after every phase. Use when the user asks to run/build/execute a Development Plan under docs/plans/ with tests included, or invokes /run-plan. Never invokes spec-creator or implementation-planner -- both run separately, by hand, before this skill starts. Unlike sdd-build, this skill does NOT skip test-writer -- use sdd-build instead when a Sonnet-cost, no-test-writer run is preferred."
+description: "Runs an already-approved Development Plan through the full back half of this repo's SDD chain: implementer -> test-writer -> plan-verifier (Critical/FAIL fix-loop, capped at 3 iterations) -> doc-writer -> a live smoke check against the real running app. Pauses for approval after every phase. Use when the user asks to run/build/execute a Development Plan under docs/plans/ with tests included, or invokes /run-plan. Never invokes spec-creator or implementation-planner -- both run separately, by hand, before this skill starts. Unlike sdd-build, this skill does NOT skip test-writer -- use sdd-build instead when a Sonnet-cost, no-test-writer run is preferred."
 ---
 
 # Run Plan
@@ -118,6 +118,38 @@ fixed.
 **Per-phase commit (if requested):** commit the new docs with a message
 naming the plan and Phase 4.
 
+## Phase 5 -- Smoke
+
+Only once Phase 4 (Docs) is done: exercise the actual feature through the
+real, running app -- not the automated suites from Phases 1-3, which run
+against this repo's mocked adapters (`MockLLMProvider`, `MockGitClient`,
+`MockGitHubClient` -- see `server/src/adapters/mocks.ts`) and therefore
+cannot catch a live-only failure: an exhausted or misconfigured provider
+API key, a caching/timing behavior that only "feels wrong" to a real user
+in a real browser, a real GitHub API quirk. A green Phase 1-3 and a `PASS`
+Phase-3 verdict prove the code is correct as written -- not that it works
+against this session's actual credentials, with a human clicking through
+it.
+
+Follow the `run` skill (it finds and prefers any project-specific run
+skill first) to launch the app for real -- `pnpm dev` for both
+`server`/`client`, Postgres up via Docker, real secrets from
+`~/.devdigest/secrets.json` or `.env`. Drive the ONE interaction path the
+plan actually changed: for a client-visible feature, open the real page
+and click through it (a browser tool, or `curl` against the real API if
+there's no UI surface yet); for a server-only feature, hit the real
+endpoint against the real running dev server and real DB, not `vitest`.
+
+If this surfaces a real defect, treat it exactly like a Phase 3 Critical
+finding: loop back to `implementer` (or fix it directly with the user's
+explicit approval, if it's small and obviously scoped) before calling the
+plan done -- never let a live-only bug ride along "because Phase 1-4 were
+green." Show the user exactly what was exercised, what was found, and
+what (if anything) needed a follow-up fix.
+
+**Per-phase commit (if requested):** commit any fix that came out of this
+phase with a message naming the plan and Phase 5.
+
 ## Traceability matrix (when requested)
 
 If the invoker asks for an AC -> task -> test -> commit matrix before merge
@@ -136,6 +168,9 @@ commit) plainly -- do not paper over a gap with "should be covered".
   over `sdd-build`.
 - Never skip an approval checkpoint, even when a phase looks obviously
   fine.
+- Never skip Phase 5 (Smoke), even when Phases 1-4 all came back clean --
+  the automated suites run against mocked adapters and cannot see a
+  live-only failure by construction (see Phase 5).
 - Never exceed the 3-iteration fix-loop cap without stopping to ask.
 - Never commit anything unless the invoker asked for per-phase commits (or
   this skill's own invocation context already establishes that, e.g. a

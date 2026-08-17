@@ -7,7 +7,7 @@ import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment } from "@/lib/hooks/reviews";
 import { useSmartDiff } from "@/lib/hooks/smart-diff";
 import { notify } from "@/lib/toast";
-import type { FocusFindingsOptions } from "@/lib/types";
+import type { FocusDiffLineOptions, FocusFindingsOptions } from "@/lib/types";
 import type { PrFile, FindingRecord } from "@devdigest/shared";
 import { SmartDiffViewer, SplitSuggestionBanner, smartDiffStyles as sd } from "../SmartDiffViewer";
 
@@ -21,11 +21,15 @@ interface DiffTabProps {
   findings: FindingRecord[];
   /** Deep-links a severity/finding into the Findings tab (shared with FindingsTab). */
   onFocusFindings: (opts: FocusFindingsOptions) => void;
+  /** A `path:line` to expand-then-scroll to on mount/change (SPEC-03 AC-30),
+   *  from a PrBriefCard review-focus click, driven by the `?file=&line=` URL
+   *  params. `null`/`undefined` — no pending focus. */
+  diffFocus?: FocusDiffLineOptions | null;
 }
 
 type OrderMode = "smart" | "original";
 
-export function DiffTab({ prId, filesCount, files, canComment, findings, onFocusFindings }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, findings, onFocusFindings, diffFocus }: DiffTabProps) {
   const t = useTranslations("prReview");
   const { data: comments } = usePrComments(prId);
   const create = useCreatePrComment(prId);
@@ -124,9 +128,16 @@ export function DiffTab({ prId, filesCount, files, canComment, findings, onFocus
           commenting={commenting}
           onFocusFindings={onFocusFindings}
           showSplitBanner={false}
+          externalFocus={diffFocus}
         />
       ) : (
-        <DiffViewer files={files} commenting={commenting} findings={findings} onFocusFindings={onFocusFindings} />
+        <DiffViewer
+          files={files}
+          commenting={commenting}
+          findings={findings}
+          onFocusFindings={onFocusFindings}
+          focus={diffFocus}
+        />
       )}
     </section>
   );

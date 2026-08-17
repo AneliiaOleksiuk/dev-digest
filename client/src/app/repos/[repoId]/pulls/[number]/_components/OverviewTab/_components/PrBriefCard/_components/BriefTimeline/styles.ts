@@ -1,0 +1,80 @@
+import type { CSSProperties } from "react";
+
+export const s = {
+  details: {
+    fontSize: 13,
+    borderTop: "1px solid var(--border)",
+    paddingTop: 12,
+  } satisfies CSSProperties,
+  summary: {
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    userSelect: "none",
+  } satisfies CSSProperties,
+  disclosure: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "var(--text-muted)",
+    fontStyle: "italic",
+  } satisfies CSSProperties,
+  empty: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "var(--text-muted)",
+    fontStyle: "italic",
+  } satisfies CSSProperties,
+  list: {
+    listStyle: "none",
+    margin: "8px 0 0",
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  } satisfies CSSProperties,
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid transparent",
+    background: "transparent",
+    width: "100%",
+    textAlign: "left",
+    cursor: "pointer",
+    fontSize: 12,
+  } satisfies CSSProperties,
+  rowSelected: {
+    border: "1px solid var(--border)",
+    background: "var(--bg)",
+  } satisfies CSSProperties,
+  sha: {
+    fontFamily: "var(--font-mono, ui-monospace, monospace)",
+    color: "var(--text-secondary)",
+    flexShrink: 0,
+  } satisfies CSSProperties,
+  time: {
+    color: "var(--text-muted)",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } satisfies CSSProperties,
+  changedMark: {
+    color: "var(--warn)",
+    fontSize: 11,
+    fontWeight: 600,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+  currentTag: {
+    color: "var(--accent-text)",
+    fontSize: 11,
+    fontWeight: 600,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+} as const;

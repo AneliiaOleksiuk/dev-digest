@@ -190,4 +190,73 @@ describe("SmartDiffViewer", () => {
       });
     });
   });
+
+  // ---------------------------------------------------------- AC-30/WI13
+  it("AC-30: externalFocus expands an ALREADY-OPEN-GROUP (core) file and scrolls to its data-diff-line anchor", async () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{ prReview: prReviewMessages, shell: shellMessages }}>
+        <SmartDiffViewer
+          smartDiff={SMART}
+          files={FILES}
+          findings={FINDINGS}
+          externalFocus={{ path: "src/server.ts", line: 1 }}
+        />
+      </NextIntlClientProvider>,
+    );
+    // "x" appears twice when open (the added line AND the summary-badge
+    // preview text derived from the same patch) — assert via the anchor
+    // DOM contract itself (`data-diff-line`, `CodeLine.tsx`) rather than a
+    // duplicated text match.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.querySelector('[data-diff-line="src/server.ts:1"]')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  // Previously a documented FAILING implementation-bug test: `onJumpToLine`
+  // used to force only the FILE's own `openMap` entry, never the enclosing
+  // `RoleGroup`'s `groupOpen` state, so a `boilerplate`-role file (default
+  // collapsed) was never mounted and the scroll target was never found.
+  // `implementer` fixed this by lifting `groupOpen` into `SmartDiffViewer`
+  // as `groupOpenMap`, with `onJumpToLine` now opening both the group and
+  // the file before scrolling. As with the sibling ALREADY-OPEN-GROUP test
+  // above, "{}" appears twice when open (the added line AND FileCard's
+  // "what this does" preview badge derived from the same patch) — assert
+  // via the anchor DOM contract itself (`data-diff-line`, `CodeLine.tsx`)
+  // rather than a duplicated text match.
+  it("AC-30: externalFocus for a file in an initially-collapsed role group (boilerplate) still expands the group and scrolls to it", async () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{ prReview: prReviewMessages, shell: shellMessages }}>
+        <SmartDiffViewer
+          smartDiff={SMART}
+          files={FILES}
+          findings={FINDINGS}
+          externalFocus={{ path: "package-lock.json", line: 1 }}
+        />
+      </NextIntlClientProvider>,
+    );
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.querySelector('[data-diff-line="package-lock.json:1"]')).toBeInTheDocument();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("AC-31/E-22 safe no-op: externalFocus naming a path NOT in this PR's files neither scrolls nor throws, nor force-opens anything", () => {
+    const render_ = () =>
+      render(
+        <NextIntlClientProvider locale="en" messages={{ prReview: prReviewMessages, shell: shellMessages }}>
+          <SmartDiffViewer
+            smartDiff={SMART}
+            files={FILES}
+            findings={FINDINGS}
+            externalFocus={{ path: "src/does-not-exist.ts", line: 1 }}
+          />
+        </NextIntlClientProvider>,
+      );
+    expect(render_).not.toThrow();
+    expect(screen.queryByText("{}")).not.toBeInTheDocument(); // boilerplate stays collapsed
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
 });

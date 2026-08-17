@@ -3,7 +3,8 @@
 import React from "react";
 import { IntentCard } from "../IntentCard";
 import { BlastRadiusCard } from "../BlastRadiusCard";
-import { PrBriefBanner } from "./_components/PrBriefBanner";
+import { PrBriefCard } from "./_components/PrBriefCard";
+import type { FocusDiffLineOptions } from "@/lib/types";
 import { s } from "./styles";
 
 interface OverviewTabProps {
@@ -17,6 +18,14 @@ interface OverviewTabProps {
   repoId: string;
   /** True once GET /pulls/:id has completed (pr_files synced). */
   blastReady?: boolean;
+  /** The PR's currently-loaded changed-file paths — PrBriefCard checks
+   *  membership before navigating a review-focus click (AC-31): a focus
+   *  entry whose file isn't here (PR advanced past the brief's head_sha, or
+   *  a historical brief from the Why Timeline) degrades instead. */
+  changedFilePaths: string[];
+  /** Deep-links a review-focus entry into the Files-changed tab (SPEC-03
+   *  AC-30), from `page.tsx`'s `?file=&line=` params. */
+  onFocusDiffLine: (opts: FocusDiffLineOptions) => void;
 }
 
 /**
@@ -29,10 +38,17 @@ export function OverviewTab({
   repoFullName,
   repoId,
   blastReady = true,
+  changedFilePaths,
+  onFocusDiffLine,
 }: OverviewTabProps) {
   return (
     <>
-      <PrBriefBanner prId={prId} />
+      <PrBriefCard
+        prId={prId}
+        headSha={headSha}
+        changedFilePaths={changedFilePaths}
+        onFocusDiffLine={onFocusDiffLine}
+      />
       <div style={s.intentBlastRow}>
         <IntentCard prId={prId} headSha={headSha} />
         <BlastRadiusCard

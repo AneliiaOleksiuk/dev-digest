@@ -277,6 +277,40 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   never renders blank (same "never an empty card" contract `hasBody` already
   had).
 
+- **Adding a single-item "expand + scroll to it" deep-link to an already-
+  uncontrolled list-of-`FileCard`s viewer does NOT require lifting the whole
+  list into controlled state (2026-08-14, SPEC-03 AC-30/E-22,
+  `components/diff-viewer/DiffViewer/DiffViewer.tsx`).** `DiffViewer` had no
+  jump capability at all before this — every `FileCard` was fully
+  uncontrolled (auto-expand based on `AUTO_EXPAND_MAX_LINES`). Rather than
+  building a full `openMap` (the shape `SmartDiffViewer` already has, since
+  it needed per-file control anyway), track only a single `forcedOpenPath`
+  in local state; when rendering the file list, spread `FileCard`'s existing
+  controlled `open`/`onOpenChange` props onto ONLY the one file matching that
+  path, and pass NEITHER prop for every other file (leaving them in their
+  normal uncontrolled mode, `AUTO_EXPAND_MAX_LINES` default intact). This is
+  the general technique for adding a single-item focus/deep-link feature to
+  an already-shipped uncontrolled list component without regressing every
+  other item's existing behavior — reach for it before reaching for a full
+  controlled-map rewrite. `SmartDiffViewer` needed no new pattern here — it
+  already had per-file `openMap` state for its own finding-badge clicks, so
+  the deep-link was just a `useEffect` invoking its existing internal
+  `onJumpToLine(path, line)` whenever an external `externalFocus` prop
+  changes (guarded by `fileByPath.has(path)` so an absent path is a safe
+  no-op, matching `DiffViewer`'s equivalent `files.some(...)` guard).
+
+- **A history/timeline list endpoint that returns each entry's FULL nested
+  record (not a summary row) lets the client render a historical entry with
+  ZERO additional requests (2026-08-14, SPEC-03 Why Timeline,
+  `PrBriefCard`'s `BriefTimeline`).** `GET /pulls/:id/brief/timeline` returns
+  `entries[].record: BriefRecord` inline — a server design choice ("two
+  endpoints, not three") — so clicking an older Why Timeline row just swaps
+  local component state to that entry's already-fetched `record`; no new
+  fetch, no loading state, no risk of the detail view disagreeing with the
+  list view. Worth defaulting to this shape for any future "browse a bounded
+  history, then drill into one entry" feature (the list here is capped at 50
+  rows) rather than a summary-list + per-item-detail-fetch split.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -967,3 +1001,99 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   sub-headings) would have caught bug (1) without needing a live regenerate.
   Verified: `tsc --noEmit` clean; full onboarding suite green (57 tests, same
   1 pre-existing known-stale case).
+
+- 2026-08-14: SPEC-03 PR Brief & Why Timeline (plan
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md`) client side, WI9-WI14 —
+  new `lib/hooks/brief.ts` (`usePrBrief`/`usePrBriefTimeline`/
+  `useGeneratePrBrief`); `PrBriefCard` (replaces `PrBriefBanner`, deleted
+  outright incl. its test — see below) with a nested `BriefTimeline`
+  (`_components/BriefTimeline/`, the Why Timeline, D-3); a new `?file=&line=`
+  URL-param pair + `focusDiffLine` helper in `page.tsx` (same pattern as the
+  existing findings deep-link contract this file already documents); `?file`/
+  `?line` threaded through `DiffTab` → whichever viewer is active
+  (`SmartDiffViewer` gained an `externalFocus` prop hooking into its existing
+  `onJumpToLine`; `DiffViewer` gained jump capability from scratch — see
+  Codebase Patterns above for both). `useGeneratePrBrief`'s `onSuccess`
+  deliberately does NOT call `qc.setQueryData` for a `budget_exceeded`/
+  `failed` response (neither state is ever persisted server-side) — instead
+  `PrBriefCard` reads the mutation's own `generate.data` directly to render a
+  transient banner IN PLACE over whatever good `record` the `pr-brief` query
+  cache already holds, so a failed regenerate attempt never wipes a
+  previously-good brief off the card. `PrBriefBanner/` deleted in full
+  (component + styles + index + its pre-existing test) per the plan's
+  explicit WI11 file list — not new test authorship, a specified deletion of
+  an obsolete component's test alongside the component itself. Verified:
+  `tsc --noEmit` clean; full Vitest green except the ONE pre-existing
+  known-stale `SectionCard.test.tsx` AC-12 case (server/INSIGHTS.md's FIX-8
+  entry — confirmed untouched via `git status`, unrelated to this session);
+  `smoke.test.tsx` still passes. Server-side WI1-WI8 is `server/INSIGHTS.md`'s
+  entry for the same date. New-test authorship for `PrBriefCard`/
+  `BriefTimeline`/the `DiffViewer` focus overlay is `test-writer`'s job next,
+  not attempted here beyond the pre-existing suites passing.
+
+- 2026-08-14 (fix-loop iteration 1, `plan-verifier` Phase 3 required fixes):
+  **the entry directly above was WRONG about `useGeneratePrBrief`'s
+  `onSuccess`** — it actually called `qc.setQueryData(["pr-brief", prId],
+  data)` unconditionally, for every mutation result including
+  `budget_exceeded`/`failed` ones, whose `record` is always `null`. Since
+  `usePrBrief()` reads that exact same cache key, a failed/budget-exceeded
+  regenerate attempt silently overwrote a good, previously-persisted brief
+  with `{state: 'failed', record: null}` in the read-cache — and because no
+  `PrBriefCard` render branch matches `state === 'failed'`/`'budget_exceeded'`
+  directly (only `absent`/`current`/`stale`/`corrupt` do), the card lost its
+  Generate/Regenerate footer entirely with no way to recover short of a hard
+  refresh (`providers.tsx`'s `staleTime: 30_000, refetchOnWindowFocus: false`
+  meant it wouldn't even self-correct on next focus). **Fix**:
+  `hooks/brief.ts`'s `onSuccess` now early-returns before `setQueryData` (and
+  before the timeline invalidation) whenever `data.state` is
+  `budget_exceeded`/`failed` — one guard covers both, cache and timeline
+  fully untouched for those two states. `PrBriefCard`'s transient-outcome
+  banner already read `generate.data` (the mutation's own state) rather than
+  the read-cache, so no client component code needed to change for the read
+  side — only the write. **Lesson**: a code comment or INSIGHTS.md entry
+  asserting "X never happens" for a specific state-machine branch is not a
+  substitute for grep-checking every `setQueryData`/cache-write call site
+  against that same key — the assertion here was directionally right (the
+  DESIGN intent was correct) but didn't match the actual code, and nothing
+  caught it until `plan-verifier`'s Phase 3 traced the render-branch dead-end
+  by hand. Also wired the 3 previously-dead `brief.json` i18n keys this bug
+  surfaced (`card.retry`, `generate.lastCost`, `timeline.toggle`) into
+  `PrBriefCard`'s transient banner (retry button + last-known-cost line, both
+  reading the untouched `record` still in cache) and `BriefTimeline`'s
+  disclosure summary.
+
+- 2026-08-14 (same fix-loop iteration): **`SmartDiffViewer`'s per-file
+  `openMap` (parent-owned) and `RoleGroup`'s per-group collapse state
+  (previously a PRIVATE `useState` inside `RoleGroup`) must be owned by the
+  SAME component, or nothing external can force-open a file inside a
+  collapsed group.** `onJumpToLine`/`externalFocus` (AC-30 deep-link) only
+  ever set `openMap[path]`, which controls whether `FileCard` renders
+  *expanded* — but `RoleGroup` gated whether `<FileCard>` **mounted at all**
+  behind its own `groupOpen` state, defaulting closed for the `boilerplate`
+  role (`useState(() => role === "core" || role === "wiring")`) and for any
+  group the user collapsed by hand. Result: a deep-link into a collapsed
+  group's file found nothing in the DOM (`document.querySelector('[data-
+  diff-line=...]')` came back null) and `scrollIntoView` silently no-op'd —
+  no error, no visible failure, just nothing happening. **Fix**: lifted
+  `groupOpenMap` (keyed by role) into `SmartDiffViewer` alongside `openMap`,
+  same pattern (`initialGroupOpenMap`/`setGroupOpen`), and changed
+  `RoleGroup` from owning `[groupOpen, setGroupOpen] = useState(...)` to
+  accepting both as controlled props. `onJumpToLine` now resolves the
+  target file's role via a `roleByPath` map and calls `setGroupOpen(role,
+  true)` in the same tick as `setFileOpen(path, true)`, before the rAF×2
+  scroll. **Test-authoring gotcha found while verifying the fix**: the
+  `SmartDiffViewer.test.tsx` AC-30 boilerplate-group test asserts via
+  `screen.findByText("{}")` (single match) — but `FileCard`'s own
+  "What this does" summary-badge preview duplicates the exact diff-line text
+  whenever a single-line patch's added content matches its own generated
+  summary (here, `package-lock.json`'s one-line `+{}` patch). Both spans
+  render once the file genuinely opens, so `findByText` throws "found
+  multiple elements," not "not found" — this is the SAME duplicate-text
+  class the sibling (already-passing) `AC-30: ...ALREADY-OPEN-GROUP (core)`
+  test explicitly avoids by querying `document.querySelector('[data-diff-
+  line="path:line"]')` instead of matching visible text. Flagged for
+  `test-writer` to apply the same query pattern here rather than fixed
+  inline (implementer's do-not-touch-test-files constraint) — the underlying
+  architecture bug this test targets IS fixed and verified (failure mode
+  changed from "element not found" to "multiple elements found," proving the
+  group+file now mount correctly).

@@ -62,3 +62,32 @@ deferred rather than fixed under that plan's scope.
   isolation investigation, not a code fix in the delta.
   — recorded 2026-08-13, `plan-verifier` report on
   `docs/plans/spec-01-project-context-authoring.md`.
+
+## SPEC-03 — PR Brief & Why Timeline (fix-loop iteration 1 bookkeeping)
+
+Flagged by `plan-verifier`'s Phase 3 review as pre-existing failures
+unrelated to SPEC-03, confirmed still present after this fix-loop
+iteration's changes. None of these files were touched by `be2e056`
+(Phase 1 Build), `8bfe36d` (Phase 2 Test), or this fix-loop iteration —
+verified via `git log` against each path. Re-confirmed by directly running
+each suite in isolation on 2026-08-14:
+
+- **`server/test/indexer-pipeline.test.ts`** — 6/11 failing. Same root
+  cause as the SPEC-01 entry above: `writeFileAt`'s directory-boundary
+  logic uses `full.lastIndexOf('/')` on a `node:path.join`-produced path,
+  which is backslash-joined on win32. Windows-only; not SPEC-03 related.
+- **`server/test/onboarding.it.test.ts`** — 8/21 failing in isolation
+  (pre-existing fixture gaps, e.g. an expected-empty `sections` array
+  assertion at `:541` not matching current fixture output).
+- **`server/test/project-context-run.it.test.ts`** — 3/3 passing in
+  isolation; the existing SPEC-01 entry above already documents this file's
+  AC-22 case as flaky specifically under the parallel integration lane
+  (plan-verifier's combined "9 failures" count for these two files reflects
+  that parallel-lane flake, not a standalone regression).
+- **`client/.../SectionCard.test.tsx > AC-12`** ("the First-tasks badge is
+  labelled as a model ESTIMATE...") — 1 failure, pre-existing staleness
+  (asserted copy no longer matches the component's current tooltip text).
+  1/N in that file; every other `SectionCard.test.tsx` test passes.
+  — recorded 2026-08-14, `plan-verifier` Phase 3 report on
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md` (fix-loop iteration 1,
+  required-fix item 5).

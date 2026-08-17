@@ -94,6 +94,36 @@ describe('run_agent_on_pr', () => {
     expect(postCalled).toBe(false);
   });
 
+  it('invalid DEVDIGEST_MCP_RUN_TIMEOUT_MS → isError:true, no run is started', async () => {
+    process.env.DEVDIGEST_MCP_RUN_TIMEOUT_MS = '-5';
+    const repo = makeRepo();
+    const pr = makePrMeta();
+    let postCalled = false;
+
+    const api = createFakeApi({
+      get: (path) => {
+        if (path === '/repos') return [repo];
+        if (path === `/repos/${repo.id}/pulls`) return [pr];
+        throw new Error(`unexpected GET ${path}`);
+      },
+      post: () => {
+        postCalled = true;
+        throw new Error('should not start a review run when config is invalid');
+      },
+    });
+
+    const result = await runAgentOnPrHandler(
+      api,
+      { repo: repo.full_name, pr: pr.number, agent: 'some-agent' },
+      makeExtra(),
+    );
+
+    expect(result.isError).toBe(true);
+    const [block] = result.content ?? [];
+    expect((block as { text: string }).text).toContain('DEVDIGEST_MCP_RUN_TIMEOUT_MS');
+    expect(postCalled).toBe(false);
+  });
+
   it('poll timeout → isError:true, message points at get_findings, no exception escapes', async () => {
     process.env.DEVDIGEST_MCP_RUN_TIMEOUT_MS = '3000';
     vi.useFakeTimers();

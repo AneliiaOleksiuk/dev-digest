@@ -216,6 +216,11 @@ export class RepoIntelRepository {
       // when the indexer itself stamped status='degraded'|'failed' (e.g. the
       // graph fell over). 'partial' is still a working index — no degraded flag.
       const isDegraded = row.status === 'degraded' || row.status === 'failed';
+      // `walkClone` (`pipeline/walk.ts`) stamps `stats.bounded` with the COUNT
+      // of files dropped past `MAX_INDEXED_FILES`, spread verbatim into this
+      // same `stats` blob by `full.ts`/`incremental.ts` — 0 (or absent) means
+      // the walk was never truncated.
+      const isBounded = typeof stats.bounded === 'number' && stats.bounded > 0;
       return {
         repoId,
         status: row.status as IndexStatus,
@@ -230,6 +235,7 @@ export class RepoIntelRepository {
         degradedReason: isDegraded
           ? ((stats.degradedReason as DegradedReason | undefined) ?? 'index_failed')
           : undefined,
+        bounded: isBounded ? true : undefined,
       };
     } catch {
       // Table missing / schema drift / connection blip — degrade silently. The

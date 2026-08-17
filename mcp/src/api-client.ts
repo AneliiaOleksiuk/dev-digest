@@ -5,6 +5,7 @@
  * import of `server/src`. No credentials: the API has no route-level auth
  * (LocalNoAuthProvider), so this client sends none.
  */
+import { getApiBase } from './config.js';
 
 /** Thrown when `fetch` itself rejects (connection refused, DNS, etc). */
 export class ApiUnreachableError extends Error {
@@ -37,15 +38,13 @@ export interface ApiClient {
   post<T>(path: string, body?: unknown): Promise<T>;
 }
 
-const DEFAULT_BASE_URL = 'http://localhost:3001';
-
 /**
  * @param baseUrl Defaults to `DEVDIGEST_API_BASE`, then `http://localhost:3001`
- *   (mirrors `client/.env.example`'s `NEXT_PUBLIC_API_BASE`).
+ *   (mirrors `client/.env.example`'s `NEXT_PUBLIC_API_BASE`) — see `config.ts`.
  * @param fetchImpl Injectable for tests — avoids global `fetch` stubbing.
  */
 export function createApiClient(
-  baseUrl: string = process.env.DEVDIGEST_API_BASE ?? DEFAULT_BASE_URL,
+  baseUrl: string = getApiBase(),
   fetchImpl: typeof fetch = fetch,
 ): ApiClient {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -162,3 +162,35 @@ export const PrBrief = z.object({
   history: PrHistory,
 });
 export type PrBrief = z.infer<typeof PrBrief>;
+
+// ---- SPEC-03: PR Brief & Why Timeline ----
+/**
+ * One review-focus entry: a model-cited `path:line` plus a one-line reason a
+ * reviewer should look there. Distinct from `Risk.file_refs` (`string[]`,
+ * no line, no reason) — this is why `review_focus[]` needed a new shape
+ * rather than reusing `Risk` (D-1, SPEC-03). `path`/`line` are re-verified
+ * against the PR's real changed-file set and hunk ranges in code before
+ * persistence (AC-18–AC-20) — never trusted as-is from the model.
+ */
+export const ReviewFocusItem = z.object({
+  path: z.string(),
+  line: z.number().int(),
+  reason: z.string(),
+});
+export type ReviewFocusItem = z.infer<typeof ReviewFocusItem>;
+
+/**
+ * The server-composed judgement produced by exactly one structured LLM call
+ * per (PR, head_sha) — SPEC-03. Reuses `Risk`/`RiskSeverity` unchanged (D-1):
+ * they already have the shape the product needs. Distinct from `PrBrief`
+ * above, which is dead scaffolding (D-1) — `Brief` is a composed judgement
+ * *over* intent/blast, never a container re-embedding copies of them.
+ */
+export const Brief = z.object({
+  what: z.string(),
+  why: z.string(),
+  risk_level: RiskSeverity,
+  risks: z.array(Risk),
+  review_focus: z.array(ReviewFocusItem),
+});
+export type Brief = z.infer<typeof Brief>;

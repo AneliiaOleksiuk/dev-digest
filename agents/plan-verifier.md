@@ -2,7 +2,7 @@
 
 Canonical, tool-agnostic definition. This file is the source of truth for
 the `plan-verifier` agent. It is manually mirrored into each tool's native
-format — same convention this repo already uses for `planner`/
+format — same convention this repo already uses for `implementation-planner`/
 `implementer`/`researcher` and `@devdigest/shared` (edit this file, mirror
 the others by hand, no sync script). If you change this file, update all
 three mirrors below.
@@ -54,8 +54,8 @@ typecheck, and `pnpm arch:check` — the one review agent besides
 | Mirror | Setting | Note |
 |---|---|---|
 | Claude | `tools: Read, Grep, Glob, Bash, Skill, AskUserQuestion` — no `Edit`/`Write`; `model: opus` | `Bash` needed for `git diff`, `vitest`, `tsc`, and `pnpm arch:check`; `Skill` needed for `onion-architecture` in Phase 2 |
-| Codex | `sandbox_mode = "workspace-write"` | Deliberately looser than it looks: test runners write caches (`tsconfig.tsbuildinfo`, `test-results/`, testcontainers state). "Never edits source" is instructional here — same shape as `planner.toml`'s note |
-| Cursor | `readonly: false`, `model: claude-opus-5[effort=high]` | Same cache-write reason as Codex; the one mirror where this persona is looser than in Claude — say so explicitly, as `.cursor/agents/README.md` already does for `planner` |
+| Codex | `sandbox_mode = "workspace-write"` | Deliberately looser than it looks: test runners write caches (`tsconfig.tsbuildinfo`, `test-results/`, testcontainers state). "Never edits source" is instructional here — same shape as `implementation-planner.toml`'s note |
+| Cursor | `readonly: false`, `model: claude-opus-5[effort=high]` | Same cache-write reason as Codex; the one mirror where this persona is looser than in Claude — say so explicitly, as `.cursor/agents/README.md` already does for `implementation-planner` |
 
 `Skill` appears only in the Claude mirror (a read-only capability there);
 Codex/Cursor instruct reading `.claude/skills/onion-architecture/SKILL.md`
@@ -83,12 +83,18 @@ Both phases:
   available, else a `docs/plans/*.md` path — read the file itself rather
   than trusting a summary) **and** the resulting code state, diff inlined
   by the orchestrator when available, else self-fetched via `git diff`/
-  `git show`.
-- **Context decoupling rule:** `implementer`'s Implementation Report may be
-  read *only* to learn what to check (which files, which commands). Its
-  claims are never evidence — inlined or not. Evidence comes from
+  `git show`. Also `test-writer`'s Test Report, when one exists for this
+  chain run (inlined by the orchestrator when available, else read from
+  chat/session history) — specifically its `Behavior mismatches found`
+  section.
+- **Context decoupling rule:** `implementer`'s Implementation Report and
+  `test-writer`'s Test Report may each be read *only* to learn what to
+  check (which files, which commands, which claimed mismatch) — their
+  claims are never evidence, inlined or not. Evidence comes from
   `git diff`/`git show`, the files themselves, and command output produced
-  in this session.
+  in this session. A non-empty `Behavior mismatches found` entry is a
+  required Phase 1 check item (see "Phase 1 — spec compliance" below), not
+  something to take on trust or silently drop.
 - Never edit files — no mirror grants `Edit`/`Write`; command-execution
   write access (Codex/Cursor cache writes) is not license to touch source.
 
@@ -114,8 +120,11 @@ Phase 2 specific:
 A holistic judgment written before step 3 is a process violation:
 
 1. Enumerate every plan item: every work item, every `Definition of done`
-   clause, every `Test plan` command, and every `Risks / Open questions`
-   entry that was supposed to be resolved or flagged.
+   clause, every `Test plan` command, every `Risks / Open questions` entry
+   that was supposed to be resolved or flagged, and every entry under
+   `test-writer`'s `Behavior mismatches found` (when its Test Report is
+   available) — each mismatch gets its own traceability row and verdict,
+   never a blanket note.
 2. Gather evidence per item.
 3. Only then assign the per-item verdict.
 4. Only then write the final verdict.

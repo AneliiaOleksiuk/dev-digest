@@ -10,7 +10,7 @@ import type {
   SmartDiffRole,
 } from "@devdigest/shared";
 import type { DiffCommentApi } from "@/components/diff-viewer";
-import type { FocusFindingsOptions } from "@/lib/types";
+import type { FocusDiffLineOptions, FocusFindingsOptions } from "@/lib/types";
 import { RoleGroup, defaultFileOpen } from "./_components/RoleGroup";
 import { SplitSuggestionBanner } from "./_components/SplitSuggestionBanner";
 import { s } from "./styles";
@@ -47,6 +47,21 @@ function initialOpenMap(groups: SmartDiffGroup[]): Record<string, boolean> {
   return map;
 }
 
+/** Core + wiring start expanded; only boilerplate starts collapsed. Lives
+ *  here (not in RoleGroup) so onJumpToLine/externalFocus can force a
+ *  collapsed group open before scrolling to a file inside it (AC-30). */
+function defaultGroupOpen(role: SmartDiffRole): boolean {
+  return role === "core" || role === "wiring";
+}
+
+function initialGroupOpenMap(groups: SmartDiffGroup[]): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const group of groups) {
+    map[group.role] = defaultGroupOpen(group.role);
+  }
+  return map;
+}
+
 export function SmartDiffViewer({
   smartDiff,
   files,
@@ -54,6 +69,7 @@ export function SmartDiffViewer({
   commenting,
   onFocusFindings,
   showSplitBanner = true,
+  externalFocus,
 }: {
   smartDiff: SmartDiffResponse;
   files: PrFile[];
@@ -62,6 +78,10 @@ export function SmartDiffViewer({
   onFocusFindings?: (opts: FocusFindingsOptions) => void;
   /** When false, DiffTab owns the banner (both order modes). */
   showSplitBanner?: boolean;
+  /** A `path:line` to expand-then-scroll to (SPEC-03 AC-30) — drives the
+   *  SAME `onJumpToLine` this viewer already uses internally for its own
+   *  finding-badge clicks. `null`/`undefined` — no pending focus. */
+  externalFocus?: FocusDiffLineOptions | null;
 }) {
   const groups = React.useMemo(
     () => withCoverageFallback(smartDiff.groups, files),
@@ -69,6 +89,16 @@ export function SmartDiffViewer({
   );
   const fileByPath = React.useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
   const [openMap, setOpenMap] = React.useState<Record<string, boolean>>(() => initialOpenMap(groups));
+  const [groupOpenMap, setGroupOpenMap] = React.useState<Record<string, boolean>>(() =>
+    initialGroupOpenMap(groups),
+  );
+  const roleByPath = React.useMemo(() => {
+    const map = new Map<string, SmartDiffRole>();
+    for (const group of groups) {
+      for (const file of group.files) map.set(file.path, group.role);
+    }
+    return map;
+  }, [groups]);
 
   // Re-seed defaults when the smart-diff payload identity changes (new review / re-fetch).
   const groupsKey = React.useMemo(
@@ -80,6 +110,7 @@ export function SmartDiffViewer({
   );
   React.useEffect(() => {
     setOpenMap(initialOpenMap(groups));
+    setGroupOpenMap(initialGroupOpenMap(groups));
     // groupsKey is the stable identity; groups is derived from the same source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupsKey]);
@@ -88,8 +119,18 @@ export function SmartDiffViewer({
     setOpenMap((prev) => ({ ...prev, [path]: open }));
   };
 
+  const setGroupOpen = (role: SmartDiffRole, open: boolean) => {
+    setGroupOpenMap((prev) => ({ ...prev, [role]: open }));
+  };
+
   const onJumpToLine = (path: string, line: number) => {
     setFileOpen(path, true);
+    // A file's own FileCard never mounts while its enclosing RoleGroup is
+    // collapsed (e.g. boilerplate, or any group the user collapsed by hand)
+    // — force the group open too, or the querySelector below finds nothing
+    // and scrollIntoView silently no-ops (AC-30).
+    const role = roleByPath.get(path);
+    if (role) setGroupOpen(role, true);
     // Wait for FileCard controlled-open to commit before querying the line.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -98,6 +139,17 @@ export function SmartDiffViewer({
       });
     });
   };
+
+  // AC-30/E-22 — jump on mount and whenever the external focus target
+  // changes; no-op when the path isn't part of this PR's loaded files.
+  React.useEffect(() => {
+    if (!externalFocus) return;
+    if (!fileByPath.has(externalFocus.path)) return;
+    onJumpToLine(externalFocus.path, externalFocus.line);
+    // onJumpToLine is a stable closure over setOpenMap; keying on the focus
+    // value itself is what should re-trigger the jump.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalFocus?.path, externalFocus?.line, fileByPath]);
 
   const { too_big, total_lines, proposed_splits } = smartDiff.split_suggestion;
 
@@ -118,6 +170,8 @@ export function SmartDiffViewer({
           openMap={openMap}
           setFileOpen={setFileOpen}
           onJumpToLine={onJumpToLine}
+          groupOpen={groupOpenMap[group.role] ?? defaultGroupOpen(group.role)}
+          setGroupOpen={(open) => setGroupOpen(group.role, open)}
         />
       ))}
     </div>

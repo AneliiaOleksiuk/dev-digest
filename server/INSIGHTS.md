@@ -87,6 +87,34 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the new `critical_count`/`warning_count`/`suggestion_count` fields added
   2026-07-30 — they're the severity breakdown of that SAME latest review,
   not summed across every agent/run on the PR.
+- **`pnpm arch:check` (dependency-cruiser) only matches specific filenames
+  — constructing a sibling module's concrete repository/adapter from
+  inside a service passes it while still violating onion in substance
+  (2026-08-14).** `.dependency-cruiser.cjs`'s four rules (`no-service-to-db`
+  etc.) match `service.ts`/`routes.ts`/`helpers.ts` by name. `new
+  RepoRepository(container.db)` called from `modules/onboarding/service.ts`
+  (to look up a sibling module's row) is service→service on paper — the
+  import path is `../repos/repository.js`, not `../../db/*` — so
+  `arch:check` reports clean, even though transitively that pulls
+  `drizzle-orm` and `src/db/schema` into the application layer exactly the
+  way the rule exists to prevent. `plan-verifier`'s Phase 2 caught this
+  reading the actual import graph, not the tool output. Same pattern
+  already exists at `modules/conventions/service.ts:56`, also unexempt and
+  also passing `arch:check`. If a new module needs data another module
+  owns, put the read behind that module's own port/facade (the way
+  `repoIntel.*` is meant to be consumed) rather than constructing its
+  concrete repository class directly — `arch:check` won't catch the
+  shortcut for you.
+- **A module's file-I/O layer (the `facts.ts`/`discover.ts`-shaped file
+  that keeps `helpers.ts` pure per the onion convention) is invisible to
+  every `arch:check` rule (2026-08-14).** The four dependency-cruiser
+  rules match only `service.ts`/`routes.ts`/`helpers.ts` by filename —
+  `modules/onboarding/facts.ts` (which does real `node:fs/promises` I/O
+  and takes the whole `Container`) is checked by none of them. Not a bug
+  in this session's code, but worth knowing before assuming a green
+  `arch:check` means every file in a new module was actually held to the
+  boundary rules — it means every file *matching one of the four regexes*
+  was.
 
 ## Codebase Patterns
 
@@ -289,6 +317,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   of the drift is still there — don't assume the client `adapters.ts` mirror
   is otherwise in sync with the server one.
 
+- **A Zod contract state enum can mix persisted and deliberately-transient
+  values without the transient ones ever touching a repository write
+  (2026-08-14, SPEC-03 `BriefState`).** `BriefState = 'current' | 'stale' |
+  'absent' | 'corrupt' | 'budget_exceeded' | 'failed'` — the first four are
+  READ states, always derivable from row-presence + a `safeParse` outcome
+  (`modules/brief/helpers.ts`'s `deriveBriefState`); the last two are
+  GENERATE-ONLY outcomes AC-25/AC-42 require to never be persisted (a
+  floor-exceeded budget check makes zero calls; a failed/schema-invalid call
+  must leave any prior row untouched). Implementation: `BriefService.generate`
+  constructs `budget_exceeded`/`failed` as literal `BriefResponse` objects
+  directly inside its budget-check and `catch` branches — never round-tripped
+  through `BriefRepository.upsertBrief`. Keeps "a corrupted stored row
+  degrades on read" (the `onboarding.json` pattern, `mapRowToRecord`
+  returning `null`) fully separate from "this one attempt failed" — the two
+  read as the same shape to the client (`record: null`, a `reason` string)
+  but have entirely different code paths and different persistence
+  consequences. Worth this shape for any future feature with a similarly
+  strict "some outcomes must produce zero DB writes" requirement.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -488,6 +535,70 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   migration files instead of one; that's fine, don't try to force a single
   migration file by fighting the prompt. Used for the `conventions` table's
   `accepted` boolean → `category`/`status`/`skill_id` migration, 2026-08-02.
+
+- **`pnpm db:generate` writes three artifacts, not one — commit all three
+  together or the migration silently doesn't exist on a fresh checkout
+  (2026-08-14).** It writes the migration SQL file
+  (`src/db/migrations/NNNN_*.sql`), updates
+  `src/db/migrations/meta/_journal.json` to register it, and writes a new
+  `src/db/migrations/meta/NNNN_snapshot.json`. `drizzle`'s `migrate()`
+  (`src/db/migrate.ts`) reads `_journal.json` to know which migrations to
+  run — if only the `.sql` file gets `git add`ed/committed and the journal/
+  snapshot changes are left uncommitted (easy to miss: they're two levels
+  deep in `meta/` and don't look like "the migration" at a glance), a
+  fresh `pnpm db:migrate` on another checkout silently skips that
+  migration entirely, with no error. Caught by `plan-verifier`'s Phase 1
+  for the Onboarding Generator's 0017 migration — the columns existed on
+  the session's own disk (already migrated there) but the committed tree
+  couldn't produce them. Always `git status` the whole
+  `src/db/migrations/` tree (not just the `.sql` file you expect) after
+  `pnpm db:generate`, and stage the journal + every new/changed snapshot
+  alongside the migration in the same commit.
+
+- **`pnpm db:generate` cannot auto-resolve an unnamed single-column PRIMARY
+  KEY's constraint name when the schema change replaces it with a composite
+  key (2026-08-14, SPEC-03 WI2, `pr_brief`'s `pr_id`-only PK → `(pr_id,
+  head_sha)`).** The generated `.sql` contains a commented-out `-- ALTER
+  TABLE "x" DROP CONSTRAINT "<constraint_name>";` placeholder plus its own
+  header comment admitting it can't fill in the name yet, and — worse — puts
+  the `ADD CONSTRAINT ... PRIMARY KEY(...)` statement BEFORE the `ADD COLUMN`
+  statement for the new key column the constraint depends on. Running it
+  as-generated fails twice over: Postgres allows only one PRIMARY KEY per
+  table (the old one is still there), and the new column referenced by the
+  composite key doesn't exist yet at that point in the script. Fix: query the
+  live DB for the real name — `SELECT constraint_name FROM
+  information_schema.table_constraints WHERE table_schema='public' AND
+  table_name='<table>' AND constraint_type='PRIMARY KEY'` (came back
+  `pr_brief_pkey`, Postgres's own default-naming convention for an unnamed
+  single-column PK) — then hand-reorder the generated SQL: `ADD COLUMN`s
+  first, then `DROP CONSTRAINT "<real_name>"`, then `ADD CONSTRAINT ...
+  PRIMARY KEY(...)`. This is a sanctioned COMPLETION of what drizzle-kit
+  itself flagged as a manual TODO in its own comment, not a violation of
+  "never hand-edit migrations" — the file is still the one `db:generate`
+  produced, just finished. Confirmed correct by dropping/reapplying against
+  live Docker Postgres (`src/db/migrations/0018_real_iceman.sql`). Any future
+  primary-key-shape change (not just a column rename/drop, per the two
+  interactive-prompt entries above) should expect this same gap.
+
+- **`arch:check`'s `no-helpers-to-io` rule is STRICTER than
+  `no-service-to-db` about `src/db/rows.ts` (2026-08-14, SPEC-03
+  `modules/brief/helpers.ts`).** `no-service-to-db`'s `to.path` regex
+  (`.dependency-cruiser.cjs`) explicitly carves out `db/rows.ts` — a
+  `service.ts` may import a plain Drizzle-inferred row type from there (it's
+  treated like a DTO at the port boundary, per the rule's own comment).
+  `no-helpers-to-io`'s `to.path` has NO such carve-out — it blocks ALL of
+  `^src/db/`, full stop. A new module's `helpers.ts` needing a DB row's shape
+  to type a pure function (e.g. `mapRowToRecord(row: XRow): Y | null`) must
+  NOT `import type { XRow } from '../../db/rows.js'`, even though the import
+  is type-only and the row itself is plain data — `pnpm arch:check` fails
+  with one `no-helpers-to-io` violation, immediately, one-line cause. Fix:
+  define a LOCAL, structurally-identical interface in `helpers.ts` instead of
+  importing the real one — TypeScript's structural typing means the actual
+  Drizzle-inferred row is still assignable to it with zero cast needed. See
+  `server/src/modules/brief/helpers.ts`'s `BriefRow` (local mirror) vs.
+  `server/src/db/rows.ts`'s `PrBriefRow` (the real type, used freely by
+  `repository.ts`/`repository.drizzle.ts`/`service.ts`, none of which match
+  the helpers-only rule).
 
 ## Session Notes
 
@@ -715,9 +826,258 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   authorship for the new write paths (AC-34–AC-53) is explicitly `test-
   writer`'s job next, not done here beyond the pre-existing suites passing.
 
+- 2026-08-14: SPEC-02 Onboarding Generator (plan
+  `docs/plans/spec-02-onboarding-generator.md`) server side, WI1-WI9 — new
+  `modules/onboarding/` (`facts.ts` for file I/O, pure `helpers.ts`,
+  `prompt.ts`, `service.ts`, `repository.ts`/`repository.drizzle.ts`,
+  `routes.ts`), generation-metadata columns added to `onboarding`
+  (migration `0017_sweet_rachel_grey.sql`, a clean single-pass `ADD COLUMN`
+  set — no interactive drizzle-kit prompt this time since nothing was
+  dropped/renamed, contrast the DROP+ADD workaround documented above),
+  `container.onboardingRepo`, and the previously-unloaded
+  `prompts/onboarding.system.md` finally wired via `renderPrompt`. `pnpm
+  arch:check` stays clean with the new module **not** added to
+  `PRE_EXISTING_MODULES` — confirmed the `conventions/service.ts` precedent
+  (importing `RepoRepository` from `modules/repos/repository.js` directly in
+  a non-exempt module's `service.ts`) is legitimate: dependency-cruiser's
+  `no-service-to-db` rule only matches DIRECT edges from `service.ts` to
+  `db/(schema|client)`, not transitive ones through another module's own
+  repository, so this pattern is arch-check-safe as long as the import
+  target isn't itself under `src/adapters/` or `src/db/`.
+- 2026-08-14: The onboarding table's generation-metadata columns
+  (`status`/`provider`/`model`/`tokensIn`/`tokensOut`/`costUsd`/`callCount`/
+  `indexSha`/`filesIndexed`/`indexStatus`) were modeled on `agentRuns`
+  (`db/schema/runs.ts`) field-for-field, INCLUDING its `doublePrecision`
+  (not `numeric`) for `costUsd` — simpler than `numeric`'s `{mode:'number'}`
+  config for the exact same `number | null` round-trip, and matches the
+  ALREADY-established codebase convention (`agent_runs`/`eval_runs`/
+  `ci_checks` all use `doublePrecision('cost_usd')`), not the plan's
+  literal-but-untested "numeric" suggestion. Metadata lives in dedicated
+  columns, never inside `onboarding.json`, specifically because the `json`
+  column must parse cleanly against the `Onboarding` zod contract
+  (`{sections}` only) on every read — a zod object silently strips unknown
+  keys, so metadata smuggled into `json` would be destroyed by that same
+  validation.
+- 2026-08-14: **`knowledge.ts` (both vendor copies) has pre-existing drift
+  UNRELATED to onboarding** — discovered while adding the new
+  `OnboardingStatus`/`OnboardingGenerationUsage`/`OnboardingTourResponse`
+  contracts, which had to be placed AFTER the `Provider` enum (referencing a
+  `const` before its declaration throws at module load, temporal dead
+  zone) rather than physically next to the existing `Onboarding`/
+  `OnboardingSection` block the plan pointed at. The client copy is missing
+  `AgentVersionConfig`/`AgentVersion` entirely and has shorter comments on
+  `Provider`/`CiFailOn` than the server copy — same "leave pre-existing
+  drift alone unless deliberately reconciling the whole file" rule this file
+  already documents for `trace.ts`. New content was appended at the very END
+  of both files (after each file's own existing tail) specifically so it
+  introduces ZERO new diff on top of that pre-existing drift — confirmed via
+  `git diff --no-index` before/after: the hunks are identical, nothing new.
+  Don't "fix" the older drift as a drive-by from a future onboarding session.
+- 2026-08-14: The `run_locally` section's model-authored markdown has NO
+  structured `commands[]` field — the shared `OnboardingSection` contract is
+  flat (`{kind,title,body,diagram,links}`), so AC-8's "every shell command
+  must be verbatim-matched or dropped" is enforced by regex-extracting
+  fenced-code-block (```) LINES from the markdown `body` and substring-
+  matching each trimmed line against the concatenated run-locally source
+  files — a whole fence collapses to nothing (removed entirely, not left as
+  an empty ` ``` ` pair) if every one of its lines fails to match. Inline
+  code spans (single backticks) are deliberately NOT put through this check
+  — treated as identifiers/short mentions, not full shell commands; only
+  fenced blocks are. If a future session needs finer-grained command
+  extraction, this is the seam (`groundRunLocallyBody`/`extractDeterministic
+  Commands` in `modules/onboarding/helpers.ts`), not a reason to add a
+  `commands[]` field to the shared contract without a product decision.
+- 2026-08-14: AC-12's "First tasks" complexity/difficulty badge could NOT be
+  built per-task-card as the reference design implies, because
+  `OnboardingSection` has no structured per-task array to attach a badge
+  to — only one flat markdown `body`. Implemented as ONE section-level badge
+  ("Model estimate", with a tooltip) on the `first_tasks` card instead of a
+  per-card badge — a deliberate, documented simplification given the
+  contract shape, not an oversight. If a later iteration wants true
+  per-task badges (Recommendation 4's rank-percentile alternative), that
+  needs a contract change (a structured `tasks[]` field) which is out of
+  this iteration's scope.
+
+- 2026-08-14: SPEC-03 PR Brief & Why Timeline (plan
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md`) server side, WI1-WI8 —
+  `Brief`/`ReviewFocusItem`/`BriefInputStatus`/`BriefUsage`/`BriefRecord`/
+  `BriefState`/`BriefResponse`/`BriefTimelineEntry`/`BriefTimelineResponse`
+  added to both vendored contract copies (`brief.ts`/`review-api.ts`, D-1);
+  `pr_brief` table repurposed from one-row-per-PR to one-row-per-(PR,
+  head_sha) (migration `0018_real_iceman.sql`, composite PK — see Recurring
+  Errors & Fixes for the hand-completed DROP/ADD CONSTRAINT step); new
+  `modules/brief/` (onion: `constants.ts`, `repository.ts`/
+  `repository.drizzle.ts`, `sources.ts`/`sources.node.ts` for the non-DB
+  input port, `prompt.ts`/`budget.ts`/`grounding.ts` all pure, `helpers.ts`,
+  `service.ts`, `routes.ts`), `container.briefRepo`/`container.briefSources`.
+  `grounding.ts` mirrors `reviewer-core/src/grounding.ts`'s `buildLineIndex`
+  rule locally rather than importing it (E-9 — not re-exported by the package
+  barrel, and Brief's items aren't `Finding`s). `budget.ts`'s spec-file
+  sub-cap (2 500 tokens, whole-document admission only) and its four-stage
+  AC-24 trim order (spec excerpts → linked issue → collapsed hunk headers →
+  binary-searched file-list truncation) are unit-testable independent of any
+  I/O, per the plan's own `count: (s: string) => number` DI-tokenizer
+  parameter. `sources.node.ts` re-resolves the full `PullRow`/`repos` row via
+  a fresh `ReviewRepository(container.db)` inside `loadDiff` rather than
+  widening `BriefPull`/`BriefRepoRow` to match `diff-loader.ts`'s literal
+  `PullRow` param type — a deliberate small redundant read (cheap relative to
+  the LLM call the generation is about to make) that keeps the module's own
+  port types narrow. Verified: `pnpm typecheck` clean, `pnpm arch:check`
+  clean (see Recurring Errors & Fixes for the `no-helpers-to-io` gotcha this
+  surfaced), full unit suite green except the pre-existing
+  `indexer-pipeline.test.ts` Windows flake (confirmed via `git status` —
+  untouched file), and the full `.it.test.ts` suite green except the
+  pre-existing 8-test `onboarding.it.test.ts` fixture gap (confirmed
+  pre-existing and unrelated via `git status` — matches the exact 8 tests
+  server/INSIGHTS.md's FIX-8 entry already documents). Client-side WI9-WI14
+  is `client/INSIGHTS.md`'s entry for the same date. Test authorship
+  (`test-writer`'s job next) not attempted beyond the pre-existing suites
+  passing.
+
 ## Open Questions
 
 - Why does `depgraph.buildEdges` leave `file_edges` empty for the demo
   orders/public import graph even after a full index on the PR tip? Name-
   matched callers paper over it; proper `decl_file` resolution is still the
   right long-term fix.
+  **Confirmed still broken on a real, large repo, with numbers (2026-08-14):**
+  this is not specific to the small `orders`/`public` demo fixture. Direct
+  DB query against `AneliiaOleksiuk/dev-digest`'s own indexed clone (repo
+  id `04f27d46-ee19-406a-9e6a-77befcb1f706`, a `full` index at commit
+  `48bc3af`, `repo_index_state.stats`: `filesIndexed: 525`,
+  `symbolsWritten: 1550`, `referencesWritten: 12912`) shows `file_edges`
+  has **0 rows**, with no `graphFailed` key in `stats` — `buildEdges` ran
+  to completion without throwing, it just found no import relationships in
+  a real 5-package TypeScript monorepo that plainly has thousands.
+  `file_rank` has 525 rows but only 1 distinct percentile (the degenerate-
+  graph fallback in `pipeline/rank.ts:39-47` correctly kicking in given
+  zero edges). Discovered downstream via the Onboarding Generator (SPEC-02)
+  while manually verifying the live "Critical paths" section, which
+  correctly reported "no usable import graph" rather than presenting the
+  flat rank as real — so the symptom is now reproducible from a live
+  feature, not just a DB query, if that helps debugging. Recorded in
+  `BACKLOG.md` under "repo-intel — import-graph extraction".
+- 2026-08-14: `test/project-context-run.it.test.ts`'s "AC-22: the second of
+  two over-budget documents is dropped..." integration test fails
+  (`Cannot read properties of undefined (reading 'map')` on
+  `trace.project_context_docs`) on a clean run against this working tree —
+  confirmed PRE-EXISTING and unrelated to the SPEC-02 onboarding session
+  above via `git status` (zero changes from this session to
+  `project-context/**`, `run-executor.ts`, or `trace-builder.ts`; the latter
+  shows modified from an EARLIER uncommitted session, not this one). Left
+  unresolved — it belongs to whichever session left `trace-builder.ts` mid-
+  edit, not to onboarding. **Reconfirmed 2026-08-14 (fix-loop iteration 1
+  below)**: still the only integration failure, still traced to the same
+  uncommitted `trace-builder.ts`, still out of this session's scope.
+
+- 2026-08-14 (SPEC-02 fix-loop iteration 1, remediating `plan-verifier`'s
+  Phase 1 FAIL against commits `e8ca0ec`/`ea93e4d`/`8f04d73`) — six
+  server-touching fixes:
+  - **FIX-1 widened past what the fix plan described.** The plan assumed
+    only migration `0017`'s journal/snapshot bookkeeping was missing. In
+    fact TWO migrations were uncommitted: `0017_sweet_rachel_grey.sql`
+    (onboarding — `.sql` itself WAS committed in `e8ca0ec`, only its
+    journal entry/snapshot were missing, as the plan said) AND
+    `0016_colossal_professor_monster.sql` (the SPEC-01
+    `project_context_attachments` table — its `.sql` file itself was
+    **also** never committed, from an entirely earlier, unrelated session;
+    `git log -- <path>` shows zero commits touching it at all). Confirmed by
+    dropping a scratch DB (`devdigest_scratch_fix1`) and running
+    `pnpm db:migrate`-equivalent (`tsx src/db/migrate.ts` with
+    `DATABASE_URL` pointed at the scratch DB) against the current working
+    tree's `migrations/` folder as-is: both tables land correctly (all ten
+    onboarding columns + `project_context_attachments` with its FKs/indexes),
+    and the three snapshot files' `id`/`prevId` chain (`0015`→`0016`→`0017`)
+    is internally consistent — so the CONTENT is correct, only the git
+    history is missing it. Left uncommitted per this run's instructions (no
+    commit requested), but flagged here since a future session might assume
+    "0017's bookkeeping" is the whole story and miss that 0016's own `.sql`
+    is homeless too.
+  - **FIX-2**: `groundBulletItemPaths` (`onboarding/helpers.ts`) closes the
+    W7 gap — AC-7 grounding previously only filtered `section.links`, never
+    scanned `section.body` prose for invented paths. Scans single-backtick
+    inline-code tokens per bullet/numbered item (reusing the existing
+    `BULLET_RE` line-ownership logic from `capBulletItems` and the existing
+    `knownPaths(facts)` allowlist); a token that "looks like a path"
+    (contains `/`, or ends in a recognized source/doc extension) and isn't
+    in the allowlist drops the WHOLE item, not just the token. Applied only
+    to `critical_paths`/`reading_path`/`first_tasks` (per the fix plan's
+    explicit scoping) — `run_locally` keeps its own verbatim-match grounding,
+    `architecture` is deliberately untouched. Order matters: grounding runs
+    BEFORE `capBulletItems`, so the render cap counts only survivors.
+  - **FIX-3**: `OnboardingService.getTour`'s no-stored-row branch now calls
+    the SAME `deriveStatus(indexState, facts)` the below-minimum generation
+    branch already used, instead of hardcoding `never_generated` — this was
+    `test-writer`'s own intentionally-failing oracle test
+    (`onboarding.it.test.ts:234`, "no local clone renders `no_clone`, not
+    `never_generated`, on the FIRST GET"); it now passes with zero test
+    changes, exactly as the fix plan predicted.
+  - **FIX-4 (server half)**: added `IndexState.bounded?: boolean` — a NEW
+    field on an EXISTING return type, deliberately not a new facade method
+    (judgment call: the Plan's Non-goal only forbade new facade *methods*).
+    `RepoIntelRepository.tryGetIndexState` derives it from
+    `stats.bounded > 0` (`pipeline/walk.ts`'s `WalkStats.bounded`, already
+    persisted into `repo_index_state.stats` but never read back out before
+    this fix). `onboarding/helpers.ts`'s `deriveStatus` now treats
+    `indexState.bounded` the same as `status === 'partial'` — a `status:
+    'full'` index that was walk-bounded at `MAX_INDEXED_FILES` now correctly
+    reports `partial_index` to the Onboarding Generator instead of an
+    unqualified "full index" claim (E-5/AC-15). This field is additive/
+    optional — no ripple into any hand-built `IndexState` literal elsewhere.
+  - **FIX-5**: `groundRunLocallyBody` now attributes each surviving,
+    verbatim-matched command line with a trailing shell comment
+    (`  # from <path>`) instead of just the skeleton path having
+    attribution — deliberately NOT the skeleton's `(from \`path\`)`
+    markdown-bullet convention, since that syntax would break INSIDE a
+    fenced code block; a shell `#` comment is both valid shell syntax and
+    consistent with `extractDeterministicCommands`' existing
+    `npm run <script>  # <script body>` style.
+  Client-side FIX-4/FIX-6 work is `client/INSIGHTS.md`'s entry for the same
+  date. Verified: `pnpm arch:check` clean; server `tsc --noEmit` clean
+  (except the one PRE-EXISTING `adapters/auth/local.ts:40` error, confirmed
+  via `git status` as belonging to an unrelated concurrent session, not
+  touched here); full onboarding unit + `.it.test.ts` suites green
+  (27 + 19 tests, including the now-passing former "known failing" AC-18
+  case); only pre-existing failures elsewhere (`indexer-pipeline.test.ts`'s
+  documented Windows flake, `project-context-run.it.test.ts`'s AC-22 case
+  above) — both confirmed unrelated via `git status` before and after.
+- 2026-08-14 (FIX-8, mid-loop addition after FIX-1..7): `OnboardingSection`
+  gained a `tasks: z.array(OnboardingTask).nullish()` field (both vendor
+  `knowledge.ts` copies) so `first_tasks` can carry structured per-task cards
+  (title/path/complexity) instead of only prose — same additive/nullish
+  pattern `diagram` already uses for being architecture-only. **A per-kind
+  constraint on an array item that must still share one object shape with
+  its siblings composes better as `.superRefine` on the item schema than as
+  a discriminated union**: `OnboardingLlmResponse`'s existing order/length
+  check already does `sections[i].kind === ONBOARDING_SECTION_KINDS[i]`
+  across ALL five items uniformly, so narrowing `OnboardingLlmSection` into a
+  discriminated union keyed on `kind` (to make `tasks` required-only-for-
+  `first_tasks` at the type level) would have fought that existing array-wide
+  check rather than compose with it. `OnboardingLlmSection`'s own
+  `.superRefine` instead enforces both directions post-hoc: `first_tasks`
+  MUST have a non-empty `tasks` array, every other kind MUST leave it
+  null/omitted — same one-schema-object shape, no union needed.
+  **This ripples into `server/test/onboarding.it.test.ts`'s shared
+  `VALID_SECTIONS`/`VALID_FIXTURE` fixture (line ~72), exactly the "extending
+  a Zod contract ripples into every hand-typed object literal" pattern this
+  file already documents for `PrIntentRecord`/`risk_areas`** — that fixture's
+  `first_tasks` entry has no `tasks` field, so EVERY "successful generation"
+  in that file now fails the new `superRefine` and falls through to the
+  `llm_failed`/skeleton path instead of persisting a real tour. Confirmed via
+  a live run: exactly 8 of 21 tests fail as a result (all downstream of "the
+  fixture's generation never actually succeeds," not 8 independent bugs) —
+  `AC-5`, `AC-23`, `AC-26`, `AC-28`, `AC-36`, `AC-21 (the marquee sequence)`,
+  `D-13`, and `FIX-4 (bounded index)`. The fix is a ONE-LINE addition to the
+  shared fixture (give its `first_tasks` entry a non-empty `tasks: [...]`),
+  not 8 separate test rewrites — `test-writer`'s job next, flagged here so it
+  isn't mistaken for a real regression in each of those 8 ACs individually.
+  Grounding: `groundTasks(kind, tasks, paths)` in `helpers.ts` applies the
+  SAME discard contract AC-7/D-8 already require for `links[].path`, to
+  `tasks[].path`, then caps at the EXISTING `MAX_FIRST_TASK_CARDS` (no second
+  cap invented). Client-side FIX-8 work (per-task card grid replacing the
+  single header badge) is `client/INSIGHTS.md`'s entry for the same date.
+  Verified: `pnpm typecheck`/`pnpm arch:check` both clean; onboarding unit
+  suites (`onboarding-helpers.test.ts`, `onboarding-prompt.test.ts`) fully
+  green (46/46, zero changes needed); `onboarding.it.test.ts` shows exactly
+  the 8 predicted failures above, all traced to the one fixture gap, not
+  fixed here per this fix-loop's own "test-writer's job next" convention.

@@ -8,7 +8,8 @@ description = "Two-phase gate: Phase 1 checks implementer's actual work against 
 # actually run the plan's Test plan commands (vitest, tsc), and those write
 # caches (tsconfig.tsbuildinfo, test-results/, testcontainers state) even
 # though the agent never edits source. "Never edits source" is instructional
-# here, not sandbox-enforced — same shape as planner.toml's note.
+# here, not sandbox-enforced — same shape as implementation-planner.toml's
+# note.
 sandbox_mode = "workspace-write"
 
 # `model`: pin to the strongest reasoning tier available, and prefer a
@@ -49,11 +50,17 @@ not one blended judgment, prevents.
 Both phases:
 - Input contract: a Development Plan (pasted or a docs/plans/*.md path)
   and the resulting code state. Read the plan file itself rather than
-  trusting a summary of it.
-- Context decoupling rule: implementer's Implementation Report may be read
-  only to learn what to check (which files, which commands). Its claims
+  trusting a summary of it. Also test-writer's Test Report, when one
+  exists for this chain run — specifically its "Behavior mismatches
+  found" section.
+- Context decoupling rule: implementer's Implementation Report and
+  test-writer's Test Report may each be read only to learn what to check
+  (which files, which commands, which claimed mismatch) — their claims
   are never evidence. Evidence comes from git diff/git show, the files
-  themselves, and command output you produce this session.
+  themselves, and command output you produce this session. A non-empty
+  "Behavior mismatches found" entry is a required Phase 1 check item (see
+  "Phase 1 — spec compliance" below), not something to take on trust or
+  silently drop.
 - Never edit files — sandbox_mode allows test-runner caches, not source
   edits.
 
@@ -77,8 +84,11 @@ Phase 2 specific:
 A holistic judgment written before step 3 is a process violation:
 
 1. Enumerate every plan item: every work item, every "Definition of done"
-   clause, every "Test plan" command, and every "Risks / Open questions"
-   entry that was supposed to be resolved or flagged.
+   clause, every "Test plan" command, every "Risks / Open questions" entry
+   that was supposed to be resolved or flagged, and every entry under
+   test-writer's "Behavior mismatches found" (when its Test Report is
+   available) — each mismatch gets its own traceability row and verdict,
+   never a blanket note.
 2. Gather evidence per item.
 3. Only then assign the per-item verdict.
 4. Only then write the final verdict.

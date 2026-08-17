@@ -41,9 +41,10 @@ export const PromptAssembly = z.object({
   skills: z.string().nullish(),
   memory: z.string().nullish(),
   specs: z.string().nullish(),
-  /** Callers-of-changed-symbols digest (repo-intel); null when absent. */
+  /** Callers-of-changed-symbols digest (T1.3); null when absent. */
   callers: z.string().nullish(),
-  /** Repo skeleton / map (repo-intel); null when absent. */
+  /** Repo skeleton / map (T3); null when absent. Enables per-slot token
+      attribution in the run trace. */
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
@@ -86,6 +87,14 @@ export const RunTrace = z.object({
   memory_pulled: z.array(MemoryPulled),
   /** Spec/plan file paths read anywhere in the run pipeline (currently: intent classification), not necessarily fed to the reviewer's prompt. */
   specs_read: z.array(z.string()),
+  /** Project-context documents actually injected into this run's prompt
+   *  (path + individual size), one entry per document — distinct from
+   *  `specs_read` (intent-classification reads only, see ADR-0003) and from
+   *  `prompt_assembly.specs` (the concatenated string). `.default([])` so
+   *  traces written before this feature still parse. */
+  project_context_docs: z
+    .array(z.object({ path: z.string(), tokens: z.number().int(), chars: z.number().int() }))
+    .default([]),
   log: z.array(RunLogLine),
 });
 export type RunTrace = z.infer<typeof RunTrace>;

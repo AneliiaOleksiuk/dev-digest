@@ -32,12 +32,29 @@ export const OnboardingLink = z.object({
 });
 export type OnboardingLink = z.infer<typeof OnboardingLink>;
 
+/** One structured "first task" card (FIX-8, AC-12/AC-4/UX-5) — `first_tasks`
+ *  ONLY; every other `OnboardingSection.kind` must leave `tasks` null/omitted.
+ *  `complexity` is the model's own subjective estimate, not a measurement
+ *  (AC-12) — only `low`/`medium` per the Spec's literal "Low/Medium" wording
+ *  (design note under AC-12); do not add `high` without a Spec citation. */
+export const OnboardingTask = z.object({
+  title: z.string(),
+  path: z.string(),
+  complexity: z.enum(['low', 'medium']),
+});
+export type OnboardingTask = z.infer<typeof OnboardingTask>;
+
 export const OnboardingSection = z.object({
   kind: z.string(),
   title: z.string(),
   body: z.string(), // markdown
   diagram: z.string().nullish(), // mermaid
   links: z.array(OnboardingLink),
+  /** Per-task structured cards — `first_tasks` only (FIX-8). Additive/
+   *  nullish so every other kind (and every pre-FIX-8 stored row) is
+   *  unaffected, the same pattern `diagram` already uses for being
+   *  architecture-only. */
+  tasks: z.array(OnboardingTask).nullish(),
 });
 export type OnboardingSection = z.infer<typeof OnboardingSection>;
 
@@ -208,3 +225,63 @@ export const AgentSkillLink = z.object({
   order: z.number().int(),
 });
 export type AgentSkillLink = z.infer<typeof AgentSkillLink>;
+
+// ---- Onboarding: generation metadata + status (SPEC-02) ----
+// Grouped here (after `Provider`, which `OnboardingGenerationUsage` needs) —
+// NOT physically next to the `Onboarding`/`OnboardingSection` block above,
+// since referencing `Provider` before its declaration would throw at module
+// load (temporal dead zone). `OnboardingSection.kind` stays `z.string()`
+// (reused as-is, per the Spec) — the five-kind constraint below is enforced
+// by the onboarding module's own LLM response schema, not by narrowing it.
+
+/** Fixed order of the five tour sections (AC-4). */
+export const ONBOARDING_SECTION_KINDS = [
+  'architecture',
+  'critical_paths',
+  'run_locally',
+  'reading_path',
+  'first_tasks',
+] as const;
+export const OnboardingSectionKind = z.enum(ONBOARDING_SECTION_KINDS);
+export type OnboardingSectionKind = z.infer<typeof OnboardingSectionKind>;
+
+/** One enumerated, machine-readable status per tour (AC-17) — never inferred
+ *  client-side from an empty body. */
+export const OnboardingStatus = z.enum([
+  'ok',
+  'partial_index',
+  'no_clone',
+  'not_indexed',
+  'llm_failed',
+  'never_generated',
+]);
+export type OnboardingStatus = z.infer<typeof OnboardingStatus>;
+
+/** Cost/usage recorded per generation (AC-28), taken from `StructuredResult` —
+ *  never discarded the way `conventions/service.ts` discards its own usage. */
+export const OnboardingGenerationUsage = z.object({
+  provider: Provider,
+  model: z.string(),
+  call_count: z.number().int(),
+  tokens_in: z.number().int(),
+  tokens_out: z.number().int(),
+  cost_usd: z.number().nullable(),
+});
+export type OnboardingGenerationUsage = z.infer<typeof OnboardingGenerationUsage>;
+
+/** GET/POST /repos/:id/onboarding response. */
+export const OnboardingTourResponse = z.object({
+  sections: z.array(OnboardingSection),
+  status: OnboardingStatus,
+  generated_at: z.string().nullable(),
+  files_indexed: z.number().int(),
+  index_status: z.string(),
+  index_sha: z.string().nullable(),
+  /** True when the persisted `index_sha` no longer matches the current index
+   *  (AC-26) — reported, never auto-regenerated. */
+  stale: z.boolean(),
+  usage: OnboardingGenerationUsage.nullable(),
+  /** Human-readable status explanation, always present. */
+  reason: z.string(),
+});
+export type OnboardingTourResponse = z.infer<typeof OnboardingTourResponse>;

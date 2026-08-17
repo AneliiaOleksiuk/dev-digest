@@ -47,6 +47,17 @@ export interface IndexState extends IndexResult {
   /** True when the layer is running on the ripgrep fallback. */
   degraded?: boolean;
   degradedReason?: DegradedReason;
+  /**
+   * True when the walk (`pipeline/walk.ts`'s `WalkStats.bounded`) truncated
+   * the file set at `MAX_INDEXED_FILES` even though the rest of the pass was
+   * clean — a `status: 'full'` index can still be built over an
+   * alphabetically-truncated slice of a very large repo (E-5). Distinct from
+   * `status === 'partial'` (soft-budget/graph/parse degradation): this repo
+   * WAS fully parsed, just not fully WALKED. Consumers that need to tell "full
+   * index, nothing left out" from "full index, but bounded" (e.g. the
+   * Onboarding Generator's AC-15) must check this flag, not only `status`.
+   */
+  bounded?: boolean;
 }
 
 // ---------------------------------------------------------------------------

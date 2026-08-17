@@ -55,10 +55,11 @@ never as a default target.
 # Hard constraints
 
 - Write scope: `docs/**` only. Never `server/`, `client/`,
-  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope,
-  human/`planner`-owned — read only); never `docs/plans/`
-  (`planner`-owned); never `docs/agent-prompts/` unless the task is
-  literally about the in-app reviewer prompts.
+  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope, owned
+  by a human or by `spec-creator` — read only for every other agent,
+  `doc-writer` included); never `docs/plans/` (`implementation-planner`-owned); never
+  `docs/agent-prompts/` unless the task is literally about the in-app
+  reviewer prompts.
 - Never document intended-but-unbuilt behavior — ground every factual
   claim in the shipped code and diff, not the plan's original intent.
 - Never create a **fifth** top-level `docs/` subsection without asking

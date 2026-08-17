@@ -257,6 +257,60 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   t.key)` and the page reads that. Adding a tab only to `TABS` (or only
   to the page allow-list) will recreate this.
 
+- **`critical_paths`/`reading_path`/`run_locally` `OnboardingSection.body` is
+  markdown-only — there is no structured per-row field for these three kinds**
+  (unlike `first_tasks`, which got a real `tasks[]` array in FIX-8 — see the
+  entry below). The design's file-row/numbered-circle/per-command-copy layout
+  has to be recovered by PARSING that markdown client-side:
+  `SectionCard/parseSection.ts`'s `parseListItems(body)` groups top-level
+  bullet/numbered lines (a continuation line belongs to the preceding item,
+  same rule as the server's own `capBulletItems`/`groundBulletItemPaths` in
+  `server/src/modules/onboarding/helpers.ts`) and pulls the first inline-code
+  span out as `path`. `run_locally` needs a SECOND shape entirely:
+  `parseRunLocallyCommands(body)` reads fenced-code lines when the LLM
+  actually ran (`groundRunLocallyBody` only ever fences), but falls back to
+  the bullet-list-of-inline-code shape `buildSkeletonSections` emits for
+  `run_locally` (`` - `command` (from `path`) ``, never fenced) — the
+  deterministic skeleton and the real LLM output are NOT the same markdown
+  shape for this one section kind. Both parsers fall back to the plain
+  `Markdown` render when they find zero rows, so an unexpected body shape
+  never renders blank (same "never an empty card" contract `hasBody` already
+  had).
+
+- **Adding a single-item "expand + scroll to it" deep-link to an already-
+  uncontrolled list-of-`FileCard`s viewer does NOT require lifting the whole
+  list into controlled state (2026-08-14, SPEC-03 AC-30/E-22,
+  `components/diff-viewer/DiffViewer/DiffViewer.tsx`).** `DiffViewer` had no
+  jump capability at all before this — every `FileCard` was fully
+  uncontrolled (auto-expand based on `AUTO_EXPAND_MAX_LINES`). Rather than
+  building a full `openMap` (the shape `SmartDiffViewer` already has, since
+  it needed per-file control anyway), track only a single `forcedOpenPath`
+  in local state; when rendering the file list, spread `FileCard`'s existing
+  controlled `open`/`onOpenChange` props onto ONLY the one file matching that
+  path, and pass NEITHER prop for every other file (leaving them in their
+  normal uncontrolled mode, `AUTO_EXPAND_MAX_LINES` default intact). This is
+  the general technique for adding a single-item focus/deep-link feature to
+  an already-shipped uncontrolled list component without regressing every
+  other item's existing behavior — reach for it before reaching for a full
+  controlled-map rewrite. `SmartDiffViewer` needed no new pattern here — it
+  already had per-file `openMap` state for its own finding-badge clicks, so
+  the deep-link was just a `useEffect` invoking its existing internal
+  `onJumpToLine(path, line)` whenever an external `externalFocus` prop
+  changes (guarded by `fileByPath.has(path)` so an absent path is a safe
+  no-op, matching `DiffViewer`'s equivalent `files.some(...)` guard).
+
+- **A history/timeline list endpoint that returns each entry's FULL nested
+  record (not a summary row) lets the client render a historical entry with
+  ZERO additional requests (2026-08-14, SPEC-03 Why Timeline,
+  `PrBriefCard`'s `BriefTimeline`).** `GET /pulls/:id/brief/timeline` returns
+  `entries[].record: BriefRecord` inline — a server design choice ("two
+  endpoints, not three") — so clicking an older Why Timeline row just swaps
+  local component state to that entry's already-fetched `record`; no new
+  fetch, no loading state, no risk of the detail view disagreeing with the
+  list view. Worth defaulting to this shape for any future "browse a bounded
+  history, then drill into one entry" feature (the list here is capped at 50
+  rows) rather than a summary-list + per-item-detail-fetch split.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -318,9 +372,67 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `graph.empty` keys; don't expect it to scale to a real force-directed
   layout without a real library.
 
+- **`--border` (#2a2a2a) is too subtle against `--bg-elevated` (#1c1c1c) for a
+  card/row that needs to read as visibly outlined** — barely distinguishable
+  in practice. `--border-strong` (#3a3a3a) is the token this codebase already
+  uses when an outline needs to actually be seen (e.g. `Button`'s `secondary`
+  kind, `SectionCard`'s `openButton`). Onboarding's `taskCard`/`fileRow`/
+  `commandRow` (2026-08-14, design fix-up after a user screenshot comparison)
+  switched from `--border` to `--border-strong` for exactly this reason —
+  reach for `--border-strong` by default for any new bordered card/row on a
+  dark elevated surface, not `--border`.
+
 ## Recurring Errors & Fixes
 
-_(to be filled in)_
+- **A native `<select>`'s open dropdown popup renders unreadable
+  light-on-white text if the `<select>`'s own `background` is
+  `"transparent"` (2026-08-13).** `src/vendor/ui/kit/SelectInput.tsx` had
+  `background: "transparent"` on the `<select>` with no color set on its
+  `<option>` elements. The **closed** box looks fine (inherits the parent
+  div's dark background), but the browser paints the **open popup** using
+  the `<select>` element's own `background-color` — "transparent" falls
+  back to the OS/browser default (white) — so combined with the light
+  `--text-primary` color, every option was invisible until clicked at
+  random. Symptom as reported by a user: "can't select anything / nothing
+  seems clickable" — it wasn't a click-handling bug, the options were
+  simply unreadable. Fix: set an explicit `background` (e.g.
+  `var(--bg-elevated)`) on both the `<select>` and every `<option>`, not
+  just `color`. Verified via a real headless-Chromium screenshot of the
+  opened dropdown (not just reading the CSS) — this class of bug is easy
+  to miss by code review alone since the closed state looks correct.
+- **A bare `gridTemplateColumns: "1fr 1fr"` lets one column's unbreakable
+  content collapse its sibling to one character per line when combined
+  with `wordBreak: "break-all"` (2026-08-13).** Found in two places
+  independently (`app/skills/_components/SkillPreview/_components/
+  ContextTab/styles.ts` and the equivalent Agent Context tab) — selecting
+  an item with long preview content (a code block, a long URL) squeezed
+  the sibling list column down to a single character per row. Root cause:
+  a bare `1fr` grid track's `min-width` defaults to `auto`, i.e. its
+  content's min-content size — if the *other* column's content can't
+  shrink below some width (unbreakable text), the grid steals space from
+  the column that *can* shrink, and `wordBreak: break-all` lets that
+  shrinkage go all the way to single characters. Fix: always use
+  `minmax(0, 1fr)` instead of bare `1fr` for a two-column grid where
+  either side might hold long/unbreakable content — forces genuinely equal
+  track sizing regardless of content, each side then scrolls/wraps
+  internally instead of stealing from its sibling.
+- **Next.js dev server can serve a stale/confused bundle with zero console
+  errors after many new files are added while it's still running
+  (2026-08-13).** After an `implementer` agent added ~15 new component/
+  hook files to a running `pnpm dev` session, the live page got stuck
+  showing only its loading skeletons forever (3 `<Skeleton>` bars, no
+  content, no error) — reproducible via a real Playwright screenshot, not
+  just user report. `rm -rf client/.next` + restarting `pnpm dev` fixed
+  it (confirmed via a clean recompile log,
+  `✓ Compiled /repos/[repoId]/context in 586ms`). Cheap first thing to try
+  whenever a live page behaves inexplicably (stuck loading, partial
+  render) right after a session added a lot of new files to a dev server
+  that was never restarted — before spending time debugging application
+  code. Note: this was **not** the actual root cause of the bug report
+  that prompted it — the app relaunching fixed the caching symptom, but
+  the user's other complaints (unreadable dropdown, collapsed grid column)
+  turned out to be the two real bugs above, only discoverable once the
+  stale-bundle red herring was ruled out first.
 
 ## Session Notes
 
@@ -698,3 +810,290 @@ _(to be filled in)_
   `ProjectContextView.test.tsx` this session were fixes to keep the
   PRE-EXISTING self-check tests compiling/passing against the new hook
   surface, not new coverage.
+
+- 2026-08-14: SPEC-02 Onboarding Generator (plan
+  `docs/plans/spec-02-onboarding-generator.md`) client side, WI10-WI13 — new
+  repo-scoped route `repos/[repoId]/onboarding/` (`OnboardingTourView`: five
+  collapsible `SectionCard`s in the fixed AC-4 order, a `RegenerateConfirmModal`
+  naming both AC-6 consequences before the paid call fires, client-side
+  `toMarkdown` export with zero network request), new
+  `lib/hooks/onboarding.ts` (`useOnboardingTour` read + `useGenerateOnboardingTour`
+  mutation), `messages/en/onboarding.json` fully reconciled to the five
+  canonical section kinds (D-6/Q7 — the old copy promised "overview,
+  architecture, key modules, getting started, and conventions & gotchas",
+  a different five than the tour renders).
+  **Nav vendor-do-not-touch exception used a 5th time** (after Skills,
+  Conventions, the SKILLS-LAB split, and Project Context): added an
+  `onboarding-tour` key to `src/vendor/ui/nav.ts`'s **WORKSPACE** group
+  (beside `pulls`/`context` — a reading surface, not a Skills Lab tool, same
+  reasoning as Project Context's IA placement), icon `"Workflow"` (an
+  EXISTING `IconName` — `icons.tsx` stays untouched, no `"Compass"`/
+  `"Download"` icons exist in this registry despite reading like natural
+  fits; used `"Workflow"` for the empty-state icon too and `"ArrowDown"` for
+  the export button instead).
+  **Pre-existing nav/route collision fixed, not left as "already working"**:
+  `activeKeyFor` (`components/app-shell/helpers.ts`) already had
+  `pathname.includes("/onboarding") → "onboarding-tour"` BEFORE this
+  session, pre-wired for a route that didn't exist yet — but that predicate
+  also matches the UNRELATED top-level add-repo screen at exactly
+  `/onboarding` (`app/onboarding/page.tsx`), which predates this feature and
+  means something else entirely. Fixed to
+  `pathname.startsWith("/repos/") && pathname.includes("/onboarding")` so
+  only the new repo-scoped route highlights the sidebar item — same
+  "pre-authored code anticipates the intended UX, but check it for
+  collisions before trusting it verbatim" lesson this file's `nav.ts`/
+  `activeKeyFor` entries already document for Skills/Conventions/Context,
+  just the first case where the pre-wiring was WRONG rather than merely
+  early.
+  **AC-12's "First tasks" badge is section-level, not per-task-card** — see
+  `server/INSIGHTS.md`'s same-date entry for why (`OnboardingSection` has no
+  structured per-task array). One "Model estimate" `Badge` (with a `title`
+  tooltip, since `Badge` itself has no `title` prop — wrapped in a plain
+  `<span title=…>`) on the `first_tasks` card's header.
+  **`run_locally`'s copy-to-clipboard button copies the WHOLE section body**,
+  not a per-command button — AC-34 only requires display+copy, never
+  execution; a single section-level copy action satisfies that without
+  needing per-line UI plumbing the flat `body` field doesn't cleanly support.
+  Verified: `tsc --noEmit` clean; full Vitest green (28 files / 130 tests —
+  no new `*.test.tsx` file this session, per the multi-agent handoff split;
+  test authorship for `OnboardingTourView`/`SectionCard`/
+  `RegenerateConfirmModal`/`helpers.ts` is `test-writer`'s job next).
+  `smoke.test.tsx` still passes.
+
+- 2026-08-14 (fix-loop iteration 1, remediating `plan-verifier`'s Phase 1
+  FAIL) — two client-touching fixes:
+  - **FIX-4 (client half)**: `sections.length === 0` was the WRONG signal for
+    "show degraded copy" — the server skeleton always returns exactly five
+    sections (`helpers.ts` `buildSkeletonSections`), so that branch was
+    provably dead on the main path and the whole `empty.*` message block
+    (no-clone/not-indexed/never-generated/llm-failed copy) never rendered.
+    Replaced with a status/reason row sourced DIRECTLY from `tour.status` +
+    `tour.reason` (a `Badge` + the server's own reason sentence), shown
+    whenever `status !== "ok"`, right in the header alongside the existing
+    age/files-indexed/stale row. Collapsed the four per-status `empty.*.title/
+    body` i18n keys down to one generic `empty.generic.title` (with
+    `tour.reason` as the body) — that branch is now reserved for the
+    genuinely-empty case (a corrupted stored row, E-15's `sections: []`
+    degrade-on-read path), not a stand-in for every degraded status.
+  - **FIX-6**: confirmation (`RegenerateConfirmModal`) is now required before
+    the FIRST generation too, not only Regenerate — `handleGenerateClick`
+    always opens the modal now; it never calls `mutate()` directly. The modal
+    gained a `mode: "generate" | "regenerate"` prop swapping in first-
+    generation copy (`confirm.firstTitle`/`firstBody`/`firstConfirmCta`) so
+    "regenerate"/"replaces the tour" doesn't read wrong when there's no
+    existing tour to replace yet — both modes still show the shared
+    `confirm.outboundNotice` line (NFR A04).
+  **Known regression, by design** (same pattern as the 2026-08-07 IntentCard/
+  BlastRadiusCard entries above): `OnboardingTourView.test.tsx`'s third case
+  ("a FIRST-EVER generation... skips the confirm gate — Generate calls
+  mutate() directly") now fails, because it encodes the EXACT pre-FIX-6
+  behavior FIX-6 exists to change. Left failing intentionally rather than
+  hand-edited, since updating a pre-existing self-check test's assertions to
+  match new behavior is `test-writer`'s job, not this session's — see FIX-6's
+  own text in `docs/plans/spec-02-onboarding-generator-fixes.md`. Verified:
+  `tsc --noEmit` clean; full Vitest run is 158 passed / 1 known-failing (the
+  case above) — every other file, including `OnboardingTourView/helpers.test.ts`,
+  `SectionCard.test.tsx`, and `RegenerateConfirmModal.test.tsx`, stayed green
+  with zero changes needed. The pre-existing SectionCard nested-`<button>`
+  HTML-validity console warning (visible in this run's stderr) is a known,
+  already-flagged Phase-2 Minor finding out of this fix plan's scope — not
+  something this session introduced or should silently "fix" as a drive-by.
+
+- 2026-08-14 (FIX-8, mid-loop addition after FIX-1..7, spotted by the product
+  owner comparing the live page to the reference screenshot) — "First tasks"
+  now renders a per-task card GRID (bold title, monospace path, a per-task
+  complexity `Badge`) instead of one markdown `body` blob with a single
+  header-level "Model estimate" badge. **This SUPERSEDES the 2026-08-14
+  entry above** ("AC-12's 'First tasks' badge is section-level, not
+  per-task-card ... `OnboardingSection` has no structured per-task array")
+  — FIX-8 added exactly that array (`OnboardingTask`, server `INSIGHTS.md`'s
+  same-date entry) and the badge moved from the section header into each
+  task card. The old `firstTasksBadge` prop on `SectionCard` and the
+  `section.firstTasksBadge`/`section.firstTasksBadgeTooltip` i18n keys are
+  DELETED, not deprecated-in-place — they described a design that no longer
+  exists, and keeping them around would have looked like a second, competing
+  badge mechanism next to the new per-task one.
+  **`Badge` (`vendor/ui/primitives/Badge.tsx`) needed ZERO edit for the
+  green/amber complexity pill** — it already takes `color`/`bg` as direct
+  props (not a named "variant" enum), and this codebase already has an
+  established green/amber semantic-token PAIR for exactly this purpose:
+  `--ok`/`--ok-bg` (green, `styles.css`) is already used via
+  `<Badge color="var(--ok)" bg="var(--ok-bg)">` in `IntentCard.tsx`,
+  `TraceBody.tsx`, `VerdictBanner`/`RunHistory`/`pulls/constants.ts`, and
+  `--warn`/`--warn-bg` (amber) the same way for warnings elsewhere in this
+  file's own entries. Before reaching for a new CSS variable or an inline
+  `style` override on `Badge` (which `vendor/ui`'s do-not-touch status would
+  make awkward to justify), check whether `--ok`/`--warn`/`--crit`/`--sugg`/
+  `--info` in `vendor/ui/styles.css` already covers the semantic you need —
+  there is NO `--success`/`--green` name; `--ok` IS the green token.
+  **`tsc --noEmit` catches a removed prop as a hard type error, not just a
+  stale runtime assertion** — unlike FIX-6's `mode` prop addition (backward
+  compatible, old test call sites kept compiling), deleting `firstTasksBadge`
+  from `SectionCard`'s props broke `SectionCard.test.tsx`'s two AC-12 call
+  sites at the TYPE level. Fixed by removing only the now-nonexistent prop
+  from those two call sites (an object-literal edit, not new test content)
+  so the file keeps compiling; left the resulting stale assertion
+  (`getByText("Model estimate")`, which no longer renders anywhere) failing
+  intentionally, per this file's own FIX-6/IntentCard precedent for "the
+  compile-fix and the behavior-fix are different jobs." Verified: `tsc
+  --noEmit` clean; full Vitest run is 178 passed / 1 known-failing (that one
+  AC-12 case, named above) — the sibling AC-12 case ("a non-first_tasks
+  section never renders the badge") still passes, now vacuously, since
+  "Model estimate" doesn't render anywhere at all post-FIX-8.
+
+- 2026-08-14 (design-conformance fix, user-reported: "sections don't match
+  the design at all, you're just dumping raw markdown") — `critical_paths`,
+  `reading_path`, and `run_locally` now render through the same structured-
+  row treatment `first_tasks` already had, instead of the generic `Markdown`
+  fallback. New `SectionCard/parseSection.ts` (+ `parseSection.test.ts`, see
+  Codebase Patterns above for the two `run_locally` body shapes it has to
+  handle) is a pure client-side markdown parser — no server/contract change,
+  since `body` was already carrying everything needed, just unparsed.
+  `critical_paths` → one bordered row per parsed item (file icon, mono path,
+  description, an "Open" link via the existing `githubBlobUrl` — reusing the
+  previously-unwired `section.openAction` i18n key, and `actions.open`, both
+  of which existed in `messages/en/onboarding.json` with no call site before
+  this). `reading_path` → the same row shape with a numbered circle badge
+  instead of a file icon. `run_locally` → one bordered row per command with a
+  PER-ROW copy button. **This supersedes the 2026-08-14 entry above**
+  ("`run_locally`'s copy-to-clipboard button copies the WHOLE section body,
+  not a per-command button ... a single section-level copy action satisfies
+  [AC-34] without needing per-line UI") — that header-level copy button is
+  now removed entirely (the design has no header copy icon for this section);
+  every command gets its own. Also added `actions.copy` to
+  `messages/en/onboarding.json` (`"Copy"`) — the pre-existing header copy
+  button's `aria-label` had been wired to `actions.export` ("Export as
+  Markdown"), a mislabel now fixed since the same `IconBtn` pattern moved
+  per-row. `architecture` (prose + `MermaidDiagram`, already bordered) needed
+  no change — it already matched the reference design. Verified:
+  `tsc --noEmit` clean; `SectionCard`/`parseSection` test files green (58
+  tests, only the pre-existing FIX-8 known-stale "Model estimate" case still
+  failing, unrelated to this change) — no live browser click-through this
+  session (would require a stored/generated onboarding tour and a running
+  API+DB; RTL's rendered-DOM assertions covered the new structure instead).
+
+- 2026-08-14 (design-conformance fix, part 2 — user regenerated the tour and
+  screenshotted the real result) — two bugs surfaced by REAL LLM-generated
+  content that the hand-written unit-test fixtures above hadn't exercised:
+  (1) `parseListItems`'s `description` field is rendered as plain text (not
+  through `Markdown`), so a body like `` - `path` — **Server entry**: loads
+  config`` showed literal `**asterisks**` instead of bold — the LLM's own
+  formatting habit (bold sub-headings inline, per `onboarding.system.md:22`'s
+  "short Markdown **bold sub-headings**" instruction) leaked straight through
+  as raw syntax. Fixed with a new `stripMarkdownEmphasis` in `parseSection.ts`
+  (strips `**bold**`/`__bold__`/`*italic*`, deliberately SKIPS single
+  `_italic_` because this codebase's real paths/identifiers are commonly
+  snake_case — `run_logger.ts` — and a naive strip would corrupt them).
+  (2) The generic `section.links[]` list at the bottom of the card was
+  rendering the SAME file paths a second time once `critical_paths`/
+  `reading_path` had their own parsed rows (each already carrying its own
+  "Open" link) — visibly duplicated in the user's screenshot (4 rows above,
+  the same 4 filenames again as a compact link list below). Suppressed via a
+  new `rowsCoverLinks` check in `SectionCard.tsx` (only when
+  `criticalPathRows`/`readingPathRows` actually produced rows — the generic
+  links list still renders as a fallback for kinds/cases where structured
+  parsing found nothing, e.g. an unparseable body). **Lesson for next time**:
+  the original parser tests (this file's entry above) only used hand-crafted
+  bullet text without markdown emphasis and without a populated `links[]`
+  alongside a parseable `body` — both gaps only surfaced once the user
+  actually clicked Regenerate and compared a REAL LLM response against the
+  design; a fixture closer to the prompt's own documented style (bold
+  sub-headings) would have caught bug (1) without needing a live regenerate.
+  Verified: `tsc --noEmit` clean; full onboarding suite green (57 tests, same
+  1 pre-existing known-stale case).
+
+- 2026-08-14: SPEC-03 PR Brief & Why Timeline (plan
+  `docs/plans/spec-03-pr-brief-and-why-timeline.md`) client side, WI9-WI14 —
+  new `lib/hooks/brief.ts` (`usePrBrief`/`usePrBriefTimeline`/
+  `useGeneratePrBrief`); `PrBriefCard` (replaces `PrBriefBanner`, deleted
+  outright incl. its test — see below) with a nested `BriefTimeline`
+  (`_components/BriefTimeline/`, the Why Timeline, D-3); a new `?file=&line=`
+  URL-param pair + `focusDiffLine` helper in `page.tsx` (same pattern as the
+  existing findings deep-link contract this file already documents); `?file`/
+  `?line` threaded through `DiffTab` → whichever viewer is active
+  (`SmartDiffViewer` gained an `externalFocus` prop hooking into its existing
+  `onJumpToLine`; `DiffViewer` gained jump capability from scratch — see
+  Codebase Patterns above for both). `useGeneratePrBrief`'s `onSuccess`
+  deliberately does NOT call `qc.setQueryData` for a `budget_exceeded`/
+  `failed` response (neither state is ever persisted server-side) — instead
+  `PrBriefCard` reads the mutation's own `generate.data` directly to render a
+  transient banner IN PLACE over whatever good `record` the `pr-brief` query
+  cache already holds, so a failed regenerate attempt never wipes a
+  previously-good brief off the card. `PrBriefBanner/` deleted in full
+  (component + styles + index + its pre-existing test) per the plan's
+  explicit WI11 file list — not new test authorship, a specified deletion of
+  an obsolete component's test alongside the component itself. Verified:
+  `tsc --noEmit` clean; full Vitest green except the ONE pre-existing
+  known-stale `SectionCard.test.tsx` AC-12 case (server/INSIGHTS.md's FIX-8
+  entry — confirmed untouched via `git status`, unrelated to this session);
+  `smoke.test.tsx` still passes. Server-side WI1-WI8 is `server/INSIGHTS.md`'s
+  entry for the same date. New-test authorship for `PrBriefCard`/
+  `BriefTimeline`/the `DiffViewer` focus overlay is `test-writer`'s job next,
+  not attempted here beyond the pre-existing suites passing.
+
+- 2026-08-14 (fix-loop iteration 1, `plan-verifier` Phase 3 required fixes):
+  **the entry directly above was WRONG about `useGeneratePrBrief`'s
+  `onSuccess`** — it actually called `qc.setQueryData(["pr-brief", prId],
+  data)` unconditionally, for every mutation result including
+  `budget_exceeded`/`failed` ones, whose `record` is always `null`. Since
+  `usePrBrief()` reads that exact same cache key, a failed/budget-exceeded
+  regenerate attempt silently overwrote a good, previously-persisted brief
+  with `{state: 'failed', record: null}` in the read-cache — and because no
+  `PrBriefCard` render branch matches `state === 'failed'`/`'budget_exceeded'`
+  directly (only `absent`/`current`/`stale`/`corrupt` do), the card lost its
+  Generate/Regenerate footer entirely with no way to recover short of a hard
+  refresh (`providers.tsx`'s `staleTime: 30_000, refetchOnWindowFocus: false`
+  meant it wouldn't even self-correct on next focus). **Fix**:
+  `hooks/brief.ts`'s `onSuccess` now early-returns before `setQueryData` (and
+  before the timeline invalidation) whenever `data.state` is
+  `budget_exceeded`/`failed` — one guard covers both, cache and timeline
+  fully untouched for those two states. `PrBriefCard`'s transient-outcome
+  banner already read `generate.data` (the mutation's own state) rather than
+  the read-cache, so no client component code needed to change for the read
+  side — only the write. **Lesson**: a code comment or INSIGHTS.md entry
+  asserting "X never happens" for a specific state-machine branch is not a
+  substitute for grep-checking every `setQueryData`/cache-write call site
+  against that same key — the assertion here was directionally right (the
+  DESIGN intent was correct) but didn't match the actual code, and nothing
+  caught it until `plan-verifier`'s Phase 3 traced the render-branch dead-end
+  by hand. Also wired the 3 previously-dead `brief.json` i18n keys this bug
+  surfaced (`card.retry`, `generate.lastCost`, `timeline.toggle`) into
+  `PrBriefCard`'s transient banner (retry button + last-known-cost line, both
+  reading the untouched `record` still in cache) and `BriefTimeline`'s
+  disclosure summary.
+
+- 2026-08-14 (same fix-loop iteration): **`SmartDiffViewer`'s per-file
+  `openMap` (parent-owned) and `RoleGroup`'s per-group collapse state
+  (previously a PRIVATE `useState` inside `RoleGroup`) must be owned by the
+  SAME component, or nothing external can force-open a file inside a
+  collapsed group.** `onJumpToLine`/`externalFocus` (AC-30 deep-link) only
+  ever set `openMap[path]`, which controls whether `FileCard` renders
+  *expanded* — but `RoleGroup` gated whether `<FileCard>` **mounted at all**
+  behind its own `groupOpen` state, defaulting closed for the `boilerplate`
+  role (`useState(() => role === "core" || role === "wiring")`) and for any
+  group the user collapsed by hand. Result: a deep-link into a collapsed
+  group's file found nothing in the DOM (`document.querySelector('[data-
+  diff-line=...]')` came back null) and `scrollIntoView` silently no-op'd —
+  no error, no visible failure, just nothing happening. **Fix**: lifted
+  `groupOpenMap` (keyed by role) into `SmartDiffViewer` alongside `openMap`,
+  same pattern (`initialGroupOpenMap`/`setGroupOpen`), and changed
+  `RoleGroup` from owning `[groupOpen, setGroupOpen] = useState(...)` to
+  accepting both as controlled props. `onJumpToLine` now resolves the
+  target file's role via a `roleByPath` map and calls `setGroupOpen(role,
+  true)` in the same tick as `setFileOpen(path, true)`, before the rAF×2
+  scroll. **Test-authoring gotcha found while verifying the fix**: the
+  `SmartDiffViewer.test.tsx` AC-30 boilerplate-group test asserts via
+  `screen.findByText("{}")` (single match) — but `FileCard`'s own
+  "What this does" summary-badge preview duplicates the exact diff-line text
+  whenever a single-line patch's added content matches its own generated
+  summary (here, `package-lock.json`'s one-line `+{}` patch). Both spans
+  render once the file genuinely opens, so `findByText` throws "found
+  multiple elements," not "not found" — this is the SAME duplicate-text
+  class the sibling (already-passing) `AC-30: ...ALREADY-OPEN-GROUP (core)`
+  test explicitly avoids by querying `document.querySelector('[data-diff-
+  line="path:line"]')` instead of matching visible text. Flagged for
+  `test-writer` to apply the same query pattern here rather than fixed
+  inline (implementer's do-not-touch-test-files constraint) — the underlying
+  architecture bug this test targets IS fixed and verified (failure mode
+  changed from "element not found" to "multiple elements found," proving the
+  group+file now mount correctly).

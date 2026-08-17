@@ -69,6 +69,18 @@ deps — see each package's AGENTS.md.
 - `./specs` — per-feature specs (L05 Project Context Folder).
   [specs/skills-feature.md](specs/skills-feature.md) — reusable skills for
   review agents.
+- [docs/features/project-context.md](docs/features/project-context.md) —
+  Project Context (discover → attach → inject, plus coverage, in-app
+  editing/creation, and the dirty-clone resync guard).
+- [docs/adr/0004-write-back-to-working-copy.md](docs/adr/0004-write-back-to-working-copy.md)
+  — write-back-to-working-copy decision for in-app document editing (D-7).
+- [docs/features/pr-brief.md](docs/features/pr-brief.md) — PR Brief & Why
+  Timeline (compose → cache by head_sha → ground → budget, plus the deep-link
+  into Files-changed).
+- [docs/reference/brief-api.md](docs/reference/brief-api.md) — PR Brief HTTP +
+  contract lookup.
+- [docs/adr/0005-composite-key-brief-persistence.md](docs/adr/0005-composite-key-brief-persistence.md)
+  — composite-key persistence + in-process concurrency-guard decision for PR Brief.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.
 - Package maps: [server/README.md](server/README.md) ·
   [client/README.md](client/README.md) ·

@@ -26,7 +26,11 @@ export function isTextInput(el: EventTarget | null): boolean {
 export function activeKeyFor(pathname: string): string {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.includes("/multi-agent")) return "multi-agent";
-  if (pathname.includes("/onboarding")) return "onboarding-tour";
+  // Repo-scoped tour only (`/repos/:repoId/onboarding`) — the top-level
+  // add-repo screen at exactly `/onboarding` must NOT highlight this item
+  // (Recommendation 5, E-17, AC-37): that route predates this feature and
+  // means something unrelated ("add a repository").
+  if (pathname.startsWith("/repos/") && pathname.includes("/onboarding")) return "onboarding-tour";
   if (pathname.includes("/context")) return "context";
   if (pathname.includes("/conventions")) return "conventions";
   if (pathname.includes("/pulls")) return "pulls";

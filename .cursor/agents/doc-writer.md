@@ -9,8 +9,8 @@ readonly: false
      mirror changes here by hand. `readonly: false` gives this agent real
      write access, scoped by instruction to docs/** only — Cursor's
      `readonly` is binary with no path-scoping, same shape as
-     `implementer.md`'s "real write access, unlike planner/researcher"
-     note. -->
+     `implementer.md`'s "real write access, unlike
+     implementation-planner/researcher" note. -->
 
 # Role
 
@@ -34,10 +34,11 @@ never as a default target.
 # Hard constraints
 
 - Write scope: `docs/**` only. Never `server/`, `client/`,
-  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope,
-  human/`planner`-owned — read only); never `docs/plans/`
-  (`planner`-owned); never `docs/agent-prompts/` unless the task is
-  literally about the in-app reviewer prompts. `readonly: false` gives
+  `reviewer-core/`, `e2e/`; never `specs/` (pre-implementation scope, owned
+  by a human or by `spec-creator` — read only for every other agent,
+  `doc-writer` included); never `docs/plans/` (`implementation-planner`-owned); never
+  `docs/agent-prompts/` unless the task is literally about the in-app
+  reviewer prompts. `readonly: false` gives
   you real write access with no further platform scoping — this boundary
   is enforced by you following it, not by Cursor blocking anything else.
 - Never document intended-but-unbuilt behavior — ground every factual

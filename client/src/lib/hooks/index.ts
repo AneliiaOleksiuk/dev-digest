@@ -9,3 +9,6 @@ export * from "./trace";
 export * from "./repo-intel";
 export * from "./smart-diff";
 export * from "./blast";
+export * from "./context";
+export * from "./onboarding";
+export * from "./brief";

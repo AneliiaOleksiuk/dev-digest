@@ -26,6 +26,8 @@ export function RoleGroup({
   openMap,
   setFileOpen,
   onJumpToLine,
+  groupOpen,
+  setGroupOpen,
 }: {
   role: SmartDiffRole;
   files: SmartDiffFile[];
@@ -36,10 +38,13 @@ export function RoleGroup({
   openMap: Record<string, boolean>;
   setFileOpen: (path: string, open: boolean) => void;
   onJumpToLine: (path: string, line: number) => void;
+  /** Group collapse state is owned by SmartDiffViewer (not this component)
+   *  so that `onJumpToLine`/externalFocus can force a collapsed group open
+   *  before scrolling to a file inside it (SPEC-03 AC-30). */
+  groupOpen: boolean;
+  setGroupOpen: (open: boolean) => void;
 }) {
   const t = useTranslations("prReview");
-  // Core + wiring start expanded; only boilerplate starts collapsed.
-  const [groupOpen, setGroupOpen] = React.useState(() => role === "core" || role === "wiring");
 
   const findingCount = files.reduce((n, f) => n + f.finding_lines.length, 0);
   const label =
@@ -54,13 +59,13 @@ export function RoleGroup({
     <div style={s.group}>
       <div
         style={s.groupHeader}
-        onClick={() => setGroupOpen((v) => !v)}
+        onClick={() => setGroupOpen(!groupOpen)}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setGroupOpen((v) => !v);
+            setGroupOpen(!groupOpen);
           }
         }}
       >

@@ -2,7 +2,7 @@
 
 Canonical, tool-agnostic definition. This file is the source of truth for
 the `test-writer` agent. It is manually mirrored into each tool's native
-format — same convention this repo already uses for `planner`/
+format — same convention this repo already uses for `implementation-planner`/
 `implementer`/`researcher` and `@devdigest/shared` (edit this file, mirror
 the others by hand, no sync script). If you change this file, update all
 three mirrors below.

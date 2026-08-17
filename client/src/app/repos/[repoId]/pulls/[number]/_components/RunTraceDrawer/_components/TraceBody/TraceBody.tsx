@@ -49,6 +49,25 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
               )}
             </div>
           </Row>
+          {/* AC-26/AC-27 — distinct from "Specs read" above (ADR-0003: never
+              merge the two). Fed by `trace.project_context_docs`, one entry
+              per document actually injected into this run's prompt, with its
+              individual size — not the aggregate `prompt_assembly.specs`
+              char count. `.default([])` on the contract means an old trace
+              renders this as an empty "none" row, never throws. */}
+          <Row label={t("trace.config.projectContextDocs")}>
+            <div style={s.specsWrap}>
+              {trace.project_context_docs.length === 0 ? (
+                <span style={s.specsNone}>{t("trace.config.none")}</span>
+              ) : (
+                trace.project_context_docs.map((doc, i) => (
+                  <span key={i} className="mono" style={s.spec}>
+                    {doc.path} ({t("trace.config.docSize", { tokens: doc.tokens, chars: doc.chars })})
+                  </span>
+                ))
+              )}
+            </div>
+          </Row>
         </div>
       </TraceSection>
 

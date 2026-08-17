@@ -39,6 +39,13 @@ link` gets you the literal `devdigest review --mode working`).
 - `src/api-client.ts` — the ONLY module the 5 MCP tools use to call the
   network. Thin `fetch` wrapper over the local API; injectable `fetchImpl` for
   tests.
+- `src/config.ts` — validated env-var reads (`DEVDIGEST_API_BASE`,
+  `DEVDIGEST_MCP_RUN_TIMEOUT_MS`): an unset var uses its default, a
+  set-but-invalid one throws `ConfigError`. Consumed by `api-client.ts`
+  (`getApiBase`, at server-construction time) and
+  `src/tools/run-agent-on-pr.ts` (`getRunTimeoutMs`, per call — caught there
+  and turned into `toolError(...)`, never left to throw across the tool
+  boundary).
 - `src/schemas.ts` — flat input schemas + compact output schemas (zod) for
   all five tools, plus the local re-declarations of the small set of enums
   this package needs (`Severity`, `Verdict`, `ConventionStatus`) — see

@@ -46,26 +46,31 @@ list_agents to get valid agent ids.") — see `src/errors.ts`.
 | `DEVDIGEST_API_BASE` | `http://localhost:3001` | Base URL of the local API. |
 | `DEVDIGEST_MCP_RUN_TIMEOUT_MS` | `180000` (3 min) | Max time `run_agent_on_pr` polls before giving up (poll interval is fixed at 2s). |
 
+Both are validated by `src/config.ts`: an unset variable falls back to its
+default, but a **set-and-invalid** one (a malformed URL, a non-positive
+timeout) fails fast with a clear error instead of being silently swallowed
+into the default.
+
 ## Wiring it into Claude Code
 
-There is no project-scoped `.mcp.json` — the server does not auto-start when
-you open this repo in Claude Code. Register it on demand, from the repo root,
-when you actually want the tools available:
+The root `.mcp.json` (committed) registers this server as a project-scoped
+MCP server — Claude Code offers it for one-time trust/approval the first time
+you open this repo, no manual step required. The Postgres + API prerequisite
+above still applies; the server itself only *calls* `:3001`, it never starts
+it.
 
-```sh
-./scripts/mcp-on.sh
-```
+`run_agent_on_pr` can legitimately run for minutes; it sends MCP progress
+notifications on every poll tick to reset the client's own per-call timeout,
+but if your client still times out, raise its timeout env vars (Claude Code:
+`MCP_TIMEOUT` / `MCP_TOOL_TIMEOUT`).
 
-This runs `claude mcp add --scope local devdigest -- npx tsx mcp/src/index.ts`
-(`--scope local` keeps the registration private to you, stored in
-`~/.claude.json`, not checked into git). It persists across sessions until
-you remove it:
+### Manual alternative: user-scope registration
 
-```sh
-./scripts/mcp-off.sh
-```
-
-`claude mcp list` shows what's currently registered.
+`./scripts/mcp-on.sh` / `./scripts/mcp-off.sh` remain available if you want
+the server registered outside this project (`--scope local`, stored in
+`~/.claude.json`, not checked into git — useful if you invoke these tools
+from a different working directory). `claude mcp list` shows what's currently
+registered from either path.
 
 `run_agent_on_pr` can legitimately run for minutes; it sends MCP progress
 notifications on every poll tick to reset the client's own per-call timeout,

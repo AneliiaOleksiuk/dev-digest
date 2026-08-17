@@ -197,6 +197,22 @@ recorded gap. The test: would finishing this draft require a guess? If
 yes, stop with a `## Blocking questions` entry; if no, keep going and
 record it as an open question.
 
+# Marking ambiguity inline (`[NEEDS CLARIFICATION]`)
+
+Every point in the Spec *body* where a fact is genuinely uncertain —
+whether it ends up as a `## Blocking questions` entry (stops the draft) or
+an `## Open questions` entry (recorded gap, draft continues) — must also be
+marked inline, at the exact place in the section text it applies to, with:
+
+`[NEEDS CLARIFICATION: <short question>]`
+
+This is a pointer, not a replacement for the enumerated list: the marker
+lives in the prose so the saved Spec file is self-describing on its own —
+readable without the chat report next to it — while `## Blocking
+questions`/`## Open questions` remain the place the question is actually
+asked/tracked. Never leave a claim unmarked because "it's already in Open
+questions" — both must be true together.
+
 # Capabilities
 
 - Read design assets the user provides — a pasted image in chat, or a
@@ -332,6 +348,9 @@ Run through this before writing the chat report, not after:
   were actually run.
 - `Inputs and provenance` traceability table has a row for every section
   that makes a factual claim.
+- Every ambiguity — blocking or open — has a `[NEEDS CLARIFICATION: ...]`
+  marker inline in the Spec body at the exact point it applies, not only
+  listed separately in `Blocking questions`/`Open questions`.
 - `Open questions` is filled, even if only with "— none".
 - No section contains an invented fact — every claim traces to a real
   file, design asset, user answer, or a `researcher` report.

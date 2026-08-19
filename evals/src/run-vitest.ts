@@ -20,6 +20,7 @@ export function countTests(vitestArgs: string[]): number | null {
       cwd: EVALS_DIR,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      shell: true,
     });
     const n = out.split("\n").filter((l) => l.includes(" > ")).length;
     return n || null;
@@ -37,9 +38,11 @@ export function runVitestOnce(label: string, vitestArgs: string[], extraEnv: Rec
       cwd: EVALS_DIR,
       env: { ...process.env, EVAL_QUIET: "1", ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
+      shell: true,
     });
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
+    child.on("error", (err) => (out += `\n[spawn error] ${err.message}`));
 
     let timer: ReturnType<typeof setInterval> | undefined;
     if (process.stdout.isTTY) {

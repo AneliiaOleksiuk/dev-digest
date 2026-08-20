@@ -241,12 +241,23 @@ export const EvalDashboard = z.object({
     traces_total: z.number().int(),
     cost_usd: z.number().nullable(),
   }),
-  /** Null when the agent has fewer than two batches (E-17) — never a zero delta. */
+  /**
+   * Null when the agent has fewer than two batches (E-17) — never a zero
+   * delta. Each FIELD is also individually nullable (revised during Phase
+   * C's plan-verifier fix-loop, docs/plans/eval-pipeline.md WI1/
+   * Recommendation 1): once >=2 batches exist and a delta block IS rendered,
+   * `latest`/`previous` can each still have their OWN metric be null (e.g. a
+   * batch whose cases had zero must_find entries, so recall was never
+   * measured that batch) — a per-field null means "unmeasured on at least
+   * one side," mirroring EvalComparison.delta's existing honest pattern
+   * rather than substituting a fabricated 0 baseline that would read as a
+   * false swing (see modules/eval/service.ts's buildDashboard).
+   */
   delta: z
     .object({
-      recall: z.number(),
-      precision: z.number(),
-      citation_accuracy: z.number(),
+      recall: z.number().nullable(),
+      precision: z.number().nullable(),
+      citation_accuracy: z.number().nullable(),
     })
     .nullable(),
   trend: z.array(EvalTrendPoint),

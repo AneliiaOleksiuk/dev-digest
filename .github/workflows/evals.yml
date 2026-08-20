@@ -66,6 +66,10 @@ jobs:
       run_workflow: ${{ steps.detect.outputs.run_workflow }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # git diff against base.sha needs real history — the default shallow
+          # (fetch-depth: 1) clone doesn't contain that commit and fails "bad object".
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

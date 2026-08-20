@@ -242,6 +242,31 @@ describe('EvalBatchRecord — nullable metrics (E-11, AC-24/25/27 representabili
     expect(populated.skills_fingerprint).toEqual([{ skill_id: 's1', version: 3 }]);
   });
 
+  it('accepts an explicit skills_fingerprint: null (a genuinely NULL DB column) and normalizes it to [] (Q-3 regression)', () => {
+    // Previously `.default([])` only fired on an omitted key, not on an
+    // explicit `null` — a NULL DB column read back as `null` and failed
+    // parsing. Now `.nullish().transform((v) => v ?? [])` must accept the
+    // explicit-null case too and normalize it to the same [] end state as
+    // the omitted-key case above.
+    const nullMetrics = {
+      recall: null,
+      precision: null,
+      citation_accuracy: null,
+      findings_total: null,
+      duration_ms: null,
+      cost_usd: null,
+    };
+    const result = EvalBatchRecord.safeParse({
+      ...base,
+      ...nullMetrics,
+      skills_fingerprint: null,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.skills_fingerprint).toEqual([]);
+    }
+  });
+
   it('rejects a status outside completed/failed', () => {
     const result = EvalBatchRecord.safeParse({
       ...base,

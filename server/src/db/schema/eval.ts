@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, doublePrecision, index } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -51,7 +52,9 @@ export const evalBatches = pgTable(
     /** Ordered `{skill_id, version}[]` of the agent's enabled linked skills
      *  at batch start (Q-3) — makes a skill-only edit visible on the batch
      *  even though it does not bump `agents.version`. */
-    skillsFingerprint: jsonb('skills_fingerprint'),
+    skillsFingerprint: jsonb('skills_fingerprint')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
     status: text('status', { enum: ['completed', 'failed'] }).notNull(),
     casesTotal: integer('cases_total').notNull(),
@@ -93,8 +96,10 @@ export const evalRuns = pgTable('eval_runs', {
   recall: doublePrecision('recall'),
   precision: doublePrecision('precision'),
   citationAccuracy: doublePrecision('citation_accuracy'),
+  findingsTotal: integer('findings_total'),
   durationMs: integer('duration_ms'),
   costUsd: doublePrecision('cost_usd'),
+  error: text('error'),
 });
 
 export const conformanceChecks = pgTable('conformance_checks', {

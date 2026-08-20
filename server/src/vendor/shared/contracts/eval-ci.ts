@@ -144,9 +144,14 @@ export const EvalBatchRecord = z.object({
   agent_version: z.number().int(),
   provider: z.string(),
   model: z.string(),
+  // Tolerate both a missing key and an explicit `null` (a genuinely NULL DB
+  // column reads back as null, which `.default([])` does NOT catch) —
+  // normalize both to an empty array, same pattern as `AgentManifest.skills`
+  // below.
   skills_fingerprint: z
     .array(z.object({ skill_id: z.string(), version: z.number().int() }))
-    .default([]),
+    .nullish()
+    .transform((v) => v ?? []),
   ran_at: z.string(),
   status: z.enum(['completed', 'failed']),
   cases_total: z.number().int(),

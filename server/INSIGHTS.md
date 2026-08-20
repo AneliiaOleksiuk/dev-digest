@@ -472,6 +472,45 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   split an all-additive migration into two `db:generate` runs "just in case";
   the two-pass workaround is only needed when a rename could plausibly be
   inferred.
+- **The `.default([])` vs. explicit-`null` Zod gotcha (documented above for
+  `AgentManifest.skills`, a YAML-authored field) recurs identically for a
+  genuinely nullable DB column, not just a YAML-parsed one (2026-08-20,
+  plan-verifier Phase 2 fix pass on `docs/plans/eval-pipeline.md`).**
+  `eval_batches.skills_fingerprint` was `jsonb('skills_fingerprint')` with no
+  DB default — a real NULL row — while `EvalBatchRecord.skills_fingerprint`
+  was `z.array(...).default([])`. `.default()` only fires when the KEY is
+  absent from the parsed object; a Drizzle-read row always has the key
+  present (value `null`), so `EvalBatchRecord.safeParse` failed on a
+  genuinely-empty-fingerprint row instead of degrading to `[]`. Fixed the
+  same way as `AgentManifest.skills`: `.nullish().transform((v) => v ?? [])`
+  on the Zod side (both vendored `eval-ci.ts` copies, kept byte-identical),
+  PLUS closed it at the DB layer too — `.notNull().default(...)` with a
+  raw-SQL `'[]'::jsonb` default expression on the column (same pattern as
+  `prIntent`'s `inScope`/`sources`/etc. in
+  `db/schema/reviews.ts`) — so a future row can't reintroduce the NULL this
+  contract now tolerates but shouldn't rely on. If you see `.default([])`
+  guarding a jsonb array field anywhere else in `eval-ci.ts` (or any other
+  contract file), grep the matching Drizzle column for whether it's
+  `.notNull()` — if not, the same silent-`safeParse`-failure risk applies
+  even though no bug report will mention "Zod" or "`.default()`" by name.
+- **Combine every open schema fix into ONE `pnpm db:generate` run, even
+  across unrelated tables, rather than one run per fix (2026-08-20).**
+  Fixing `eval_batches.skills_fingerprint`'s nullability AND adding
+  `eval_runs.findings_total`/`eval_runs.error` (two unrelated Major findings
+  from the same `plan-verifier` Phase 2 pass) in the same schema edit before
+  running `db:generate` produced one migration
+  (`0020_early_korvac.sql`) instead of two — halves the
+  journal/snapshot bookkeeping surface that the 2026-08-14 "three artifacts,
+  commit all three" incident (below) warns about, with no downside since
+  neither fix depended on the other applying first. Verified this migration
+  both incrementally (`pnpm db:migrate` against the already-migrated dev DB)
+  and via a full from-scratch replay (`CREATE DATABASE
+  devdigest_replay_check` in the same Postgres container, then `DATABASE_URL=
+  ...devdigest_replay_check pnpm exec tsx src/db/migrate.ts` runs migrations
+  0000→0020 in order) — both applied cleanly with zero manual SQL edits,
+  confirming `SET NOT NULL` on `skills_fingerprint` was safe (checked first
+  via `SELECT count(*) FROM eval_batches WHERE skills_fingerprint IS NULL`
+  → 0 rows in the live dev DB before running it).
 
 ## Recurring Errors & Fixes
 
@@ -1149,3 +1188,20 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   clean) plus the required `--no-index` byte-identity check. Phases B–E
   (module scaffold, case CRUD, scorer, batch runner, read APIs, client,
   gate script) are separate `implementer` passes per the plan's phasing.
+
+- 2026-08-20 (later, same day): Targeted fix pass on Phase A per
+  `plan-verifier`'s Phase 2 architecture review (two Major findings, both
+  fixed rather than deferred). See the two new Tool & Library Notes entries
+  above for the technical detail. Summary: `eval_batches.skills_fingerprint`
+  is now not-null with a raw-SQL `'[]'::jsonb` default (was nullable, no
+  default) and both vendored `EvalBatchRecord.skills_fingerprint` schemas now
+  `.nullish().transform((v) => v ?? [])` instead of `.default([])`;
+  `eval_runs` gained `findings_total`/`error` columns matching
+  `EvalRunRecord`'s existing contract fields. One combined migration
+  (`0020_early_korvac.sql`), applied both incrementally and via a
+  from-scratch replay against live Docker Postgres (available this time,
+  unlike the Phase A session). `tsc --noEmit` clean, `--no-index`
+  byte-identity check clean, the existing 29-test
+  `test/eval-ci-contracts.test.ts` suite passed unchanged (none of its
+  existing assertions tested `skills_fingerprint: null` explicitly, so none
+  encoded the bug being fixed — no test edits were needed or made).

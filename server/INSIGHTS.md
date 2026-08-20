@@ -425,6 +425,27 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   second `status()` call anyway (this one already gates the fetch/reset that
   follows it).
 
+- **pgvector column dimension mismatch after embedding model change silently
+  returns zero rows (2026-08-20).** When switching embedding models (e.g.,
+  OpenAI `text-embedding-3-small` 1536-dim → a different provider's 3072-dim),
+  the pgvector column's vector-dimension constraint stays at the OLD size.
+  Subsequent queries with embeddings of the NEW dimension silently return empty
+  results — no SQL error, no type error, just no matching rows. The cause is
+  hidden inside pgvector's distance-computation internals: a vector of
+  dimension 3072 cannot compute distance against a column defined as dimension
+  1536, so the WHERE clause silently matches nothing. **Fix:** after changing
+  the embedding model, regenerate and apply a fresh Drizzle migration — `pnpm
+  db:generate` (inspect the resulting `migrations/*.sql` to confirm the
+  column's `vector(n)` constraint changed to the new dimension), then `pnpm
+  db:migrate`. The dimension is baked into the column's type definition at the
+  DDL level; the database will not auto-adapt it. **Prevention:** Store the
+  embedding model name and expected dimension in a schema comment or Drizzle
+  migration so a future model change surfaces the mismatch during code review:
+  `// Embedded with OpenAI text-embedding-3-small (1536-dim)` on the column
+  definition. This is especially subtle because a local schema mismatch won't
+  surface until you actually run a query — typecheck and connection testing both
+  pass silently.
+
 ## Recurring Errors & Fixes
 
 - **`test/indexer-pipeline.test.ts` fails 6/11 tests with `ENOENT: no such

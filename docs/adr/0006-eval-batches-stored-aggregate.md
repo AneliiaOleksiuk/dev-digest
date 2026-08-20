@@ -99,6 +99,46 @@ cascade) never touches any `eval_batches` row at all, because nothing reads
   same tables this ADR covers, not changes to the D-3 decision itself — the
   stored-aggregate tradeoff above is unaffected by either fix.
 
+## Addendum (Phase C fix-loop, 2026-08-21) — write mechanism corrected, decision unchanged
+
+This decision — a stored, immutable aggregate rather than a live derivation
+over `eval_runs` — is unaffected by what follows. What changed is *how* that
+stored row gets written, and it is recorded here because Phase C's
+implementation of the batch runner (`docs/plans/eval-pipeline.md` WI7)
+initially got the write mechanism wrong in a way `plan-verifier` caught.
+
+The first cut opened an `eval_batches` row **before** any case ran — a
+placeholder (`status: 'failed'`, every count `0`, every metric `null`) —
+then overwrote it once the real aggregate was known. That placeholder was
+not inert: `listBatchesForOwner` has no status filter and sorts `ran_at`
+descending, so the placeholder **was** `batches[0]` — "the latest batch" —
+for the whole in-flight window, and a process dying mid-batch left it
+permanently in place, indistinguishable from a genuine all-failed batch.
+
+The fix, and the mechanism this ADR's tables now describe in practice:
+`EvalRepository.insertBatchWithRuns` is the *only* write to
+`eval_batches`/`eval_runs` for a run, and it writes the `eval_batches` row
+**already closed** — after every case has actually run and the aggregate is
+computed — together with every one of that batch's `eval_runs` rows, inside
+a single `db.transaction()` (`server/src/modules/eval/repository.drizzle.ts`
+— the first use of `.transaction(...)` anywhere in `server/src`). A
+still-running batch now has no row at all until it finishes, and a throw
+partway through the transaction rolls back both the batch insert and every
+run insert together, so a committed batch's `cases_total` can never diverge
+from its actual persisted `eval_runs` row count.
+
+**Residual, accepted tradeoff — not fully closed by the transaction.** The
+transaction only protects what it itself commits. If the process crashes
+*while* the batch is still executing — before the transaction begins — any
+spend already incurred by cases that already completed has no persisted
+record and cannot be recovered. Fixing that would mean writing each case's
+cost as it finishes, which is exactly the earlier per-case-write shape this
+fix moved away from, so it is accepted rather than hidden. See
+`EvalBatchWrite`'s doc comment (`server/src/modules/eval/repository.ts`) and
+[`docs/features/eval-pipeline.md`](../features/eval-pipeline.md#persisting-a-batch--the-fix-loops-single-atomic-transaction)
+for the full detail and a diagram of the two phases (in-memory execution,
+then the one atomic transaction).
+
 ## Alternatives considered
 
 1. **Nullable `batch_id` + `agent_version` columns on `eval_runs`, aggregate

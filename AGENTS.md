@@ -102,6 +102,11 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
 - [docs/adr/0006-eval-batches-stored-aggregate.md](docs/adr/0006-eval-batches-stored-aggregate.md)
   — why `eval_batches` stores its aggregate as an immutable snapshot instead
   of deriving it from `eval_runs` on every read.
+- [docs/features/eval-pipeline.md](docs/features/eval-pipeline.md) — Eval
+  Pipeline (create case from finding → zero-LLM scorer → version-pinned
+  batch runner → dashboard/history/compare).
+- [docs/reference/eval-api.md](docs/reference/eval-api.md) — Eval Pipeline
+  HTTP + contract lookup.
 - [evals/README.md](evals/README.md) — self-check harness (skills/agents/workflow
   evals), routing table above, backends, stats tools.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.

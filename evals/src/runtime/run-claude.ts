@@ -3,7 +3,7 @@
  * extracts what the session ACTUALLY did (tools, subagents, skills, reads) — not its prose.
  */
 
-import { query, type Options, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { EVAL_MODEL, MAX_TURNS, SPAWN_TOOLS } from "../config.js";
 import { REPO_ROOT } from "../artifacts/paths.js";
 import { subscriptionEnv } from "./env.js";
@@ -36,8 +36,6 @@ export interface RunOptions {
   model?: string;
   /** ["project"] loads on-disk CLAUDE.md + skills/agents; default [] keeps the run isolated. */
   settingSources?: Array<"user" | "project" | "local">;
-  /** Programmatic subagent definitions — used to force model:"inherit" under the openrouter backend. */
-  agents?: Record<string, AgentDefinition>;
   /**
    * Early-stop hook. Called after every tool_use with the trace collected SO FAR; return true to
    * end the session immediately. Lets a dispatch/trace case stop the moment its evidence is in
@@ -70,7 +68,6 @@ export async function runClaude(prompt: string, opts: RunOptions = {}): Promise<
     cwd: opts.cwd ?? REPO_ROOT,
     // Default: do NOT load on-disk config — isolates the injected artifact. workflowTask overrides.
     settingSources: opts.settingSources ?? [],
-    agents: opts.agents,
     env: subscriptionEnv(),
   };
 

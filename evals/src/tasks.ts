@@ -8,10 +8,10 @@
  *     SYSTEMIC effect: does a skill activate, does a subagent dispatch, does CLAUDE.md matter.
  */
 
-import { IS_BASELINE, IS_OPENROUTER, WORKFLOW_ALLOWED_TOOLS } from "./config.js";
+import { IS_BASELINE, WORKFLOW_ALLOWED_TOOLS } from "./config.js";
 import { runClaude, type RunOptions } from "./runtime/run-claude.js";
 import { runContent } from "./runtime/dispatch.js";
-import { skillContent, agentContent, agentTools, projectAgentDefinitions } from "./artifacts/load.js";
+import { skillContent, agentContent, agentTools } from "./artifacts/load.js";
 
 /**
  * Run a prompt with a skill's content injected (the 'candidate' condition). Under
@@ -52,9 +52,5 @@ export function workflowTask(prompt: string, opts: RunOptions = {}) {
     allowedTools: WORKFLOW_ALLOWED_TOOLS,
     ...opts,
     settingSources: ["project"],
-    // A subagent's own `model:` frontmatter (e.g. architecture-reviewer.md's `model: sonnet`)
-    // fails outright under the OpenRouter backend — see projectAgentDefinitions()'s doc comment.
-    // Force every subagent to inherit the parent's (already-valid) model in that case only.
-    agents: IS_OPENROUTER ? projectAgentDefinitions() : undefined,
   });
 }

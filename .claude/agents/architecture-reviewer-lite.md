@@ -1,7 +1,6 @@
 ---
 name: architecture-reviewer-lite
 description: Controlled A/B variant of architecture-reviewer with the "cite the specific documented rule per finding" hard rule removed. Used only by evals/agents/architecture-reviewer-lite/ to measure what that one hard rule buys — not registered for production dispatch.
-model: sonnet
 tools: Read, Glob, Grep
 skills:
   - onion-architecture          # backend layering — inward-only dependency rule

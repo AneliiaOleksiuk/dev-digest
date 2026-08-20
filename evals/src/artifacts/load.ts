@@ -5,7 +5,6 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { SKILLS_DIR, AGENTS_DIR } from "./paths.js";
 
 function stripFrontmatter(md: string): string {
@@ -72,37 +71,4 @@ export function agentTools(agentName: string): string[] {
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t.length > 0 && !MUTATING_TOOLS.has(t));
-}
-
-/**
- * Every real `.claude/agents/*.md`, redefined with `model: "inherit"` regardless of what its own
- * frontmatter says. Feed this to the SDK's `agents` option in workflowTask under
- * EVAL_BACKEND=openrouter: `settingSources: ["project"]` loads the on-disk agent files verbatim
- * (frontmatter included), and a subagent whose frontmatter pins a specific model (e.g.
- * `model: sonnet`, as architecture-reviewer.md does for real production quality) tries to resolve
- * that alias through the OpenRouter/LiteLLM proxy the parent session is routed through — which
- * fails outright for a model OpenRouter doesn't even carry (verified: no Claude Sonnet listing on
- * OpenRouter as of 2026-08-20), and would defeat the point of routing to a cheap model even for one
- * that does exist there. "inherit" makes every subagent dispatch use the same already-valid model
- * as the parent instead.
- */
-export function projectAgentDefinitions(): Record<string, AgentDefinition> {
-  if (!existsSync(AGENTS_DIR)) return {};
-  const defs: Record<string, AgentDefinition> = {};
-  for (const f of readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md"))) {
-    const name = f.slice(0, -3);
-    const md = readFileSync(join(AGENTS_DIR, f), "utf8");
-    const fmEnd = md.startsWith("---") ? md.indexOf("\n---", 3) : -1;
-    if (fmEnd === -1) continue; // not a frontmattered agent file (e.g. README.md)
-    const frontmatter = md.slice(0, fmEnd);
-    const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim();
-    if (!description) continue;
-    defs[name] = {
-      description,
-      prompt: stripFrontmatter(md),
-      tools: agentTools(name),
-      model: "inherit",
-    };
-  }
-  return defs;
 }

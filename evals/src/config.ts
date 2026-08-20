@@ -14,7 +14,6 @@ export const MAX_TURNS = Number(process.env.EVAL_MAX_TURNS ?? "8");
 // "candidate" = artifact injected (normal). "baseline" = no artifact (benchmark lift baseline).
 export const EVAL_CONFIG = process.env.EVAL_CONFIG ?? "candidate";
 export const IS_BASELINE = EVAL_CONFIG === "baseline";
-export const IS_OPENROUTER = (process.env.EVAL_BACKEND ?? "subscription") === "openrouter";
 
 // --- Scoring / statistics thresholds ---------------------------------------
 export const DEFAULT_THRESHOLD = 0.6; // judge score gate for a quality case

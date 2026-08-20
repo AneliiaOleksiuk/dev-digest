@@ -1,0 +1,98 @@
+{
+  "skill_name": "onion-architecture",
+  "evals": [
+    {
+      "id": 0,
+      "name": "notifications-repo-port",
+      "prompt": "I threw together a first draft of a new `notifications` module under `server/src/modules/notifications/` — the files are staged at `.claude/skills/onion-architecture/evals/fixtures/case-1-notifications/` for now (treat that path as if it were `server/src/modules/notifications/`). Can you review it for issues before I open the PR? I mainly want to know if the file split (routes/service/repository) and how they depend on each other looks right for this codebase's conventions.",
+      "expected_output": "A review that flags: (1) service.ts constructing its own NotificationRepository instead of receiving a repository interface via the constructor, (2) repository.ts exporting only a concrete class with no port interface, (3) routes.ts querying db/schema.ts directly in the unread-count route instead of going through the service.",
+      "files": [
+        "evals/fixtures/case-1-notifications/repository.ts",
+        "evals/fixtures/case-1-notifications/service.ts",
+        "evals/fixtures/case-1-notifications/routes.ts",
+        "evals/fixtures/case-1-notifications/helpers.ts"
+      ],
+      "expectations": [
+        "The review flags that service.ts (NotificationService) constructs its own NotificationRepository instance in its constructor instead of receiving a repository interface/instance via dependency injection.",
+        "The review flags that repository.ts exports only a concrete NotificationRepository class with no separate port/interface -- the repository is not split into an interface implemented by a Drizzle class.",
+        "The review flags that routes.ts (the /notifications/unread-count route) queries db/schema.ts directly via drizzle instead of going through the service layer."
+      ]
+    },
+    {
+      "id": 1,
+      "name": "webhooks-adapter-leak",
+      "prompt": "Added a new `webhooks` module (`server/src/modules/webhooks/`, staged at `.claude/skills/onion-architecture/evals/fixtures/case-2-webhooks/`, treat that path as if it were `server/src/modules/webhooks/`) that posts a Slack message whenever a review finishes. Can you check it over before I push? I'm mostly worried I wired the Slack integration in a sloppy way.",
+      "expected_output": "A review that flags: (1) service.ts importing the concrete SlackNotifier adapter directly instead of a port interface, (2) service.ts constructing the adapter itself (`new SlackNotifier(...)`) instead of receiving it from the container, (3) helpers.ts performing I/O (sending the Slack message) instead of staying a pure formatting function.",
+      "files": [
+        "evals/fixtures/case-2-webhooks/repository.ts",
+        "evals/fixtures/case-2-webhooks/repository.drizzle.ts",
+        "evals/fixtures/case-2-webhooks/service.ts",
+        "evals/fixtures/case-2-webhooks/routes.ts",
+        "evals/fixtures/case-2-webhooks/helpers.ts",
+        "evals/fixtures/case-2-webhooks/adapters/slack/slack.ts"
+      ],
+      "expectations": [
+        "The review flags that service.ts imports the concrete SlackNotifier class directly from adapters/slack/slack.ts instead of depending on a port/interface.",
+        "The review flags that service.ts constructs the SlackNotifier itself (`new SlackNotifier(...)`) in its constructor instead of receiving an already-built instance from the container/composition root.",
+        "The review flags that helpers.ts's formatAndNotify function performs I/O (calling notifier.send, a network call) instead of staying a pure function that only formats data."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "audit-log-routes-bypass",
+      "prompt": "Drafted an `audit-log` module (`server/src/modules/audit-log/`, staged at `.claude/skills/onion-architecture/evals/fixtures/case-3-audit-log/`, treat that path as if it were `server/src/modules/audit-log/`) with a dashboard widget and a manual GitHub sync button. Take a look before I open the PR — anything structurally off?",
+      "expected_output": "A review that flags: (1) the `/audit-log/recent` route querying db/schema.ts directly instead of going through the service, (2) the `/audit-log/sync` route constructing a concrete OctokitGitHubClient adapter directly in routes.ts instead of going through a service/container-provided port, (3) module-container.ts being an ad-hoc per-module DI/singleton instead of using platform/container.ts as the single composition root.",
+      "files": [
+        "evals/fixtures/case-3-audit-log/repository.ts",
+        "evals/fixtures/case-3-audit-log/repository.drizzle.ts",
+        "evals/fixtures/case-3-audit-log/service.ts",
+        "evals/fixtures/case-3-audit-log/routes.ts",
+        "evals/fixtures/case-3-audit-log/helpers.ts",
+        "evals/fixtures/case-3-audit-log/module-container.ts"
+      ],
+      "expectations": [
+        "The review flags that the /audit-log/recent route in routes.ts queries db/schema.ts (the auditLogs table) directly via drizzle instead of calling the service.",
+        "The review flags that the /audit-log/sync route in routes.ts constructs a concrete OctokitGitHubClient adapter directly instead of obtaining a GitHub client/port through the service or container.",
+        "The review flags that module-container.ts is an ad-hoc, module-local DI/singleton (getAuditLogService with module-level caching) instead of using platform/container.ts as the single composition root."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "analytics-cross-module-repo",
+      "prompt": "Sketched a new `analytics` module (`server/src/modules/analytics/`, staged at `.claude/skills/onion-architecture/evals/fixtures/case-4-analytics/`, treat that path as if it were `server/src/modules/analytics/`) that snapshots a workspace's findings trend over time. Its own repository/service/routes split looked fine to me, but can you sanity-check it before I open the PR?",
+      "expected_output": "A review that flags: service.ts importing ReviewRepository directly from ../reviews/repository.js (a different module's repository) and constructing it itself (`new ReviewRepository(this.db)`), instead of depending on that module's ReviewsService (e.g. via Container) -- everything else in the module (its own AnalyticsRepository port/Drizzle split, routes.ts going through the service, helpers.ts staying pure) is fine and shouldn't be flagged as a problem.",
+      "files": [
+        "evals/fixtures/case-4-analytics/repository.ts",
+        "evals/fixtures/case-4-analytics/repository.drizzle.ts",
+        "evals/fixtures/case-4-analytics/service.ts",
+        "evals/fixtures/case-4-analytics/routes.ts",
+        "evals/fixtures/case-4-analytics/helpers.ts"
+      ],
+      "expectations": [
+        "The review flags that service.ts (AnalyticsService) imports ReviewRepository directly from '../reviews/repository.js' -- a different module's repository -- instead of depending on that module's service.",
+        "The review flags that service.ts constructs the cross-module repository itself (`new ReviewRepository(this.db)`) rather than obtaining review data through ReviewsService/Container.",
+        "The review does NOT flag AnalyticsRepository's own port/Drizzle split, routes.ts, or helpers.ts as problems -- those already follow the module-structure and repository-pattern rules correctly."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "digest-adapter-reaches-into-module",
+      "prompt": "Added a new `digest` module (`server/src/modules/digest/`, staged at `.claude/skills/onion-architecture/evals/fixtures/case-5-digest/`, treat that path as if it were `server/src/modules/digest/`) that emails a daily summary via SendGrid -- the mailer adapter is staged at `evals/fixtures/case-5-digest/adapters/email/sendgrid.ts`, treat that path as if it were `server/src/adapters/email/sendgrid.ts`. Can you look it over before I open the PR?",
+      "expected_output": "A review that flags: adapters/email/sendgrid.ts importing renderDigestSummary directly from modules/digest/helpers.ts (an adapter reaching into a specific module's file) instead of the service rendering the digest body via helpers.ts and passing the already-rendered string into the mailer port -- everything else in the module (repository.ts/repository.drizzle.ts port split, service.ts depending only on the DigestRepository and DigestMailer interfaces, routes.ts, helpers.ts staying pure) is fine and shouldn't be flagged as a problem.",
+      "files": [
+        "evals/fixtures/case-5-digest/repository.ts",
+        "evals/fixtures/case-5-digest/repository.drizzle.ts",
+        "evals/fixtures/case-5-digest/ports.ts",
+        "evals/fixtures/case-5-digest/service.ts",
+        "evals/fixtures/case-5-digest/routes.ts",
+        "evals/fixtures/case-5-digest/helpers.ts",
+        "evals/fixtures/case-5-digest/adapters/email/sendgrid.ts"
+      ],
+      "expectations": [
+        "The review flags that adapters/email/sendgrid.ts (SendgridDigestMailer) imports renderDigestSummary directly from modules/digest/helpers.ts -- an adapter importing a specific module's file.",
+        "The review explains the fix as: rendering the digest body belongs in service.ts (calling the pure helpers.ts function) before calling the mailer port, so the adapter only ever receives already-formatted data as a parameter -- not something it fetches or builds itself from module internals.",
+        "The review does NOT flag repository.ts/repository.drizzle.ts, ports.ts, service.ts's own dependencies, routes.ts, or helpers.ts as problems -- those already follow the module-structure and repository-pattern rules correctly."
+      ]
+    }
+  ]
+}

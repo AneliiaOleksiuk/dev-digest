@@ -25,6 +25,67 @@ CLI does the same job with zero new dependencies).
 - `no-helpers-to-io`: `modules/*/helpers.ts` → `db/**`, `adapters/**`,
   `platform/container.ts` is forbidden.
 
+Cross-module repository access (`dependency-rule.md`'s "Cross-module access"
+section) is not yet one of the four rules above — the shipped config only
+checks layers *within* a module, not module-to-module edges. It's
+mechanizable the same way, using dependency-cruiser's own capture-group
+pattern for "a module may only depend on itself, not siblings":
+
+```js
+{
+  name: 'no-cross-module-repo-access',
+  severity: 'error',
+  comment:
+    "A module depends on another module's service.ts, not its repository — see dependency-rule.md.",
+  from: {
+    path: '^src/modules/([^/]+)/service\\.ts$',
+    pathNot: PRE_EXISTING_MODULES,
+  },
+  to: {
+    path: '^src/modules/([^/]+)/repository(\\.drizzle)?\\.ts$',
+    pathNot: '^src/modules/$1/',
+  },
+},
+```
+
+`$1` backreferences the module name captured in `from.path`, so the rule
+only fires on a *different* module's repository — a service importing its
+own `repository.ts` is still fine. This isn't wired into the real
+`server/.dependency-cruiser.cjs` yet: `PRE_EXISTING_MODULES` would need
+`conventions`, `brief`, and `onboarding` added first (see the note at the
+end of `dependency-rule.md`'s "Cross-module access" section) — same
+scope-discipline call as every other rule here, don't skip it to make the
+check pass immediately.
+
+Adapter-to-module imports (`dependency-rule.md`'s "Adapter-to-module
+imports" section) is a second not-yet-wired rule, running the opposite
+direction — an adapter file reaching into `modules/**` instead of a module
+reaching into another module:
+
+```js
+{
+  name: 'no-adapter-to-module',
+  severity: 'error',
+  comment:
+    "adapters/** is infrastructure — it implements a port, it never imports a specific module's file. See dependency-rule.md.",
+  from: {
+    path: '^src/adapters/',
+    pathNot: PRE_EXISTING_ADAPTERS,
+  },
+  to: {
+    path: '^src/modules/',
+  },
+},
+```
+
+No capture group needed here — unlike cross-module repo access, an adapter
+importing *any* module (even "its own" conceptually associated one) is the
+violation, since an adapter isn't owned by a module the way `service.ts`/
+`repository.ts` are. `PRE_EXISTING_ADAPTERS` would need `astgrep` added
+before this could ship (see the note at the end of `dependency-rule.md`'s
+"Adapter-to-module imports" section) — same scope-discipline call as
+`no-cross-module-repo-access` above.
+
 ("Only the container wires a port to its concrete adapter" isn't mechanized
 — dependency-cruiser rules match single import edges, not "two kinds of
 import in the same file." The four rules above already make that violation

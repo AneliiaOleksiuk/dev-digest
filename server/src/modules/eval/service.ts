@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { EvalCaseInputMeta } from '@devdigest/shared';
 import type { EvalCaseInput, EvalCaseRecord, EvalExpectation } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
@@ -158,14 +160,33 @@ export class EvalService {
       must_not_flag: kind === 'must_not_flag' ? [entry] : [],
     };
 
+    // AC-46 — this write path built its own diff via `buildDiffText` instead
+    // of taking `input_diff` straight from a validated request body (like
+    // `create`/`update` do), so it must cap-check that diff itself before
+    // the insert — otherwise a PR-author-controlled `pr_files.patch` (plain
+    // `text`, no length bound) reaches storage uncapped, then Phase C's LLM
+    // prompt uncapped after it.
+    const inputDiff = buildDiffText([{ path: finding.file, patch: prFile.patch }]);
+    assertDiffWithinCap(inputDiff);
+
+    // `input_meta`/`input_files` are server-constructed here rather than
+    // pulled from a zod-validated request body (`create`/`update` get that
+    // validation for free from the route's `EvalCaseCreateBody`/
+    // `EvalCaseUpdateBody` schema, now that both fields are typed instead of
+    // `z.unknown()`) — so this call site validates its own constructed
+    // values explicitly, the same shape guarantee the other two paths get
+    // from the route boundary.
+    const inputFiles = z.array(z.string()).parse([finding.file]);
+    const inputMeta = EvalCaseInputMeta.parse({ title: pull.title, body: pull.body ?? '' });
+
     const row = await this.repo.insert({
       workspaceId,
       ownerKind: 'agent',
       ownerId: review.agentId,
       name: name ?? finding.title,
-      inputDiff: buildDiffText([{ path: finding.file, patch: prFile.patch }]),
-      inputFiles: [finding.file],
-      inputMeta: { title: pull.title, body: pull.body ?? '' },
+      inputDiff,
+      inputFiles,
+      inputMeta,
       expectedOutput,
       notes: null,
     });

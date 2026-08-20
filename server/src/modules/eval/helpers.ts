@@ -1,4 +1,5 @@
-import { EvalExpectation } from '@devdigest/shared';
+import { z } from 'zod';
+import { EvalCaseInputMeta, EvalExpectation } from '@devdigest/shared';
 import type { EvalCaseRecord, EvalExpectationEntry } from '@devdigest/shared';
 import { AppError } from '../../platform/errors.js';
 import { FULL_FILE_KINDS, MAX_INPUT_DIFF_BYTES } from './constants.js';
@@ -11,22 +12,37 @@ import type { EvalCaseRow } from './repository.js';
  * that throws a named `AppError`).
  */
 
+/** `input_files`'s read-side shape — a plain array of file paths. */
+const InputFiles = z.array(z.string());
+
 /**
  * Row → API read shape. A stored `expected_output` that fails to re-parse
  * against `EvalExpectation` degrades to `expectation_status: 'unusable'` +
  * `expected_output: null` rather than throwing (AC-13, E-12) — the entire
  * reason `EvalCaseRecord` carries that field.
+ *
+ * `input_meta`/`input_files` get the SAME "degrade rather than throw"
+ * treatment via `input_status`, kept as its own field rather than folded
+ * into `expectation_status` — the two are orthogonal (a case can have a
+ * perfectly scoreable `expected_output` with corrupt/legacy `input_meta`,
+ * or vice versa; see the field's doc comment in the contract for the full
+ * rationale). A `null` stored value (nothing pinned, or a pre-this-fix row)
+ * is not corruption — it re-parses successfully as `null`, same as
+ * `expected_output`'s own nullable handling.
  */
 export function mapRowToRecord(row: EvalCaseRow): EvalCaseRecord {
   const parsed = EvalExpectation.safeParse(row.expectedOutput);
+  const metaParsed = EvalCaseInputMeta.nullable().safeParse(row.inputMeta ?? null);
+  const filesParsed = InputFiles.nullable().safeParse(row.inputFiles ?? null);
   return {
     id: row.id,
     owner_kind: row.ownerKind,
     owner_id: row.ownerId,
     name: row.name,
     input_diff: row.inputDiff ?? '',
-    input_files: row.inputFiles ?? null,
-    input_meta: row.inputMeta ?? null,
+    input_files: filesParsed.success ? filesParsed.data : null,
+    input_meta: metaParsed.success ? metaParsed.data : null,
+    input_status: metaParsed.success && filesParsed.success ? 'ok' : 'unusable',
     expected_output: parsed.success ? parsed.data : null,
     expectation_status: parsed.success ? 'ok' : 'unusable',
     notes: row.notes ?? null,

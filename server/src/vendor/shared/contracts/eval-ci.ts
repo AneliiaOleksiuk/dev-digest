@@ -55,14 +55,27 @@ export const EvalExpectation = z.object({
 });
 export type EvalExpectation = z.infer<typeof EvalExpectation>;
 
+/**
+ * Metadata pinned alongside `input_diff` on a create-from-finding case — the
+ * source PR's title/body (WI5). Typed (not `z.unknown()`) because WI7's batch
+ * runner reads `input_meta.body` straight into a prompt (Phase C) — an
+ * unvalidated shape reaching an LLM call is a stored-content risk, the same
+ * reasoning `expected_output` already got AC-11's schema for.
+ */
+export const EvalCaseInputMeta = z.object({
+  title: z.string(),
+  body: z.string(),
+});
+export type EvalCaseInputMeta = z.infer<typeof EvalCaseInputMeta>;
+
 /** Create/update payload for an eval case (id + owner resolved by the route). */
 export const EvalCaseInput = z.object({
   owner_kind: EvalOwnerKind,
   owner_id: z.string(),
   name: z.string().min(1),
   input_diff: z.string().default(''),
-  input_files: z.unknown().nullish(),
-  input_meta: z.unknown().nullish(),
+  input_files: z.array(z.string()).nullish(),
+  input_meta: EvalCaseInputMeta.nullish(),
   expected_output: EvalExpectation,
   notes: z.string().nullish(),
 });
@@ -91,8 +104,18 @@ export const EvalCaseRecord = z.object({
   owner_id: z.string(),
   name: z.string(),
   input_diff: z.string(),
-  input_files: z.unknown().nullish(),
-  input_meta: z.unknown().nullish(),
+  input_files: z.array(z.string()).nullish(),
+  input_meta: EvalCaseInputMeta.nullish(),
+  /**
+   * Read-side degradation for `input_meta`/`input_files`, same "degrade
+   * rather than throw" pattern `expectation_status` established (AC-13,
+   * E-12) — kept as its OWN field rather than folded into
+   * `expectation_status` because the two are orthogonal: a case can have a
+   * perfectly scoreable `expected_output` (`expectation_status: 'ok'`) with
+   * corrupt/legacy `input_meta`, or vice versa. Conflating them would make a
+   * metadata-only corruption falsely read as "this case can't be scored".
+   */
+  input_status: z.enum(['ok', 'unusable']).default('ok'),
   expected_output: EvalExpectation.nullable(),
   expectation_status: z.enum(['ok', 'unusable']),
   notes: z.string().nullish(),

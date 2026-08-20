@@ -160,6 +160,18 @@ diagrams are not duplicated here; read them there).
    `null`, never `1.0` or `0.0` (E-11), and a first batch to have no delta
    (E-17). The spec's contract list didn't call this out. Folded into WI1 as a
    required change, not an optional one.
+   **Revised during Phase C's plan-verifier fix-loop (2026-08-21, Major
+   finding #2):** WI1 as originally shipped left `EvalDashboard.delta`'s
+   three fields (`recall`/`precision`/`citation_accuracy`) NON-nullable as a
+   whole block only — once ≥2 batches existed and a delta was rendered,
+   `buildDashboard` had no honest way to represent "one side's own metric is
+   unmeasured" and fell back to a fabricated `0` for that field, which reads
+   as a real (and wrong) swing. Fixed by widening each field to
+   `.nullable()` too (both vendored `eval-ci.ts` copies) and changing
+   `buildDashboard` to emit `null` per field whenever either endpoint's own
+   metric is null — the same honest pattern `EvalComparison.delta` and
+   `compare()` already used. See `server/src/modules/eval/service.ts`'s
+   `buildDashboard` and the contract's own doc comment for the detail.
 2. **Close E-8 by recording a skills fingerprint on the batch, instead of only
    documenting it.** D-4 leaves "a skill change is invisible to
    `agents.version`" as a documented gap, and Q-3 asks whether to fix it by

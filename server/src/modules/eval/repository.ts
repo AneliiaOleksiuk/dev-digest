@@ -99,11 +99,40 @@ export interface EvalPrFileRow {
 
 // ---- batch runner (WI7) / read APIs (WI8) ----------------------------------
 
-/** Values pinned at batch OPEN — before any case has run (AC-15/AC-16). The
- *  row is inserted with placeholder aggregate fields (see
- *  `repository.drizzle.ts`'s `insertBatch`) and only its identity/pin fields
- *  are trusted until `closeBatch` overwrites the aggregate. */
-export interface EvalBatchInsert {
+/**
+ * Everything needed to insert a batch row ALREADY CLOSED with its final
+ * aggregate — pin fields captured at batch-OPEN time (AC-15/AC-16: agent
+ * config as of the moment the batch started, before any case ran) plus the
+ * aggregate computed once every case has actually run (AC-19, AC-21, AC-30;
+ * never zeros for an all-failed batch, `null` metrics instead).
+ *
+ * There is deliberately no separate "open with placeholder aggregates, then
+ * close" step (an earlier draft of this module had one — `status: 'failed'`,
+ * every count 0, every metric null, written before any case ran). That
+ * placeholder had no way to be excluded from `listBatchesForOwner` (no status
+ * filter, sorted `ran_at` desc), so it WAS `batches[0]` — the "latest" batch
+ * — for the entire in-flight window: a concurrent
+ * `GET /agents/:id/eval-dashboard` during a run saw `current.*` all null and
+ * `cases_total: 0` for an agent with real history, and computed a fabricated
+ * `delta` against it. Deferring the whole write to here means a running
+ * batch simply has no row at all until it's done — nothing for any read path
+ * to pick up — and a process that dies mid-batch leaves no row, rather than
+ * a permanent fake-failed one indistinguishable from a genuine AC-21
+ * all-failed batch.
+ *
+ * `EvalRepository.insertBatchWithRuns` (the only port method that accepts
+ * this type) writes this row plus every per-case `eval_runs` row it produces
+ * inside ONE transaction, so a closed batch's `cases_total` can no longer
+ * diverge from its actual persisted `eval_runs` count (Phase C fix-loop
+ * iteration 2, Minor finding #1). That guarantee only covers what the
+ * transaction itself commits, though: if the process crashes WHILE the batch
+ * is still running -- i.e. before this transaction even starts -- any spend
+ * already incurred by cases that already completed has no persisted record
+ * anywhere and cannot be recovered; this is an accepted tradeoff of
+ * deferring all persistence to batch-end, not a claim that no spend can ever
+ * be lost (Minor finding #2).
+ */
+export interface EvalBatchWrite {
   workspaceId: string;
   ownerKind: EvalCaseOwnerKind;
   ownerId: string;
@@ -111,12 +140,11 @@ export interface EvalBatchInsert {
   provider: string;
   model: string;
   skillsFingerprint: { skill_id: string; version: number }[];
-}
-
-/** The aggregate a batch is CLOSED with, once every case has run (AC-19,
- *  AC-21, AC-30) — never zeros for an all-failed batch, `null` metrics
- *  instead. */
-export interface EvalBatchClose {
+  /** Captured at batch-OPEN time (before any case ran), NOT at insert time —
+   *  so `ran_at` still reflects when the batch started, matching the earlier
+   *  open-then-close shape's semantics even though the write itself now
+   *  happens after every case has run. */
+  ranAt: Date;
   status: 'completed' | 'failed';
   casesTotal: number;
   casesPassed: number;
@@ -229,20 +257,21 @@ export interface EvalRepository {
 
   // ---- batch runner (WI7) --------------------------------------------------
 
-  /** Open a batch — inserted with placeholder aggregate fields (real
-   *  aggregate written by `closeBatch` once every case has run) so
-   *  `eval_runs.batch_id` has a real row to reference from the first
-   *  per-case insert onward. */
-  insertBatch(values: EvalBatchInsert): Promise<EvalBatchRow>;
-
-  /** Close a batch with its final aggregate (AC-19, AC-30). `id` is always
-   *  this module's own freshly-opened batch id — not client-addressable, so
-   *  this method is intentionally NOT workspace-scoped (the workspace check
-   *  already happened at `insertBatch`/the route boundary). */
-  closeBatch(id: string, patch: EvalBatchClose): Promise<EvalBatchRow>;
-
-  /** Persist one case's outcome (AC-19/AC-20). */
-  insertRun(values: EvalRunInsert): Promise<EvalRunRow>;
+  /** The ONLY write to `eval_batches`/`eval_runs` for a run — inserts the
+   *  batch row already CLOSED with its final aggregate (see `EvalBatchWrite`'s
+   *  doc comment for why there is no separate open/close step) plus every
+   *  one of `runs`' per-case outcomes (AC-19/AC-20), all inside a SINGLE
+   *  transaction: a throw/crash between the batch insert and the run inserts
+   *  can no longer leave a closed batch whose `cases_total` doesn't match its
+   *  actual `eval_runs` row count (Phase C fix-loop iteration 2, Minor
+   *  finding #1 -- see `EvalBatchWrite`'s doc comment for the residual risk
+   *  this does NOT cover). `runs` omits `batchId` -- the real batch id only
+   *  exists once the transaction's first insert returns, so the
+   *  implementation fills it in for every row itself. */
+  insertBatchWithRuns(
+    batch: EvalBatchWrite,
+    runs: Omit<EvalRunInsert, 'batchId'>[],
+  ): Promise<{ batch: EvalBatchRow; runs: EvalRunRow[] }>;
 
   // ---- read APIs (WI8, zero LLM calls) -------------------------------------
 

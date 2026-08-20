@@ -277,12 +277,17 @@ export class EvalService {
    * identical for both entry points.
    *
    * Sequence: guard → resolve provider + enabled linked skills ONCE (pins
-   * `agent_version`/`provider`/`model`/`skills_fingerprint`, AC-15/AC-16) →
-   * open the batch row → run every case SERIALLY (Q-4) through
-   * `runner.runBatch` (per-case isolation is `runner.ts`'s job, AC-20) →
-   * persist each case's `eval_runs` row → close the batch with the
-   * aggregate (AC-19, AC-21, AC-30) → log a summary line that NEVER
-   * includes diff/prompt/raw-response content (AC-48, A09).
+   * `agent_version`/`provider`/`model`/`skills_fingerprint`/`ran_at` in
+   * memory, AC-15/AC-16 — a mid-batch config change cannot affect these
+   * already-captured values regardless of when the row is written) → run
+   * every case SERIALLY (Q-4) through `runner.runBatch` (per-case isolation
+   * is `runner.ts`'s job, AC-20) → compute the aggregate (AC-21, AC-30) →
+   * insert the batch row ALREADY CLOSED plus every case's `eval_runs` row in
+   * ONE transaction via `insertBatchWithRuns` (the ONLY write to
+   * `eval_batches`/`eval_runs` for a run; see `EvalBatchWrite`'s doc comment
+   * for why there's no separate open-with-placeholder step, and for the one
+   * residual risk the transaction does NOT cover) → log a summary line that
+   * NEVER includes diff/prompt/raw-response content (AC-48, A09).
    */
   private async runPinnedBatch(
     workspaceId: string,
@@ -308,17 +313,11 @@ export class EvalService {
       const skillBodies = enabledSkills.map((s) => `### ${s.name}\n${s.body}`);
       const skillsFingerprint = enabledSkills.map((s) => ({ skill_id: s.skill_id, version: s.version }));
 
-      // ---- OPEN: pin agent_version/provider/model/skills_fingerprint NOW —
-      // a config change after this point cannot affect this batch (AC-15/16).
-      const batchRow = await this.repo.insertBatch({
-        workspaceId,
-        ownerKind: 'agent',
-        ownerId: agent.id,
-        agentVersion: agent.version,
-        provider: agent.provider,
-        model: agent.model,
-        skillsFingerprint,
-      });
+      // ---- OPEN (in memory only — no DB write yet, see EvalBatchWrite's
+      // doc comment): pin agent_version/provider/model/skills_fingerprint/
+      // ran_at NOW — a config change after this point cannot affect this
+      // batch (AC-15/16), regardless of when the row actually gets written.
+      const ranAt = new Date();
 
       const runnerCases: RunnerCase[] = rows.map((r) => {
         const expectationParsed = EvalExpectation.safeParse(r.expectedOutput);
@@ -343,24 +342,7 @@ export class EvalService {
       const results = await runBatch(snapshot, runnerCases);
       const durationMs = Date.now() - batchStart;
 
-      // ---- Persist per case (AC-19) ------------------------------------
-      for (const r of results) {
-        await this.repo.insertRun({
-          caseId: r.caseId,
-          batchId: batchRow.id,
-          actualOutput: r.actualOutput,
-          pass: r.pass,
-          recall: r.recall,
-          precision: r.precision,
-          citationAccuracy: r.citation_accuracy,
-          findingsTotal: r.findingsTotal,
-          durationMs: r.durationMs,
-          costUsd: r.costUsd,
-          error: r.error,
-        });
-      }
-
-      // ---- Close the batch with the aggregate (AC-21, AC-30) -----------
+      // ---- Aggregate (AC-21, AC-30) -------------------------------------
       const agg = aggregateBatch(
         results.map((r) => ({
           ok: r.ok,
@@ -383,22 +365,50 @@ export class EvalService {
       const allCostsKnown = okResults.length > 0 && okResults.every((r) => r.costUsd !== null);
       const costUsd = allCostsKnown ? okResults.reduce((sum, r) => sum + (r.costUsd ?? 0), 0) : null;
 
-      const closed = await this.repo.closeBatch(batchRow.id, {
-        status: agg.status,
-        casesTotal: agg.cases_total,
-        casesPassed: agg.cases_passed,
-        casesFailed: agg.cases_failed,
-        recall: agg.recall,
-        recallCases: agg.recall_cases,
-        precision: agg.precision,
-        precisionCases: agg.precision_cases,
-        citationAccuracy: agg.citation_accuracy,
-        citationCases: agg.citation_cases,
-        findingsTotal,
-        durationMs,
-        costUsd,
-        error: agg.status === 'failed' ? 'Every case in this batch failed to execute' : null,
-      });
+      // ---- Insert the batch row ALREADY CLOSED plus every case's
+      // `eval_runs` row in ONE transaction (Phase C fix-loop iteration 2,
+      // Minor finding #1) — the ONLY write to `eval_batches`/`eval_runs` for
+      // this run. See `EvalBatchWrite`'s doc comment for the residual risk
+      // this transaction does NOT cover (spend from cases that ran before
+      // this call, lost on a crash before the transaction starts).
+      const { batch: closed } = await this.repo.insertBatchWithRuns(
+        {
+          workspaceId,
+          ownerKind: 'agent',
+          ownerId: agent.id,
+          agentVersion: agent.version,
+          provider: agent.provider,
+          model: agent.model,
+          skillsFingerprint,
+          ranAt,
+          status: agg.status,
+          casesTotal: agg.cases_total,
+          casesPassed: agg.cases_passed,
+          casesFailed: agg.cases_failed,
+          recall: agg.recall,
+          recallCases: agg.recall_cases,
+          precision: agg.precision,
+          precisionCases: agg.precision_cases,
+          citationAccuracy: agg.citation_accuracy,
+          citationCases: agg.citation_cases,
+          findingsTotal,
+          durationMs,
+          costUsd,
+          error: agg.status === 'failed' ? 'Every case in this batch failed to execute' : null,
+        },
+        results.map((r) => ({
+          caseId: r.caseId,
+          actualOutput: r.actualOutput,
+          pass: r.pass,
+          recall: r.recall,
+          precision: r.precision,
+          citationAccuracy: r.citation_accuracy,
+          findingsTotal: r.findingsTotal,
+          durationMs: r.durationMs,
+          costUsd: r.costUsd,
+          error: r.error,
+        })),
+      );
 
       // ---- Log (AC-48, A09) — NEVER input_diff, the assembled prompt, or
       // the raw model response; only ids/counts/metrics/model/tokens/cost.
@@ -478,23 +488,29 @@ export class EvalService {
 
     // E-17 — fewer than two batches → no delta at ALL (never a zero delta).
     //
-    // NOTE (flagged for review): `EvalDashboard.delta`'s three fields are
-    // plain, NON-nullable `z.number()`s in the Phase-A contract (unlike
-    // `EvalComparison.delta`'s, which ARE individually nullable) — once we
-    // decide to render a delta block at all (>=2 batches), every field must
-    // be a real number. When either endpoint's OWN metric is null (a batch
-    // that never exercised that metric, e.g. no must_find entries in any of
-    // its cases), we report 0 for that field rather than subtracting
-    // against a fabricated baseline (which would read as a false swing,
-    // e.g. "recall dropped by 0.8" when really "recall is simply
-    // unmeasured this batch") — the least-wrong choice the schema allows,
-    // not a claim that the metric IS zero.
+    // Per-field null when EITHER endpoint's OWN metric is null (a batch that
+    // never exercised that metric, e.g. no must_find entries in any of its
+    // cases) — `EvalDashboard.delta`'s three fields were widened to
+    // `.nullable()` during Phase C's plan-verifier fix-loop
+    // (docs/plans/eval-pipeline.md WI1/Recommendation 1) specifically so
+    // this never has to fabricate a `0` baseline, which read as a false
+    // swing (e.g. "recall dropped by 0.8" when really "recall is simply
+    // unmeasured this batch"). Mirrors `compare()`'s existing pattern below.
     const delta =
       latest && previous
         ? {
-            recall: (latest.recall ?? 0) - (previous.recall ?? 0),
-            precision: (latest.precision ?? 0) - (previous.precision ?? 0),
-            citation_accuracy: (latest.citation_accuracy ?? 0) - (previous.citation_accuracy ?? 0),
+            recall:
+              latest.recall !== null && previous.recall !== null
+                ? latest.recall - previous.recall
+                : null,
+            precision:
+              latest.precision !== null && previous.precision !== null
+                ? latest.precision - previous.precision
+                : null,
+            citation_accuracy:
+              latest.citation_accuracy !== null && previous.citation_accuracy !== null
+                ? latest.citation_accuracy - previous.citation_accuracy
+                : null,
           }
         : null;
 

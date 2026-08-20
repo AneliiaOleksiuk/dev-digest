@@ -2,9 +2,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type {
-  EvalBatchClose,
-  EvalBatchInsert,
   EvalBatchRow,
+  EvalBatchWrite,
   EvalCaseInsert,
   EvalCaseOwnerKind,
   EvalCaseRow,
@@ -143,83 +142,77 @@ export class DrizzleEvalRepository implements EvalRepository {
 
   // ---- batch runner (WI7) -------------------------------------------------
 
-  /** Opens with placeholder aggregate fields — `status: 'failed'`, every
-   *  count 0, every metric `null` — overwritten by `closeBatch` once the
-   *  runner has a real aggregate. Never read back by a caller before
-   *  `closeBatch` runs (the service holds the row in memory for that
-   *  window), so the placeholder values are never user-visible. */
-  async insertBatch(values: EvalBatchInsert): Promise<EvalBatchRow> {
-    const [row] = await this.db
-      .insert(t.evalBatches)
-      .values({
-        workspaceId: values.workspaceId,
-        ownerKind: values.ownerKind,
-        ownerId: values.ownerId,
-        agentVersion: values.agentVersion,
-        provider: values.provider,
-        model: values.model,
-        skillsFingerprint: values.skillsFingerprint,
-        status: 'failed',
-        casesTotal: 0,
-        casesPassed: 0,
-        casesFailed: 0,
-        recall: null,
-        precision: null,
-        citationAccuracy: null,
-        recallCases: 0,
-        precisionCases: 0,
-        citationCases: 0,
-        findingsTotal: null,
-        durationMs: null,
-        costUsd: null,
-        error: null,
-      })
-      .returning();
-    return toBatchRow(row!);
-  }
+  /** The ONLY write to `eval_batches`/`eval_runs` for a run — see
+   *  `EvalBatchWrite`'s doc comment (repository.ts) for why the batch itself
+   *  is a single insert of an already-closed row rather than an
+   *  open-with-placeholder-then-update. A batch still running therefore has
+   *  no row at all, so it can never be `listBatchesForOwner`'s `batches[0]`
+   *  (or appear in any other read) until this call actually happens.
+   *
+   *  Both inserts happen inside one `db.transaction` (Phase C fix-loop
+   *  iteration 2, Minor finding #1) — a throw partway through (e.g. an FK
+   *  violation on one of the `runs` inserts) rolls back the batch insert too,
+   *  so a committed batch's `cases_total` and its persisted `eval_runs` row
+   *  count can never diverge. See `EvalBatchWrite`'s doc comment for the one
+   *  risk this transaction does NOT cover (spend from cases that ran before
+   *  this call, lost on a crash before the transaction starts). */
+  async insertBatchWithRuns(
+    batch: EvalBatchWrite,
+    runs: Omit<EvalRunInsert, 'batchId'>[],
+  ): Promise<{ batch: EvalBatchRow; runs: EvalRunRow[] }> {
+    return this.db.transaction(async (tx) => {
+      const [batchRow] = await tx
+        .insert(t.evalBatches)
+        .values({
+          workspaceId: batch.workspaceId,
+          ownerKind: batch.ownerKind,
+          ownerId: batch.ownerId,
+          agentVersion: batch.agentVersion,
+          provider: batch.provider,
+          model: batch.model,
+          skillsFingerprint: batch.skillsFingerprint,
+          ranAt: batch.ranAt,
+          status: batch.status,
+          casesTotal: batch.casesTotal,
+          casesPassed: batch.casesPassed,
+          casesFailed: batch.casesFailed,
+          recall: batch.recall,
+          precision: batch.precision,
+          citationAccuracy: batch.citationAccuracy,
+          recallCases: batch.recallCases,
+          precisionCases: batch.precisionCases,
+          citationCases: batch.citationCases,
+          findingsTotal: batch.findingsTotal,
+          durationMs: batch.durationMs,
+          costUsd: batch.costUsd,
+          error: batch.error,
+        })
+        .returning();
+      const closedBatch = toBatchRow(batchRow!);
 
-  async closeBatch(id: string, patch: EvalBatchClose): Promise<EvalBatchRow> {
-    const [row] = await this.db
-      .update(t.evalBatches)
-      .set({
-        status: patch.status,
-        casesTotal: patch.casesTotal,
-        casesPassed: patch.casesPassed,
-        casesFailed: patch.casesFailed,
-        recall: patch.recall,
-        recallCases: patch.recallCases,
-        precision: patch.precision,
-        precisionCases: patch.precisionCases,
-        citationAccuracy: patch.citationAccuracy,
-        citationCases: patch.citationCases,
-        findingsTotal: patch.findingsTotal,
-        durationMs: patch.durationMs,
-        costUsd: patch.costUsd,
-        error: patch.error,
-      })
-      .where(eq(t.evalBatches.id, id))
-      .returning();
-    return toBatchRow(row!);
-  }
+      const runRows: EvalRunRow[] = [];
+      for (const r of runs) {
+        const [row] = await tx
+          .insert(t.evalRuns)
+          .values({
+            caseId: r.caseId,
+            batchId: closedBatch.id,
+            actualOutput: r.actualOutput as object | null,
+            pass: r.pass,
+            recall: r.recall,
+            precision: r.precision,
+            citationAccuracy: r.citationAccuracy,
+            findingsTotal: r.findingsTotal,
+            durationMs: r.durationMs,
+            costUsd: r.costUsd,
+            error: r.error,
+          })
+          .returning();
+        runRows.push(toRunRow(row!));
+      }
 
-  async insertRun(values: EvalRunInsert): Promise<EvalRunRow> {
-    const [row] = await this.db
-      .insert(t.evalRuns)
-      .values({
-        caseId: values.caseId,
-        batchId: values.batchId,
-        actualOutput: values.actualOutput as object | null,
-        pass: values.pass,
-        recall: values.recall,
-        precision: values.precision,
-        citationAccuracy: values.citationAccuracy,
-        findingsTotal: values.findingsTotal,
-        durationMs: values.durationMs,
-        costUsd: values.costUsd,
-        error: values.error,
-      })
-      .returning();
-    return toRunRow(row!);
+      return { batch: closedBatch, runs: runRows };
+    });
   }
 
   // ---- read APIs (WI8) -----------------------------------------------------

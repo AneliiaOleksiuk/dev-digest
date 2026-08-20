@@ -403,6 +403,20 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   session widens `EvalDashboard.delta`'s fields to `.nullable()` to close this
   gap, `buildDashboard`'s `0`-fallback branch should be replaced with a real
   null at the same time — don't leave both paths inconsistent.
+  **STALE as of 2026-08-21 (Phase C `plan-verifier` fix-loop, Major finding
+  #2) — the gap above is now closed, not just documented as a tradeoff.**
+  `EvalDashboard.delta`'s three fields were widened to `.nullable()` in BOTH
+  vendored `eval-ci.ts` copies, and `buildDashboard`'s `0`-fallback branch was
+  replaced with `latest.x !== null && previous.x !== null ? latest.x -
+  previous.x : null` per field — exactly the fix this entry's last sentence
+  anticipated. The `0`-fallback code this entry describes no longer exists;
+  don't reintroduce it from memory of this entry alone, check the current
+  `service.ts`. Confirmed zero client consumers of `EvalDashboard.delta`
+  existed before the widening (`grep -r "delta" client/src` hit only
+  `MetricCard`'s own unrelated generic `delta` prop and a `Showcase` demo
+  usage), so this contract ripple needed no client-side fixture update —
+  unlike the `project_context_docs`/`risk_areas` ripples documented
+  elsewhere in this file.
 
 ## Tool & Library Notes
 
@@ -593,6 +607,70 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   actually a test-fixture gap. Create the agent through `POST /agents` (or
   `AgentsRepository.insert()` directly) whenever a version-1 snapshot needs
   to actually exist.
+- **An "open with placeholder, close with real aggregate" two-step INSERT
+  makes the placeholder row a real read-path hazard, not just an internal
+  implementation detail — fixed by deferring the whole write to close time
+  (2026-08-21, Phase C `plan-verifier` fix-loop, Major finding #1,
+  `modules/eval/{repository,repository.drizzle,service}.ts`).** WI7 as
+  originally shipped wrote an `eval_batches` row at batch-OPEN (before any
+  case had run) with placeholder aggregates (`status: 'failed'`,
+  `cases_total: 0`, every metric `null`), then overwrote it via a separate
+  `closeBatch` once the real aggregate was known. The doc comment claimed
+  this was never read back by a caller — false: `listBatchesForOwner` has no
+  status filter and sorts `ran_at` desc, so the placeholder WAS `batches[0]`
+  (the "latest" batch) for the ENTIRE in-flight window — a concurrent
+  `GET /agents/:id/eval-dashboard` mid-run saw `current.*` all null,
+  `cases_total: 0` for an agent with real history, and computed a fabricated
+  `delta` against real prior data. Worse: a process dying mid-batch left a
+  PERMANENT fake-failed row indistinguishable from a genuine AC-21
+  all-failed batch. **Fix:** merged `insertBatch`+`closeBatch` into one
+  `insertClosedBatch` — the batch row is written EXACTLY ONCE, already
+  closed, only after `runBatch()` returns and the aggregate is computed.
+  `EvalBatchWrite` (the port's insert type) now carries both the pin fields
+  (`agentVersion`/`provider`/`model`/`skillsFingerprint`) AND the final
+  aggregate AND an explicit `ranAt: Date` — `runPinnedBatch` still captures
+  `ranAt = new Date()` at the old "OPEN" moment (before running any case) so
+  the persisted `ran_at` keeps meaning "when the batch started," even though
+  the actual DB write now happens after the batch finishes. Per-case
+  `eval_runs` inserts had to move to AFTER the batch insert (their `batch_id`
+  column is a real FK against `eval_batches.id` — you cannot insert a run row
+  referencing a batch that doesn't exist yet), which is safe here because
+  `runBatch()` already collects every case's result fully in memory before
+  any per-case persistence happens. Net effect: a still-running batch now
+  has literally NO row in `eval_batches` until it's done — nothing for any
+  read path to pick up as "latest" — and a mid-batch crash leaves no row at
+  all rather than a permanent bogus one. **Alternative considered and
+  rejected:** adding a `'running'` status value (would require widening
+  `EvalBatchRecord.status`/`eval_batches.status` in both vendored
+  `eval-ci.ts` copies) — rejected as the larger diff for no real benefit,
+  since a `'running'` row would STILL need active exclusion from every read
+  path (same problem, just moved into a filter instead of removed by
+  construction) and would STILL get stuck forever on a process crash. If a
+  future session is tempted to add an "open" batch row again (e.g. to show
+  live progress mid-run), it needs an explicit exclusion filter on every one
+  of `listBatchesForOwner`/dashboard/trend/compare — don't reintroduce the
+  old shape without also adding that filter everywhere this entry's "why it
+  matters" paragraph describes.
+  **Amended 2026-08-21 (Phase C fix-loop iteration 2, Minor findings #1/#2)
+  — the single `insertClosedBatch` + N separate `insertRun` calls above were
+  themselves N+1 separate autocommits with no transaction, so a throw/crash
+  between them could still commit a batch whose `cases_total` didn't match
+  its actual `eval_runs` row count.** Merged into one
+  `EvalRepository.insertBatchWithRuns(batch, runs)` port method that wraps
+  the batch insert and every run insert in a single `db.transaction` (this
+  repo's first use of `.transaction(...)` anywhere in `server/src` — `grep
+  -rn "\.transaction("` returned zero hits before this change). Fixes Minor
+  finding #1 by construction: if anything in the transaction throws, nothing
+  commits, so a persisted batch's `cases_total` and its `eval_runs` row count
+  can never diverge. **Honest residual (Minor finding #2), not fully fixed:**
+  this only protects what the transaction commits — if the process crashes
+  WHILE `runBatch()` is still executing (i.e. before this transaction even
+  starts), any spend already incurred by cases that already completed is not
+  persisted anywhere and is not recoverable. Fixing that fully would mean
+  committing each case's cost as it finishes, which is the pre-fix-loop-1
+  per-case-write design this whole entry describes moving away from — so
+  it's accepted as a tradeoff, documented here and in `EvalBatchWrite`'s doc
+  comment (`repository.ts`), not silently claimed as a pure win.
 - **Testcontainers-backed `*.it.test.ts` files (`test/helpers/pg.ts`'s
   `startPg()`) are fully self-contained** — they spin up their OWN ephemeral
   `pgvector/pgvector:pg16` container and run migrations, independent of the

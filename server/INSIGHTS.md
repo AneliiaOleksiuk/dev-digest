@@ -445,6 +445,33 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   definition. This is especially subtle because a local schema mismatch won't
   surface until you actually run a query — typecheck and connection testing both
   pass silently.
+- **The two vendored `eval-ci.ts` copies had pre-existing byte-drift before
+  L06-Evals touched them (2026-08-20).** `client/src/vendor/shared/contracts/
+  eval-ci.ts` was missing `AgentManifest`/`AgentManifestInput` entirely, only
+  imported `Provider`/`CiFailOn` implicitly via that missing export, and
+  `ConformanceInput.provider`'s enum lacked the `'openrouter'` variant the
+  server copy has — none of it exercised anywhere in `client/src` (grep
+  confirmed zero references to `AgentManifest`), so it never surfaced as a
+  bug. `docs/plans/eval-pipeline.md` WI1's Definition of done requires `git
+  diff --no-index` between the two files to print **nothing**, which this
+  drift would have failed regardless of the new eval-batch content being
+  correct on both sides. Fixed by copying the server file's full content
+  (old + new) onto the client file rather than patching only the new
+  sections — confirmed with the same `--no-index` command afterward. If a
+  future session edits `eval-ci.ts` again, run that diff BEFORE starting, not
+  just after, so pre-existing drift doesn't get silently attributed to the
+  current change.
+- **`drizzle-kit generate` did NOT prompt interactively for a pure-ADD schema
+  change spanning two tables (2026-08-20, `eval_batches` + `eval_runs.batch_id`).**
+  The documented `ADD+DROP-in-one-run` interactive-prompt gotcha (below, `pnpm
+  db:generate` entry) only fires when one run both drops and adds columns on
+  the SAME table. A new table (`eval_batches`) plus a new nullable FK column
+  on an existing table (`eval_runs.batch_id`) plus two new indexes — all pure
+  additions, no renames/drops anywhere in the diff — generated cleanly in one
+  non-interactive run with no rename-vs-create ambiguity. Don't pre-emptively
+  split an all-additive migration into two `db:generate` runs "just in case";
+  the two-pass workaround is only needed when a rename could plausibly be
+  inferred.
 
 ## Recurring Errors & Fixes
 
@@ -1102,3 +1129,23 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   green (46/46, zero changes needed); `onboarding.it.test.ts` shows exactly
   the 8 predicted failures above, all traced to the one fixture gap, not
   fixed here per this fix-loop's own "test-writer's job next" convention.
+
+- 2026-08-20: L06-Evals Phase A (`docs/plans/eval-pipeline.md` WI1/WI2, on
+  `L06-Evals-homework`) — contracts + schema only, no module code yet.
+  `EvalExpectation`/`EvalExpectationEntry` (versioned, `match_scope: 'range'
+  | 'file'` per Q-6), `EvalBatchRecord`, `EvalComparison`,
+  `EvalCaseFromFindingInput`, `EvalCaseRecord` (with `expectation_status`
+  degrade-on-parse-failure) added to `eval-ci.ts`;
+  `EvalCaseInput.expected_output` moved off `z.unknown()`;
+  `EvalDashboard`/`EvalTrendPoint` widened to nullable metrics/delta per the
+  plan's Recommendation 1. Hand-mirrored to the client copy — see the new
+  Tool & Library Notes entry above for the pre-existing drift that had to be
+  reconciled to make the two files byte-identical. New `eval_batches` table
+  + `eval_runs.batch_id` + two new indexes (`db/schema/eval.ts`), migration
+  `0019_unique_gravity.sql` generated cleanly (see the other new Tool &
+  Library Notes entry — no interactive prompt for this pure-ADD change).
+  Docker was not running this session, so `pnpm db:migrate` was **not** run
+  against a live database — verified via `tsc --noEmit` only (both packages
+  clean) plus the required `--no-index` byte-identity check. Phases B–E
+  (module scaffold, case CRUD, scorer, batch runner, read APIs, client,
+  gate script) are separate `implementer` passes per the plan's phasing.

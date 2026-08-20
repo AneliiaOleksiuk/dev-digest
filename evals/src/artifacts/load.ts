@@ -5,7 +5,22 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { SKILLS_DIR, AGENTS_DIR } from "./paths.js";
+import { SKILLS_DIR, AGENTS_DIR, EVALS_DIR } from "./paths.js";
+
+/**
+ * Resolve an agent's .md file: the real `.claude/agents/<name>.md` first, else
+ * `evals/agents/<name>/fixtures/<name>.md` — for agents that are eval-only fixtures, never
+ * registered as a live subagent (e.g. architecture-reviewer, retired into plan-verifier's Phase 2
+ * on 2026-08-07 — see root INSIGHTS.md). Keeps agentTask able to grade a retired persona's content
+ * without resurrecting it as a dispatchable agent in the real .claude/agents/ roster.
+ */
+function resolveAgentFile(agentName: string): string {
+  const real = join(AGENTS_DIR, `${agentName}.md`);
+  if (existsSync(real)) return real;
+  const fixture = join(EVALS_DIR, "agents", agentName, "fixtures", `${agentName}.md`);
+  if (existsSync(fixture)) return fixture;
+  throw new Error(`agent not found: ${real} (also checked ${fixture})`);
+}
 
 function stripFrontmatter(md: string): string {
   if (md.startsWith("---")) {
@@ -39,9 +54,7 @@ export function skillContent(skillName: string): string {
 
 /** An agent definition with its frontmatter stripped (the behavioral prompt only). */
 export function agentContent(agentName: string): string {
-  const f = join(AGENTS_DIR, `${agentName}.md`);
-  if (!existsSync(f)) throw new Error(`agent not found: ${f}`);
-  return stripFrontmatter(readFileSync(f, "utf8"));
+  return stripFrontmatter(readFileSync(resolveAgentFile(agentName), "utf8"));
 }
 
 // Tools the eval refuses to hand a subagent: evals run with bypassPermissions against the LIVE
@@ -58,9 +71,7 @@ const READONLY_FALLBACK = ["Read", "Grep", "Glob"];
  * grant collapses to the read-only fallback rather than handing over Write/Bash on the live repo.
  */
 export function agentTools(agentName: string): string[] {
-  const f = join(AGENTS_DIR, `${agentName}.md`);
-  if (!existsSync(f)) throw new Error(`agent not found: ${f}`);
-  const md = readFileSync(f, "utf8");
+  const md = readFileSync(resolveAgentFile(agentName), "utf8");
   const fmEnd = md.startsWith("---") ? md.indexOf("\n---", 3) : -1;
   const frontmatter = fmEnd !== -1 ? md.slice(0, fmEnd) : "";
   const line = frontmatter.match(/^tools:\s*(.+)$/m);

@@ -163,7 +163,7 @@ The tool tiers assert on real tool use (subagent dispatch, doc reads, skill acti
 model has to be capable enough to actually *do* it, not just be reachable. Measured on the bundled
 workflow cases:
 
-| Model | Content + routing/read traces | Subagent **dispatch** (`Agent`→ `architecture-reviewer`) |
+| Model | Content + routing/read traces | Subagent **dispatch** (`Agent`→ `researcher`) |
 |-------|------------------------------|-----------------------------------------------------------|
 | `google/gemini-2.5-flash` | ✅ | ✅ **recommended** |
 | `deepseek/deepseek-chat` | ✅ | ❌ does the work inline instead of dispatching |
@@ -266,7 +266,8 @@ src/
     run-claude.ts       # runClaude() — the headless turn-loop; Result / RunOptions / Metrics types
   artifacts/
     paths.ts            # REPO_ROOT / SKILLS_DIR / AGENTS_DIR / RESULTS_DIR anchors
-    load.ts             # skillContent() (SKILL.md + references/*.md), agentContent()
+    load.ts             # skillContent() (SKILL.md + references/*.md AND rules/*.md — skills in
+                        #   this repo use both folder names interchangeably), agentContent()
     fixture.ts          # fixtureReader(import.meta.url) — inline a case's fixtures into a prompt
   tasks.ts              # skillTask / agentTask / workflowTask — compose runtime + artifacts;
                         #   skill/agentTask skip injection under EVAL_CONFIG=baseline (benchmark lift)

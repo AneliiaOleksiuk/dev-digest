@@ -509,6 +509,24 @@ _(to be filled in)_
   independent of what changed. Raw data:
   `evals/results/repeat-{baseline,version-B,restored}.json`.
 
+  **Update (later session, same day):** the `git show 8426e6d:...`
+  restore-for-eval-purposes-only workaround above got accidentally
+  upgraded into a real, committed `.claude/agents/architecture-reviewer.md`
+  (+ a new `-lite` sibling) while wiring CI around it — i.e. exactly the
+  "wired back into a production dispatch path" outcome this entry says was
+  deliberately avoided. Caught during a docs-cross-check pass. Fixed
+  properly this time: both files now live only as eval fixtures
+  (`evals/agents/architecture-reviewer/fixtures/architecture-reviewer.md`,
+  `evals/agents/architecture-reviewer-lite/fixtures/architecture-reviewer-lite.md`),
+  `agentContent()`/`agentTools()` (`evals/src/artifacts/load.ts`) fall back
+  to that fixtures path when an agent isn't found in the real
+  `.claude/agents/`, and the workflow-tier dispatch case
+  (`evals/workflow/review-workflow.cases.ts`) now targets `researcher` (a
+  real, currently-registered agent) instead — dispatch through
+  `settingSources: ["project"]` only ever finds agents actually on disk in
+  `.claude/agents/`, so a retired persona can't be a dispatch target
+  without re-registering it, which is the thing to avoid.
+
 ## Open Questions
 
 - **`reviewer-core/` is on npm while everything else is on pnpm:** unclear

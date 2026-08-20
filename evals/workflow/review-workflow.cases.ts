@@ -36,13 +36,18 @@ export const cases: WorkflowCase[] = [
     kind: "trace",
     // Endpoint must NOT already exist, or the model reviews the existing code inline instead of
     // planning-then-dispatching. GET /reviews/:id/export is genuinely absent from routes.ts.
-    name: "API-route task reads server/README.md AND pulls the architecture-reviewer",
+    // Dispatches `researcher` — a real, currently-registered agent (`.claude/agents/researcher.md`)
+    // — not `architecture-reviewer`, which was retired into `plan-verifier`'s Phase 2 on 2026-08-07
+    // (see root INSIGHTS.md) and only exists as an eval-only fixture now
+    // (evals/agents/architecture-reviewer/fixtures/), never registered for real dispatch.
+    name: "API-route task reads server/README.md AND pulls the researcher",
     prompt:
       "Я планую додати НОВИЙ, ще не реалізований ендпоінт GET /reviews/:id/export (віддає ревʼю як " +
       "markdown). Спершу звірся з конвенціями API цього репо. Потім ОБОВʼЯЗКОВО запусти сабагента " +
-      "architecture-reviewer, щоб він оцінив мій план на відповідність onion-шарам — не рецензуй сам.",
+      "researcher, щоб він дослідив, чи вже десь у кодовій базі є подібний export-у-markdown " +
+      "функціонал, який можна перевикористати — не досліджуй сам.",
     expectFilesRead: ["server/README.md"],
-    expectSubagents: ["architecture-reviewer"],
+    expectSubagents: ["researcher"],
     maxTurns: 8,
   },
 

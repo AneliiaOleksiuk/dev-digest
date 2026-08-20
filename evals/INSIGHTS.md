@@ -109,6 +109,39 @@ read" test (actionable without re-investigation) — see
   calls one run; picked up 3 more ADR docs on its own the other run, still hit all 5 required ones).
   Reduced the suite from 12 live sessions to 7 without losing any check.
 
+- **Passing an `agents: Record<string, AgentDefinition>` override to the SDK's `query()` `Options`
+  does NOT take precedence over the same-named agent auto-discovered from `settingSources:
+  ["project"]`.** Tried this to force `model: "inherit"` on every real `.claude/agents/*.md`
+  subagent under `EVAL_BACKEND=openrouter` (so a subagent's own `model: sonnet` frontmatter
+  wouldn't try to resolve through the OpenRouter/LiteLLM proxy). Shipped it, re-ran CI, the proxy
+  log still showed the exact same `openrouter/claude-sonnet-5 is not a valid model ID` error —
+  the on-disk frontmatter won. Reverted the (non-functional) `agents` plumbing entirely and fixed
+  it at the source instead: removed `model: sonnet` from the subagent's own frontmatter (omitting
+  `model` already means "inherit the parent's model" per the SDK's own docs). If a subagent needs
+  to run under a backend the parent session doesn't natively support, don't try to override it
+  from the harness side — fix the agent file.
+- **OpenRouter carries no Claude Sonnet listing at all** (verified via a live fetch of
+  `https://openrouter.ai/api/v1/models` on 2026-08-20 — zero ids containing "sonnet"). A subagent
+  whose frontmatter pins `model: sonnet`/any Sonnet alias will always fail when dispatched through
+  an OpenRouter-routed session, independent of any proxy config — there is nothing to route to.
+- **`pnpm vitest run "agents/${{ matrix.X }}"` in a GitHub Actions matrix is a substring match, not
+  a directory-exact match** — `"agents/architecture-reviewer"` also matches
+  `agents/architecture-reviewer-lite/...`, silently running (and grading) the wrong sibling's tests
+  inside what should be an isolated matrix leg. A job that looked like it was failing on
+  `architecture-reviewer`'s own findings was actually failing on `architecture-reviewer-lite`'s
+  (genuinely flakier, by design) results bleeding in. Fix: always anchor the pattern with a
+  trailing slash (`"agents/${{ matrix.agent }}/"`) whenever a matrix value could be a prefix of a
+  sibling directory name.
+- **`skillContent()` only inlined `SKILL.md` + `references/*.md` — silently missing every skill
+  that documents itself under `rules/` instead** (`dependency-checker`, `onion-architecture`,
+  `fastify-best-practices` all use `rules/`; no repo convention picks one folder name over the
+  other). A `kind: "quality"` case for one of these skills was judging SKILL.md's prose alone,
+  missing the bulk of the skill's actual instructions — e.g. `dependency-checker`'s report-format
+  rule (which mandates the Mermaid `flowchart` keyword) lives in `rules/report-format.md` and was
+  invisible to the eval, so the model reasonably improvised the equally-valid-but-ungrounded
+  `graph TD` alias and failed a grounding check that was really testing whether the skill's own
+  instructions were even being read. Fixed by inlining both `references/` and `rules/`.
+
 ## Session Notes
 
 - 2026-08-20: Fixed `pnpm eval:workflow` (was failing 4/6 — 3 cases pointed
@@ -131,3 +164,25 @@ read" test (actionable without re-investigation) — see
   routing checks" entry above. Suite is now 6 `test()` cases / 7 live
   sessions (down from 11 `test()` / 12 sessions), full run green on the
   first try.
+- 2026-08-20 (CI wiring session): Turned the newly-added
+  `.github/workflows/evals.yml` blocking (temporarily) specifically to
+  force real failures to the surface, root-caused all four, fixed each,
+  then reverted the gate back to report-only (the documented/graded
+  design — see AGENTS.md's routing table) once the underlying bugs were
+  confirmed fixed, not just hidden by non-blocking status. Root causes,
+  none of which were "the model is just bad": (1) `skillContent()`
+  silently dropped `rules/`-folder skills — see Tool & Library Notes;
+  (2) `architecture-reviewer.md` cited docs that don't exist
+  (`server/docs/architecture.md`, `reviewer-core/docs/pipeline.md`) —
+  re-pointed every RULE's Source at real files
+  (`.claude/skills/onion-architecture/rules/*`, `server/AGENTS.md`,
+  `reviewer-core/AGENTS.md`); (3) `.claude/agents/architecture-reviewer-lite.md`
+  never existed on disk despite `evals/agents/architecture-reviewer-lite/`
+  referencing it — every run failed instantly with "agent not found",
+  not a real model-quality signal; (4) `architecture-reviewer.md`'s
+  `model: sonnet` frontmatter broke subagent dispatch under
+  `EVAL_BACKEND=openrouter` — see the two OpenRouter/model-override
+  entries in Tool & Library Notes. Also fixed a CI-only bug found while
+  debugging (4): the `skills`/`agents` matrix jobs' vitest pattern
+  matched sibling directories by substring, contaminating one matrix
+  leg's grade with an unrelated one's results.

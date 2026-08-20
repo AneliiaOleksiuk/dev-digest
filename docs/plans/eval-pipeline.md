@@ -247,6 +247,9 @@ must not re-open them, and `plan-verifier` should treat them as binding.
 
 ### Phase A — contracts + schema (commit 1)
 
+**Status: DONE — 2026-08-20 22:40** (commits `e545d5c`, `1a9ba62`, `33bffd4`,
+`1cec960` — build, tests, fix-loop for 2 Major findings, ADR 0006)
+
 Nothing else compiles against the new shapes until this lands.
 
 **WI1. Define `EvalExpectation` and the batch/compare contracts; mirror both
@@ -334,6 +337,11 @@ migration.**
   typecheck clean; `pnpm db:migrate` applies cleanly against a fresh database.
 
 ### Phase B — server module, case CRUD, create-from-finding, scorer (commit 2)
+
+**Status: DONE — 2026-08-21 00:13** (commits `9dac19b`, `cf7c0ee`, `136f22c` —
+build, tests, fix-loop iteration 1/3 for 1 blocking + 1 Major finding; docs
+phase concluded "nothing new to write"; 3 Minor findings deferred to Phase C
+per user decision)
 
 **WI3. Scaffold `modules/eval/` and register it.**
 

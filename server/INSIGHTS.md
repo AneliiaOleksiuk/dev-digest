@@ -336,6 +336,48 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   consequences. Worth this shape for any future feature with a similarly
   strict "some outcomes must produce zero DB writes" requirement.
 
+- **`onion-architecture`'s `rules/dependency-rule.md` table says `service.ts`
+  must never import `platform/container.ts`, but the real, already-shipped
+  precedent contradicts the table and IS the pattern to follow
+  (2026-08-20, L06-Evals Phase B, `modules/eval/service.ts`).**
+  `modules/blast/service.ts` (a genuinely new, post-skill module cited
+  elsewhere in this file as "otherwise a normal onion module") takes
+  `Container` in its constructor and calls `this.container.repoIntel...`
+  directly — `examples.md`'s own "good" `XService` example, by contrast,
+  takes only the repository interface, no `Container`. When a new module's
+  service needs to construct a SIBLING module's `Service` class for a
+  cross-module read (the skill's own sanctioned "depend on the owning
+  module's `service.ts`, not its `repository.ts`" rule), that construction
+  has to happen somewhere, and the working examples in this codebase
+  (`brief/sources.node.ts:45` constructing `BlastService`, and now
+  `eval/service.ts` constructing `AgentsService`) all do it by threading
+  `Container` through, not by trying to avoid importing `Container` at all
+  costs. Followed the real precedent (Container in the constructor, used
+  only to build peer `*Service` instances or read cross-cutting facades like
+  `repoIntel`) rather than the stricter written table — `arch:check` stayed
+  green either way, since none of the four dependency-cruiser rules actually
+  forbid `service.ts → platform/container.ts` (only `db/schema|client`,
+  `adapters/`, and — for `helpers.ts` only — `container.ts` itself are
+  matched). If a future session tightens `dependency-rule.md`'s table to
+  match this practice (or adds a fifth dependency-cruiser rule to actually
+  enforce the stricter table), don't be surprised that `blast/service.ts`
+  and `eval/service.ts` both need it grandfathered or rewritten.
+- **Re-implementing a cross-module join locally (per onion's "Cross-module
+  reads" rule) is mechanical, not risky, when the source function is a plain
+  `db.select()` chain (2026-08-20, `modules/eval/repository.drizzle.ts`'s
+  `getFindingContext`).** `modules/reviews/repository.ts`'s `findingContext`
+  (three sequential `getFinding`/`getReview`/one inline `pull_requests`
+  select) and `modules/reviews/diff-loader.ts`'s `diffFromPrFiles` (a
+  four-line-per-file `diff --git`/`---`/`+++`/patch text builder) were both
+  copied in SHAPE, not imported, into `modules/eval/`'s own
+  `repository.drizzle.ts` (`getFindingContext`) and `helpers.ts`
+  (`buildDiffText`) respectively — neither original function was touched.
+  Both are ~10-15 lines of straight-line Drizzle/string-building code with no
+  hidden behavior, so the duplication is a one-time cost, not an ongoing
+  maintenance burden; if `diffFromPrFiles`'s four-line format ever changes,
+  grep for the literal `diff --git a/` string to find every place that needs
+  updating in lockstep (currently 2: the original and this mirror).
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -1188,6 +1230,40 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   clean) plus the required `--no-index` byte-identity check. Phases B–E
   (module scaffold, case CRUD, scorer, batch runner, read APIs, client,
   gate script) are separate `implementer` passes per the plan's phasing.
+
+- 2026-08-20 (later, same day): L06-Evals Phase B (`docs/plans/eval-pipeline.md`
+  WI3-WI6, on `L06-Evals-homework`) — new `modules/eval/` (onion port/adapter:
+  `repository.ts`/`repository.drizzle.ts`/`helpers.ts`/`service.ts`/
+  `routes.ts`/`constants.ts`/`scorer.ts`), `container.evalRepo` (lazy getter +
+  `ContainerOverrides.evalRepo`, mirrors `briefRepo`), registered in
+  `modules/index.ts` as `eval: evalModule` (import renamed off the reserved
+  word `eval`; the OBJECT KEY `eval` is fine, only the binding identifier
+  can't be named that in strict-mode ESM). Case CRUD
+  (`GET/POST/PATCH/DELETE /eval-cases`, `GET /agents/:id/eval-cases`) with
+  tenancy-first + `owner_id` IDOR resolved through `AgentsService.get`
+  (never a raw id comparison), `MAX_INPUT_DIFF_BYTES` cap, and read-side
+  degrade-not-crash for a corrupt `expected_output` row
+  (`expectation_status: 'unusable'`). One-click `POST /findings/:id/eval-case`
+  derives everything server-side (expectation kind from
+  `accepted_at`/`dismissed_at`, `match_scope` from `findings.kind` via the
+  module-local `FULL_FILE_KINDS` mirror, owner from `reviews.agent_id`) and
+  refuses-and-writes-nothing on a pending finding / null-`agent_id` review /
+  patchless file / foreign-workspace finding. `scorer.ts` (WI6) is fully
+  pure — zero imports beyond the module and shared contract TYPES — see the
+  two new Codebase Patterns entries above for the `Container`-in-`service.ts`
+  precedent question this surfaced and the local-join-reimplementation
+  pattern. Verified: `tsc --noEmit` clean, `depcruise --config
+  .dependency-cruiser.cjs src` clean (216 modules, 765 deps, zero
+  violations), full unit suite green except the pre-existing
+  `indexer-pipeline.test.ts` Windows flake (confirmed via `git status` —
+  file untouched this session, matches the existing Recurring-Errors-&-Fixes
+  entry), vendored `eval-ci.ts` byte-identity (`git diff --no-index`) still
+  clean (Phase B touched zero contract/schema files). No migration needed —
+  Phase A's `eval_cases` table shape already covered every field this phase
+  writes. Phase C (batch runner, WI7-WI8), Phase D (client), Phase E (gate
+  script) are separate `implementer` passes per the plan's phasing. Test
+  authorship (`test-writer`'s job next) not attempted beyond the pre-existing
+  suites passing.
 
 - 2026-08-20 (later, same day): Targeted fix pass on Phase A per
   `plan-verifier`'s Phase 2 architecture review (two Major findings, both

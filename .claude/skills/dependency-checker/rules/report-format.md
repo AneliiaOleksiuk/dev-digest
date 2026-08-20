@@ -32,9 +32,11 @@ Table: package name | manager (pnpm/npm) | direct prod deps | direct dev
 deps | total installed size.
 
 ## Internal dependency graph
-Mermaid diagram per discovery.md's two edge types (solid = live tsconfig
-path import, dashed = hand-mirrored vendor copy). Caption the dashed edges
-explicitly as "not compiler-enforced, can drift silently."
+A Mermaid `flowchart TD` diagram (use the `flowchart` keyword, not the
+legacy `graph` alias — keeps output deterministic) per discovery.md's two
+edge types (solid = live tsconfig path import, dashed = hand-mirrored
+vendor copy). Caption the dashed edges explicitly as "not
+compiler-enforced, can drift silently."
 
 ## Size ranking
 Top N heaviest *direct* dependencies across the whole repo (name, which

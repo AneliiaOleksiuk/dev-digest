@@ -243,6 +243,12 @@ Notes:
   keep the case count small. For a stricter gate, split into a required `eval:agents`/`eval:skills`
   job and a non-blocking `eval:workflow` job (activation flakiness, above).
 
+**This repo's own `.github/workflows/evals.yml` already implements the stricter split**: a
+`quality` job (`pnpm eval:quality`, no model) is the only **blocking** check; `skills`/`agents`/
+`workflow-tier` run with `continue-on-error: true` and end each matrix leg with `pnpm eval:report`
+(above) to publish a report + baseline diff in the job summary, without gating merge yet. Promote
+a tier to blocking once its `evals/baselines/*.json` have proven stable.
+
 ## Module layout — `src/` (the engine)
 
 The engine is split by responsibility with one-directional dependencies (config knows nothing of
@@ -444,6 +450,30 @@ Shows the delta at three levels: per-test pass rate, per-**practice** (which pra
 improved/regressed — the main signal), and metrics (`baseline → candidate (±diff)`). Green =
 improved, red = regressed, dim = unchanged. A practice on one side only renders `— → X%`.
 
+### `eval:report` — CI comparison against a committed baseline
+
+```bash
+pnpm eval:report <vitest pattern>     # run after `vitest run <pattern>` has populated results/records.jsonl
+```
+Loads this run's records and diffs them against `evals/baselines/<slug>.json` (the tracked
+snapshot written by the `--commit` flow below). Prints a markdown table — appended to
+`$GITHUB_STEP_SUMMARY` when set (CI), stdout otherwise. **Never fails the process** — it's a
+report, not a gate. `pnpm eval:quality` is the only blocking check in this repo's CI (see the
+"Which change → which run" table and the root `AGENTS.md`'s routing table).
+
+**Creating / recalibrating a baseline** — do this whenever a `*.cases.ts` case or a `scoring/*`
+grader changes:
+
+```bash
+pnpm eval:repeat skills/onion-architecture -n 2 --label baseline --commit
+git add evals/baselines/skills-onion-architecture.json
+```
+`--commit` writes the same aggregate `eval:repeat` already saves to `results/repeat-<label>.json`
+(gitignored, local) *also* to `evals/baselines/<slug>.json` (tracked — see
+[evals/baselines/README.md](baselines/README.md)). The slug is the pattern argument with `/` and
+`\` turned into `-`. Commit that file alongside the case/grader change — the diff **is** the
+calibration record, reviewable like any other change.
+
 ### `eval:benchmark` — measured lift (with vs without the artifact)
 
 ```bash
@@ -564,6 +594,7 @@ tokens > 125% of baseline), `missing_data` (a config has zero records for a test
 | `CLAUDE.md` / activation / dispatch | `pnpm eval:workflow` |
 | Any artifact's structure | `pnpm eval:quality` |
 | A `SKILL.md` edit you want to **measure** | repeat/delta loop: `--label baseline` before, `--label candidate` after, then `eval:delta` |
+| An eval `*.cases.ts` or `scoring/*` grader changes | recalibrate: `pnpm eval:repeat <pattern> -n 2 --label baseline --commit` (see [eval:report](#eval-report--ci-comparison-against-a-committed-baseline)) |
 | New skill/agent — is it **worth its tokens**? | `pnpm eval:benchmark skills/<skill> -n 5` |
 | Adding evals for one of **your** skills/agents | `pnpm eval:scaffold <name>` (or `--agent <name>`) |
 | Model / Claude Code version | `pnpm eval` (whole suite) |

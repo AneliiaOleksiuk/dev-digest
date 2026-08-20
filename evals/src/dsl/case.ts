@@ -53,6 +53,15 @@ export type WorkflowCase =
       expectFileRead: string;
       tools?: string[];
       maxTurns?: number;
+      /** Treatment's cwd (default REPO_ROOT — see workflowTask). */
+      cwd?: string;
+      /**
+       * Control's cwd. Omitted (default): control runs in a freshly created empty tmpdir with
+       * settingSources:[] — isolates "no on-disk config at all". Provided: control runs at this
+       * path WITH settingSources:["project"] — isolates "shallower on-disk config", e.g. comparing
+       * a package cwd (nested AGENTS.md loads) against REPO_ROOT (only root AGENTS.md loads).
+       */
+      controlCwd?: string;
     }
   | {
       // A single-session composite: run ONE workflowTask and assert several trace facets at once.
@@ -65,13 +74,23 @@ export type WorkflowCase =
       expectSubagents?: string[];
       expectSkills?: string[];
       expectFilesRead?: string[];
+      /** Substrings that must ALL appear in the response text (case-insensitive). */
+      grounding?: string[];
       maxTurns?: number;
+      /** Session cwd (default REPO_ROOT — see workflowTask). Use to reach a nested AGENTS.md. */
+      cwd?: string;
     };
+
+/** Windows Read tool calls surface `\`-separated paths; case authors write `/`-separated substrings. */
+function readIncludes(filesRead: string[], substring: string): boolean {
+  const needle = substring.replace(/\\/g, "/");
+  return filesRead.some((f) => f.replace(/\\/g, "/").includes(needle));
+}
 
 /** Did a skill engage? Either an explicit Skill tool-call, or reading its SKILL.md. */
 export function activated(result: Result, skill: string): boolean {
   const bySkill = result.skillsInvoked.some((s) => s === skill || s.endsWith(`:${skill}`));
-  const byRead = result.filesRead.some((f) => f.includes(`skills/${skill}/SKILL.md`));
+  const byRead = readIncludes(result.filesRead, `skills/${skill}/SKILL.md`);
   return bySkill || byRead;
 }
 
@@ -151,15 +170,19 @@ export function runWorkflowCases(cases: WorkflowCase[]): void {
         const files = c.expectFilesRead ?? [];
         const skillEngaged = (p: { skillsInvoked: string[]; filesRead: string[] }, skill: string) =>
           p.skillsInvoked.some((s) => s === skill || s.endsWith(`:${skill}`)) ||
-          p.filesRead.some((f) => f.includes(`skills/${skill}/SKILL.md`));
+          readIncludes(p.filesRead, `skills/${skill}/SKILL.md`);
         const result = await workflowTask(c.prompt, {
           maxTurns: c.maxTurns,
-          stopWhen: (p) =>
-            subs.every((s) => p.subagents.includes(s)) &&
-            skls.every((s) => skillEngaged(p, s)) &&
-            files.every((f) => p.filesRead.some((r) => r.includes(f))),
+          cwd: c.cwd,
+          stopWhen: c.grounding?.length
+            ? undefined // grounding needs the full response text, so let the session run to completion
+            : (p) =>
+                subs.every((s) => p.subagents.includes(s)) &&
+                skls.every((s) => skillEngaged(p, s)) &&
+                files.every((f) => readIncludes(p.filesRead, f)),
         });
         logTrace(c.name, result);
+        let grounded: number | undefined;
         try {
           for (const sub of c.expectSubagents ?? []) {
             expect(result.subagents, `subagents: ${result.subagents.join(", ")}`).toContain(sub);
@@ -172,30 +195,43 @@ export function runWorkflowCases(cases: WorkflowCase[]): void {
           }
           for (const file of c.expectFilesRead ?? []) {
             expect(
-              result.filesRead.some((f) => f.includes(file)),
+              readIncludes(result.filesRead, file),
               `${file} not read | reads: ${result.filesRead.join(", ")}`,
             ).toBe(true);
           }
+          if (c.grounding?.length) {
+            grounded = patternMatch(result.text, c.grounding);
+            expect(grounded, `missing concrete evidence; output:\n${result.text}`).toBe(1);
+          }
           expect(result.isError).toBe(false);
         } finally {
-          record(c.name, { result });
+          record(c.name, { result, grounded });
         }
       } else {
-        // contrast: treatment (real harness) vs control (empty tmpdir, no on-disk config).
+        // contrast: treatment (real harness) vs control. Control defaults to an empty tmpdir with
+        // no on-disk config at all; c.controlCwd instead compares against a shallower REAL cwd
+        // (e.g. REPO_ROOT) so the case isolates "does the NESTED AGENTS.md matter", not just
+        // "does AGENTS.md exist at all".
         const tools = c.tools ?? ["Read", "Grep", "Glob"];
-        const treatment = await workflowTask(c.prompt, { allowedTools: tools, maxTurns: c.maxTurns });
-        const emptyCwd = mkdtempSync(join(tmpdir(), "eval-control-"));
-        const control = await runClaude(c.prompt, {
-          allowedTools: tools,
-          maxTurns: c.maxTurns,
-          cwd: emptyCwd,
-          settingSources: [],
-        });
+        const treatment = await workflowTask(c.prompt, { allowedTools: tools, maxTurns: c.maxTurns, cwd: c.cwd });
+        const control = c.controlCwd
+          ? await runClaude(c.prompt, {
+              allowedTools: tools,
+              maxTurns: c.maxTurns,
+              cwd: c.controlCwd,
+              settingSources: ["project"],
+            })
+          : await runClaude(c.prompt, {
+              allowedTools: tools,
+              maxTurns: c.maxTurns,
+              cwd: mkdtempSync(join(tmpdir(), "eval-control-")),
+              settingSources: [],
+            });
         logTrace(`${c.name} [treatment]`, treatment);
         logTrace(`${c.name} [control]`, control);
         try {
-          const treatmentRead = treatment.filesRead.some((f) => f.includes(c.expectFileRead));
-          const controlRead = control.filesRead.some((f) => f.includes(c.expectFileRead));
+          const treatmentRead = readIncludes(treatment.filesRead, c.expectFileRead);
+          const controlRead = readIncludes(control.filesRead, c.expectFileRead);
           expect(treatmentRead, `treatment reads: ${treatment.filesRead.join(", ")}`).toBe(true);
           expect(controlRead, `control reads: ${control.filesRead.join(", ")}`).toBe(false);
         } finally {

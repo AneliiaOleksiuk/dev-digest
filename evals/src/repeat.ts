@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { GREEN, RED, DIM, RESET, rateColor } from "./ansi.js";
 import { gitInfo } from "./git.js";
 import { countTests, runVitestOnce } from "./run-vitest.js";
-import { RESULTS_DIR } from "./artifacts/paths.js";
+import { RESULTS_DIR, EVALS_DIR } from "./artifacts/paths.js";
 import { aggregate, loadRecords, recordCount, type NodeAggregate, type Stats } from "./records/stats.js";
 
 /**
@@ -75,21 +75,30 @@ async function main(): Promise<void> {
   const MAX_TIMES = 2;
   let times = MAX_TIMES;
   let label: string | undefined;
+  let commit = false;
   const vitestArgs: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-n" || a === "--times") times = Number(argv[++i]);
     else if (a === "--label") label = argv[++i];
+    else if (a === "--commit") commit = true;
     else vitestArgs.push(a);
   }
   if (vitestArgs.length === 0 || !Number.isFinite(times) || times < 1) {
-    console.error("usage: pnpm eval:repeat <vitest pattern> [-n times<=2] [-t testNamePattern] [--label name]");
+    console.error("usage: pnpm eval:repeat <vitest pattern> [-n times<=2] [-t testNamePattern] [--label name] [--commit]");
+    process.exit(1);
+  }
+  if (commit && !label) {
+    console.error("--commit requires --label (the baseline needs a name)");
     process.exit(1);
   }
   if (times > MAX_TIMES) {
     console.error(`  ${DIM}capping -n ${times} → ${MAX_TIMES} (token economy)${RESET}`);
     times = MAX_TIMES;
   }
+  // Captured before resolveEvalPatterns expands a directory arg into its .eval.ts files —
+  // --commit needs the original pattern (e.g. "skills/onion-architecture") for the baseline slug.
+  const patternArg = vitestArgs.find((a) => !a.startsWith("-"));
   vitestArgs.splice(0, vitestArgs.length, ...resolveEvalPatterns(vitestArgs));
 
   const startLine = recordCount();
@@ -128,6 +137,23 @@ async function main(): Promise<void> {
     writeFileSync(file, JSON.stringify({ label, git_sha: git.sha, dirty: git.dirty, times, vitestArgs, tests }, null, 2));
     console.log(`\n${GREEN}Saved as '${label}'${RESET} -> ${file}`);
     console.log(`Compare with: pnpm eval:delta <baseline-label> ${label}`);
+
+    if (commit && patternArg) {
+      // Slug must match report.ts's slugify() — both turn path separators into "-".
+      const slug = patternArg.replace(/[\\/]/g, "-");
+      const dir = join(EVALS_DIR, "baselines");
+      mkdirSync(dir, { recursive: true });
+      const baselineFile = join(dir, `${slug}.json`);
+      writeFileSync(
+        baselineFile,
+        JSON.stringify(
+          { label, pattern: patternArg, git_sha: git.sha, calibrated_at: new Date().toISOString(), tests },
+          null,
+          2,
+        ),
+      );
+      console.log(`${GREEN}Committed baseline${RESET} -> ${baselineFile} (git add + commit it)`);
+    }
   }
 }
 

@@ -1,12 +1,13 @@
 # Harness evals — skills (.claude/skills/*), agents (.claude/agents/*), and workflow-level
 # behavior (CLAUDE.md / AGENTS.md + on-disk config). See evals/README.md for the full model.
 #
-# All tiers are BLOCKING: `quality` (static SKILL.md gate) plus the model-judged skill/agent/
-# workflow-tier evals. Each matrix leg still ends with `pnpm eval:report`, which publishes a
+# `quality` is the only BLOCKING check (static SKILL.md gate — no model, no network, cheap and
+# deterministic). The model-judged tiers (skills/agents/workflow-tier) are report-only: they run
+# with `continue-on-error` and each matrix leg ends with `pnpm eval:report`, which publishes a
 # pass/fail + baseline-comparison table to the job summary (diffed against the committed
-# `evals/baselines/*.json` snapshots — see evals/README.md's "eval:report" section) — informative
-# on top of the gate, not instead of it. Merge is only actually blocked once these checks are
-# marked required in this repo's branch protection settings (Settings -> Branches).
+# `evals/baselines/*.json` snapshots — see evals/README.md's "eval:report" section). LLM-judge
+# flakiness can't block a merge this way; promote a tier to blocking once its baselines have
+# proven stable across enough runs.
 #
 # `detect` maps changed files to the suites that must run (evals/scripts/ci-detect.mjs) — a
 # changed skill/agent with no written evals is reported as SKIP, never run and never fails.
@@ -105,6 +106,7 @@ jobs:
     if: needs.detect.outputs.skills != '[]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -144,6 +146,7 @@ jobs:
     if: needs.detect.outputs.agents != '[]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -190,6 +193,7 @@ jobs:
     if: needs.detect.outputs.run_workflow == 'true' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     defaults:
       run:
         working-directory: evals

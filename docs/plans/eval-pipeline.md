@@ -470,6 +470,11 @@ per user decision)
 
 ### Phase C — batch execution (commit 3)
 
+**Status: DONE — 2026-08-21** (commits `42763c6`, `3fce7db`, `10ab8f6`,
+`c583613`, `1bc999a` — build, tests, fix-loop for 2 Major + 2 Minor findings
+across 2 iterations, docs incl. ADR 0006 amendment, live smoke test against
+real Postgres + real OpenRouter)
+
 **WI7. Version-pinned batch runner.**
 
 - Files: `server/src/modules/eval/{routes.ts,service.ts,runner.ts,

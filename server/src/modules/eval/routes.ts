@@ -5,25 +5,37 @@ import { EvalCaseFromFindingInput, EvalCaseInput } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
+import { EVAL_RUN_RATE_LIMIT } from './constants.js';
 import { EvalService } from './service.js';
 
 /**
- * Eval module (Phase B — case CRUD + create-from-finding; the batch runner
- * and read APIs are Phase C, WI7/WI8).
+ * Eval module.
  *
- *   GET    /agents/:id/eval-cases  → an agent's eval cases (workspace-scoped)
- *   GET    /eval-cases/:id         → one case (degrades on a corrupt
- *                                    expected_output rather than throwing)
- *   POST   /eval-cases             → create (owner_kind restricted to 'agent'
- *                                    this iteration, D-9)
- *   PATCH  /eval-cases/:id         → partial update
- *   DELETE /eval-cases/:id         → delete
- *   POST   /findings/:id/eval-case → one-click "create case from finding"
- *                                    (WI5) — registered here, not
- *                                    `modules/reviews`, per this repo's
- *                                    existing "route prefix doesn't imply
- *                                    module ownership" precedent.
+ *   GET    /agents/:id/eval-cases     → an agent's eval cases (workspace-scoped)
+ *   GET    /eval-cases/:id            → one case (degrades on a corrupt
+ *                                       expected_output rather than throwing)
+ *   POST   /eval-cases                → create (owner_kind restricted to
+ *                                       'agent' this iteration, D-9)
+ *   PATCH  /eval-cases/:id            → partial update
+ *   DELETE /eval-cases/:id            → delete
+ *   POST   /findings/:id/eval-case    → one-click "create case from finding"
+ *                                       (WI5) — registered here, not
+ *                                       `modules/reviews`, per this repo's
+ *                                       existing "route prefix doesn't imply
+ *                                       module ownership" precedent.
+ *   POST   /agents/:id/eval-runs      → run an agent's WHOLE case set as one
+ *                                       version-pinned batch (WI7, rate-limited)
+ *   POST   /eval-cases/:id/run        → run ONE case as a one-case batch
+ *                                       (WI7, rate-limited)
+ *   GET    /agents/:id/eval-dashboard → per-agent dashboard (WI8, zero LLM calls)
+ *   GET    /eval-dashboard            → workspace-wide, one entry per agent (WI8)
+ *   GET    /agents/:id/eval-batches   → an agent's batch history (WI8)
+ *   GET    /eval-batches/:id          → one batch + its per-case runs (WI8)
+ *   GET    /agents/:id/eval-compare   → two batches side by side, read-only (WI8)
  */
+
+/** Querystring for `GET /agents/:id/eval-compare` (WI8). */
+const EvalCompareQuery = z.object({ base: z.string().uuid(), head: z.string().uuid() });
 
 /** D-9 — `owner_kind` accepted only as the literal `'agent'` at the API
  *  level this iteration, even though the Phase-A contract's enum still
@@ -86,6 +98,64 @@ export default async function evalRoutes(appBase: FastifyInstance) {
       const evalCase = await service.createFromFinding(workspaceId, req.params.id, req.body.name);
       reply.status(201);
       return evalCase;
+    },
+  );
+
+  // ---- WI7: batch runner (rate-limited — each call can trigger paid LLM
+  // calls, same rationale as `modules/reviews/routes.ts:41-44,62-66`) -------
+
+  app.post(
+    '/agents/:id/eval-runs',
+    { schema: { params: IdParams }, config: { rateLimit: EVAL_RUN_RATE_LIMIT } },
+    async (req, reply) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const batch = await service.runForAgent(workspaceId, req.params.id, req.log);
+      reply.status(201);
+      return batch;
+    },
+  );
+
+  app.post(
+    '/eval-cases/:id/run',
+    { schema: { params: IdParams }, config: { rateLimit: EVAL_RUN_RATE_LIMIT } },
+    async (req, reply) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const batch = await service.runOneCase(workspaceId, req.params.id, req.log);
+      reply.status(201);
+      return batch;
+    },
+  );
+
+  // ---- WI8: read APIs — dashboard, history, compare (zero LLM calls) ------
+
+  app.get('/agents/:id/eval-dashboard', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.getDashboardForAgent(workspaceId, req.params.id);
+  });
+
+  app.get('/eval-dashboard', async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.getWorkspaceDashboard(workspaceId);
+  });
+
+  app.get('/agents/:id/eval-batches', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.listBatchesForAgent(workspaceId, req.params.id);
+  });
+
+  app.get('/eval-batches/:id', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    const detail = await service.getBatch(workspaceId, req.params.id);
+    if (!detail) throw new NotFoundError('Eval batch not found');
+    return detail;
+  });
+
+  app.get(
+    '/agents/:id/eval-compare',
+    { schema: { params: IdParams, querystring: EvalCompareQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      return service.compare(workspaceId, req.params.id, req.query.base, req.query.head);
     },
   );
 }

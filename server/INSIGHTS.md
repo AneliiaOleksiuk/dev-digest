@@ -378,6 +378,32 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   grep for the literal `diff --git a/` string to find every place that needs
   updating in lockstep (currently 2: the original and this mirror).
 
+- **The Agents module's update route is `PUT /agents/:id`, not `PATCH`**
+  (`modules/agents/routes.ts:109`) — every other module touched by L06-Evals
+  (`eval-cases`, etc.) uses `PATCH` for its own partial-update route, so it's
+  an easy wrong guess to carry over when writing a cross-module test/script
+  against agents. `POST /agents`/`DELETE /agents/:id` are the usual verbs;
+  only the update route is the outlier.
+- **`EvalDashboard.delta`'s three metric fields are plain non-nullable
+  `z.number()`s in the committed Phase-A contract, unlike
+  `EvalComparison.delta`'s fields, which ARE individually nullable
+  (2026-08-21, WI8, `modules/eval/service.ts`'s `buildDashboard`).** Once
+  `buildDashboard` decides to render a delta block at all (>=2 batches for
+  the same owner), every one of `recall`/`precision`/`citation_accuracy` must
+  be a real number — there is no per-field null escape hatch the way
+  `EvalComparison.delta`'s schema allows. The chosen compromise (documented
+  inline at the computation): when either endpoint batch's OWN metric is
+  null (e.g. a batch whose cases had zero `must_find` entries, so `recall`
+  is genuinely unmeasured), report `0` for that delta field rather than
+  subtracting against a fabricated non-null baseline — the latter would read
+  as a false swing ("recall dropped by 0.8") when the truth is "unmeasured
+  this batch," which is strictly worse. `EvalComparison`'s own delta (WI8's
+  `compare()` method) does NOT have this problem — use `null` there whenever
+  either side's metric is null, since the schema allows it. If a future
+  session widens `EvalDashboard.delta`'s fields to `.nullable()` to close this
+  gap, `buildDashboard`'s `0`-fallback branch should be replaced with a real
+  null at the same time — don't leave both paths inconsistent.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -553,6 +579,36 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   confirming `SET NOT NULL` on `skills_fingerprint` was safe (checked first
   via `SELECT count(*) FROM eval_batches WHERE skills_fingerprint IS NULL`
   → 0 rows in the live dev DB before running it).
+
+- **A raw `db.insert(t.agents).values(...)` (bypassing `AgentsRepository
+  .insert()`) creates an agent with NO `agent_versions` snapshot for version
+  1 — only `AgentsRepository.insert()`'s own `snapshotVersion()` side effect
+  writes that row (confirmed 2026-08-21, WI7/WI8 manual verification against
+  real Postgres).** A test or script that inserts an agent directly via
+  Drizzle and then calls `AgentsService.getVersion(workspaceId, agentId, 1)`
+  gets `undefined` — which is the CORRECT "missing snapshot" degradation
+  (AC-32, `modules/eval/service.ts`'s `compare()`: a missing snapshot yields
+  a `null` prompt, never the live one), not a bug in `getVersion` or in the
+  eval compare view. Easy to misdiagnose as a compare-view bug when it's
+  actually a test-fixture gap. Create the agent through `POST /agents` (or
+  `AgentsRepository.insert()` directly) whenever a version-1 snapshot needs
+  to actually exist.
+- **Testcontainers-backed `*.it.test.ts` files (`test/helpers/pg.ts`'s
+  `startPg()`) are fully self-contained** — they spin up their OWN ephemeral
+  `pgvector/pgvector:pg16` container and run migrations, independent of the
+  docker-compose `devdigest-postgres` container `pnpm dev` normally talks to.
+  Confirmed 2026-08-21: both the manually-started `devdigest-postgres`
+  container and a `startPg()`-spun one ran side by side in the same session
+  with no conflict (different ports, testcontainers picks an ephemeral one).
+  **This contradicts this file's own "Docker Desktop is not auto-started in
+  this environment" framing (see root `INSIGHTS.md`'s Tool & Library Notes)
+  — that note describes one session's environment state, not a permanent
+  fact about this dev machine.** Always check `docker info` (or
+  `dockerAvailable()`) fresh each session rather than assuming Docker is
+  down because a past session's notes said so; if it's up, running the real
+  `.it.test.ts` suite (or a throwaway ad hoc one against `startPg()`) is a
+  strictly stronger correctness check than unit tests alone for anything
+  touching `repository.drizzle.ts`.
 
 ## Recurring Errors & Fixes
 
@@ -1281,3 +1337,52 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `test/eval-ci-contracts.test.ts` suite passed unchanged (none of its
   existing assertions tested `skills_fingerprint: null` explicitly, so none
   encoded the bug being fixed — no test edits were needed or made).
+
+- 2026-08-21: L06-Evals Phase C (`docs/plans/eval-pipeline.md` WI7/WI8, on
+  `L06-Evals-homework`) — the version-pinned batch runner + zero-LLM-call
+  read APIs. New `modules/eval/runner.ts` (pure orchestration: no DB, no
+  `Container` — `runOneCase`/`runBatch` take an already-resolved
+  `RunnerAgentSnapshot` + `LLMProvider`, run cases SERIALLY per Q-4, and
+  never throw — a provider error/timeout/schema failure is caught and
+  returned as a failed `CaseRunResult` so the caller's isolation loop needs
+  no try/catch of its own). `AgentsService.linkedSkillsForRun` (additive,
+  read-only) added so `service.ts` never imports `AgentsRepository`
+  directly. `service.ts` gained `runForAgent`/`runOneCase` (funnel through
+  one shared `runPinnedBatch`: in-process `workspaceId:agentId` concurrency
+  guard, pin `agent_version`/`provider`/`model`/`skills_fingerprint` once,
+  open a placeholder `eval_batches` row, run serially, persist each
+  `eval_runs` row, close the batch with `scorer.ts`'s aggregate, one
+  structured log line with counts/metrics/tokens/cost, never diff/prompt/raw
+  response) and the five WI8 read methods (`getDashboardForAgent`,
+  `getWorkspaceDashboard`, `listBatchesForAgent`, `getBatch`, `compare`), all
+  workspace-scoped through the batch row (`eval_runs` itself still has no
+  `workspace_id`). `repository.ts`/`repository.drizzle.ts` gained
+  `insertBatch`/`closeBatch`/`insertRun` and the five read queries
+  (`getBatchById`, `listBatchesForOwner`, `listRunsForBatch` via a LEFT JOIN
+  to `eval_cases` for `case_name`, `listDashboardOwnerIds` via
+  `selectDistinct` unioned in JS from both `eval_cases` and `eval_batches`,
+  `countCasesForOwner`). Two new routes (`POST /agents/:id/eval-runs`,
+  `POST /eval-cases/:id/run`, both rate-limited via the existing
+  `EVAL_RUN_RATE_LIMIT`) and five new GET routes. One new unit test file
+  (`test/eval-runner.test.ts`, plan-mandated: asserts the object passed to a
+  mocked `reviewPullRequest` has no `callers`/`repoMap`/`specs`/`intent` key,
+  per AC-18/D-2) — full AC-14..AC-33 test authorship is `test-writer`'s job
+  next. Manually verified beyond the plan's minimum: Docker was actually up
+  this session (see the new Tool & Library Notes entry above), so besides
+  the required unit-level `tsc`/`depcruise`/`vitest --exclude '**/*.it.test.ts'`
+  commands, also ran the pre-existing `eval-cases.it.test.ts`/
+  `eval-create-from-finding.it.test.ts` (21 tests, unaffected — confirms no
+  Phase-B regression) plus two THROWAWAY, not-committed integration checks
+  against real Postgres via `app.inject()`: one exercising `runner.runBatch`
+  directly (8 cases → 8 results, a mid-batch provider throw isolates to
+  exactly one failed case, an all-throwing provider → `status: 'failed'`
+  with every metric `null`), and one over real HTTP (8 cases → 8 `eval_runs`
+  rows sharing one `batch_id`/`agent_version`, WI8 reads issue zero further
+  LLM calls, a foreign-workspace batch id 404s, two concurrent
+  `POST /eval-cases/:id/run` calls for the same case → one 201 + one 409 from
+  the concurrency guard, and `compare()`'s `base_prompt` correctly comes back
+  `null` for an agent created via raw DB insert with no `agent_versions` row
+  — see the new "raw insert bypasses agent_versions snapshot" Recurring
+  Errors & Fixes entry above, which THIS check surfaced). Both throwaway
+  files deleted before this session's Implementation Report; test-writer
+  owns the real, committed integration coverage next.

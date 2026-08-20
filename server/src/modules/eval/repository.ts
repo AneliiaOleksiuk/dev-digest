@@ -97,6 +97,107 @@ export interface EvalPrFileRow {
   patch: string | null;
 }
 
+// ---- batch runner (WI7) / read APIs (WI8) ----------------------------------
+
+/** Values pinned at batch OPEN — before any case has run (AC-15/AC-16). The
+ *  row is inserted with placeholder aggregate fields (see
+ *  `repository.drizzle.ts`'s `insertBatch`) and only its identity/pin fields
+ *  are trusted until `closeBatch` overwrites the aggregate. */
+export interface EvalBatchInsert {
+  workspaceId: string;
+  ownerKind: EvalCaseOwnerKind;
+  ownerId: string;
+  agentVersion: number;
+  provider: string;
+  model: string;
+  skillsFingerprint: { skill_id: string; version: number }[];
+}
+
+/** The aggregate a batch is CLOSED with, once every case has run (AC-19,
+ *  AC-21, AC-30) — never zeros for an all-failed batch, `null` metrics
+ *  instead. */
+export interface EvalBatchClose {
+  status: 'completed' | 'failed';
+  casesTotal: number;
+  casesPassed: number;
+  casesFailed: number;
+  recall: number | null;
+  recallCases: number;
+  precision: number | null;
+  precisionCases: number;
+  citationAccuracy: number | null;
+  citationCases: number;
+  findingsTotal: number | null;
+  durationMs: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
+/** A persisted `eval_batches` row (raw — `skillsFingerprint` is unparsed
+ *  jsonb; `helpers.ts`'s `mapBatchRowToRecord` re-parses it, degrading to an
+ *  empty array on failure, same "degrade rather than throw" pattern
+ *  `mapRowToRecord` already established for `expected_output`, A08). */
+export interface EvalBatchRow {
+  id: string;
+  workspaceId: string;
+  ownerKind: EvalCaseOwnerKind;
+  ownerId: string;
+  agentVersion: number;
+  provider: string;
+  model: string;
+  skillsFingerprint: unknown;
+  ranAt: Date;
+  status: 'completed' | 'failed';
+  casesTotal: number;
+  casesPassed: number;
+  casesFailed: number;
+  recall: number | null;
+  precision: number | null;
+  citationAccuracy: number | null;
+  recallCases: number;
+  precisionCases: number;
+  citationCases: number;
+  findingsTotal: number | null;
+  durationMs: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
+/** One `eval_runs` insert — persisted per case once the runner has an
+ *  outcome (AC-19). `batchId` is always supplied by this module's callers
+ *  (never null on insert — it only reads back as nullable after a batch row
+ *  is later deleted, `ON DELETE SET NULL`). */
+export interface EvalRunInsert {
+  caseId: string;
+  batchId: string;
+  actualOutput: unknown;
+  pass: boolean | null;
+  recall: number | null;
+  precision: number | null;
+  citationAccuracy: number | null;
+  findingsTotal: number | null;
+  durationMs: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
+/** A persisted `eval_runs` row (raw). */
+export interface EvalRunRow {
+  id: string;
+  caseId: string;
+  batchId: string | null;
+  ranAt: Date;
+  actualOutput: unknown;
+  pass: boolean | null;
+  recall: number | null;
+  precision: number | null;
+  citationAccuracy: number | null;
+  findingsTotal: number | null;
+  durationMs: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
 export interface EvalRepository {
   // ---- eval_cases CRUD (WI4) ----------------------------------------------
 
@@ -125,4 +226,47 @@ export interface EvalRepository {
    *  case-creation time (AC-7/AC-8). `undefined`/`patch: null` both mean "no
    *  usable patch" to the caller. */
   getPrFileByPath(prId: string, path: string): Promise<EvalPrFileRow | undefined>;
+
+  // ---- batch runner (WI7) --------------------------------------------------
+
+  /** Open a batch — inserted with placeholder aggregate fields (real
+   *  aggregate written by `closeBatch` once every case has run) so
+   *  `eval_runs.batch_id` has a real row to reference from the first
+   *  per-case insert onward. */
+  insertBatch(values: EvalBatchInsert): Promise<EvalBatchRow>;
+
+  /** Close a batch with its final aggregate (AC-19, AC-30). `id` is always
+   *  this module's own freshly-opened batch id — not client-addressable, so
+   *  this method is intentionally NOT workspace-scoped (the workspace check
+   *  already happened at `insertBatch`/the route boundary). */
+  closeBatch(id: string, patch: EvalBatchClose): Promise<EvalBatchRow>;
+
+  /** Persist one case's outcome (AC-19/AC-20). */
+  insertRun(values: EvalRunInsert): Promise<EvalRunRow>;
+
+  // ---- read APIs (WI8, zero LLM calls) -------------------------------------
+
+  /** Workspace-scoped batch read (AC-44) — `undefined` when the batch isn't
+   *  in this workspace, mapped by the caller to a 404. */
+  getBatchById(workspaceId: string, id: string): Promise<EvalBatchRow | undefined>;
+
+  /** An owner's batches, most recent first. `limit` caps history-table reads;
+   *  omitted for the dashboard, which needs the full set for delta + trend. */
+  listBatchesForOwner(workspaceId: string, ownerId: string, limit?: number): Promise<EvalBatchRow[]>;
+
+  /** Every `eval_runs` row for one batch, plus its source case's CURRENT name
+   *  (left-joined — `case_name` reads back `null` if the case row is somehow
+   *  gone, even though the FK's `ON DELETE CASCADE` on `eval_cases` normally
+   *  prevents that). `batchId` is trusted here because every caller already
+   *  resolved it through `getBatchById` (workspace-scoped) first — AC-44. */
+  listRunsForBatch(batchId: string): Promise<{ run: EvalRunRow; caseName: string | null }[]>;
+
+  /** Distinct `(owner_kind, owner_id)` pairs with EITHER a case OR a batch in
+   *  this workspace — the "one entry per agent" set the workspace-wide
+   *  dashboard route iterates (an owner keeps showing up in its own history
+   *  even after every one of its cases has been deleted, E-15). */
+  listDashboardOwnerIds(workspaceId: string): Promise<{ ownerKind: EvalCaseOwnerKind; ownerId: string }[]>;
+
+  /** `eval_cases` count for one owner in this workspace — `EvalDashboard.cases_total`. */
+  countCasesForOwner(workspaceId: string, ownerId: string): Promise<number>;
 }

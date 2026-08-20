@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { EvalCaseInputMeta, EvalExpectation } from '@devdigest/shared';
-import type { EvalCaseRecord, EvalExpectationEntry } from '@devdigest/shared';
+import type { EvalBatchRecord, EvalCaseRecord, EvalExpectationEntry, EvalRunRecord } from '@devdigest/shared';
 import { AppError } from '../../platform/errors.js';
 import { FULL_FILE_KINDS, MAX_INPUT_DIFF_BYTES } from './constants.js';
-import type { EvalCaseRow } from './repository.js';
+import type { EvalBatchRow, EvalCaseRow, EvalRunRow } from './repository.js';
+
+/** `eval_batches.skills_fingerprint`'s read-side shape (Q-3). */
+const SkillsFingerprint = z.array(z.object({ skill_id: z.string(), version: z.number().int() }));
 
 /**
  * Pure functions only — no DB, no adapters, no `Container` (onion-architecture
@@ -135,4 +138,61 @@ export function buildDiffText(files: { path: string; patch: string | null }[]): 
     parts.push(f.patch);
   }
   return parts.join('\n');
+}
+
+/**
+ * Row → API read shape for a batch (WI7/WI8). `skills_fingerprint` is jsonb
+ * written only by this module's own runner — re-parsed anyway (never trusted
+ * blind, A08) with the SAME "degrade rather than throw" treatment
+ * `mapRowToRecord` gives `expected_output`: a row that fails to re-parse
+ * reads back with an EMPTY fingerprint rather than throwing.
+ */
+export function mapBatchRowToRecord(row: EvalBatchRow): EvalBatchRecord {
+  const fingerprintParsed = SkillsFingerprint.safeParse(row.skillsFingerprint);
+  return {
+    id: row.id,
+    owner_kind: row.ownerKind,
+    owner_id: row.ownerId,
+    agent_version: row.agentVersion,
+    provider: row.provider,
+    model: row.model,
+    skills_fingerprint: fingerprintParsed.success ? fingerprintParsed.data : [],
+    ran_at: row.ranAt.toISOString(),
+    status: row.status,
+    cases_total: row.casesTotal,
+    cases_passed: row.casesPassed,
+    cases_failed: row.casesFailed,
+    recall: row.recall,
+    precision: row.precision,
+    citation_accuracy: row.citationAccuracy,
+    recall_cases: row.recallCases,
+    precision_cases: row.precisionCases,
+    citation_cases: row.citationCases,
+    findings_total: row.findingsTotal,
+    duration_ms: row.durationMs,
+    cost_usd: row.costUsd,
+    error: row.error,
+  };
+}
+
+/** Row → API read shape for one case's run within a batch (WI7/WI8).
+ *  `caseName` is passed in separately (the repository's left-join result) —
+ *  `null` when the source case row is gone. */
+export function mapRunRowToRecord(row: EvalRunRow, caseName: string | null): EvalRunRecord {
+  return {
+    id: row.id,
+    case_id: row.caseId,
+    case_name: caseName,
+    batch_id: row.batchId,
+    ran_at: row.ranAt.toISOString(),
+    actual_output: row.actualOutput,
+    pass: row.pass,
+    recall: row.recall,
+    precision: row.precision,
+    citation_accuracy: row.citationAccuracy,
+    findings_total: row.findingsTotal,
+    duration_ms: row.durationMs,
+    cost_usd: row.costUsd,
+    error: row.error,
+  };
 }

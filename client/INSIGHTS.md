@@ -311,6 +311,37 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   history, then drill into one entry" feature (the list here is capped at 50
   rows) rather than a summary-list + per-item-detail-fetch split.
 
+- **No per-case-across-batches read exists server-side for the Eval
+  Pipeline (2026-08-21, L06, docs/plans/eval-pipeline.md WI9/WI12).** The
+  server's eval module has `GET /agents/:id/eval-cases` (no run info at
+  all) and `GET /eval-batches/:id` (a batch's own per-case rows), but
+  nothing answering "this case's most recent run, across whichever batch it
+  last ran in." To show each case's last pass/fail + recall in the Agent
+  Editor's Evals tab (AC-35), `EvalsTab/helpers.ts`'s `buildLastRunByCase`
+  reconstructs it client-side: walk an agent's recent batches NEWEST FIRST
+  (`EvalDashboard.recent_runs`, capped to 5 via a new `useEvalBatches`
+  hook — `lib/hooks/eval.ts`, a `useQueries`-based addition beyond the 12
+  hooks the plan named by name, same shape as `hooks/context.ts`'s
+  `useSkillContexts`) and take the first run matching each `case_id`. This
+  is only fully correct when every batch walked contains every case that
+  existed at that time — true for a "run whole set" batch
+  (`POST /agents/:id/eval-runs`), but NOT for a single-case run
+  (`POST /eval-cases/:id/run`, a ONE-CASE batch): running just one case
+  makes every OTHER case's last-run display fall back to whatever it showed
+  in the last full-set batch, even if that's now stale relative to the
+  just-run case. No dedicated endpoint exists to fix this properly —
+  documented as a known limitation in the helper's own doc comment, not
+  silently presented as exact.
+- **`hooks/eval.ts` imports its contract types from `"../types"`
+  (`lib/types.ts`), not `"@devdigest/shared"` directly — following
+  `hooks/brief.ts`'s precedent, not `hooks/agents.ts`'s/`hooks/reviews.ts`'s
+  (2026-08-21, L06).** Both import styles coexist in this codebase; which
+  one to follow isn't arbitrary per-file taste — `docs/plans/eval-pipeline.md`
+  WI9 explicitly said "re-export via `lib/types.ts`, the file's own header
+  says to add them there," and `lib/types.ts`'s own header comment says the
+  same. When a plan/spec names the file's own stated convention, follow
+  that over whichever sibling hook file happens to be open.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -382,6 +413,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   reach for `--border-strong` by default for any new bordered card/row on a
   dark elevated surface, not `--border`.
 
+- **`@devdigest/ui`'s `LineChart` (`vendor/ui/charts/LineChart.tsx`) fills a
+  missing index in a shorter series with a hard-coded `0`, not a gap
+  (2026-08-21, L06 Eval Pipeline, AC-39/E-7/E-11).** Row-building is
+  `row[s.name] = s.data[i] ?? 0` — there is no `null`/`undefined` support
+  and no `connectNulls`, so passing a metric straight through when it's
+  legitimately undefined for that point (e.g. a batch with no findings at
+  all, `citation_accuracy: null`) would render as a real, misleadingly LOW
+  point instead of "no data here." Its OTHER default, `yMin=0.6, yMax=1.0`
+  (already the subject of AC-39/E-7 — always pass explicit `yMin={0}
+  yMax={1}`), is the well-known trap; this zero-fill behavior is a second,
+  separate trap in the same file. Since it's vendored/do-not-touch, the only
+  honest fix without editing it is to filter each metric's series
+  independently before handing it to `LineChart` (drop null points per
+  series, don't substitute 0) — `AgentEvalDetail.tsx`'s `trendSeries` does
+  this, with an on-screen caption noting the tradeoff: multi-series charts
+  built this way do NOT preserve x-axis alignment across series when their
+  null patterns differ. Worth knowing before reusing `LineChart` for any
+  other per-point-nullable metric.
+
 ## Recurring Errors & Fixes
 
 - **A native `<select>`'s open dropdown popup renders unreadable
@@ -433,6 +483,23 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the user's other complaints (unreadable dropdown, collapsed grid column)
   turned out to be the two real bugs above, only discoverable once the
   stale-bundle red herring was ruled out first.
+- **A pre-wired `activeKeyFor` prefix check can anticipate the WRONG nav key,
+  not just anticipate one early (2026-08-21, L06 Eval Pipeline client,
+  docs/plans/eval-pipeline.md WI13).** `components/app-shell/helpers.ts`
+  already had `if (pathname.startsWith("/eval")) return "eval";` sitting
+  unused, presumably guessed ahead of time the same way `/context` and
+  `/conventions` were pre-wired before their `nav.ts` entries existed (see
+  the Codebase Patterns entries above) — but the plan's actual required
+  `nav.ts` key is `"evals"` (plural), so the pre-wired singular string never
+  matched and the sidebar item would have stayed permanently unhighlighted
+  on `/evals` if shipped as-is. Fixed alongside adding the `nav.ts` entry:
+  `pathname.startsWith("/evals")` → `"evals"`. Generalizes the existing
+  onboarding-tour lesson ("pre-authored code anticipates the intended UX,
+  but check it for collisions before trusting it verbatim") one step
+  further: also check that the pre-wired STRING it returns is the exact key
+  you're about to add, not just that the route-prefix check fires at all —
+  grep `activeKeyFor` for the feature's own prefix before assuming a hit
+  there is already correct.
 
 ## Session Notes
 
@@ -1097,3 +1164,48 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   architecture bug this test targets IS fixed and verified (failure mode
   changed from "element not found" to "multiple elements found," proving the
   group+file now mount correctly).
+
+- 2026-08-21: L06 Eval Pipeline client side (Phase D,
+  `docs/plans/eval-pipeline.md` WI9-WI13; server Phases A-C already shipped).
+  New `lib/hooks/eval.ts` (the plan's 12 named hooks plus `useEvalBatch`/
+  `useEvalBatches`, added for a real gap — see the new Codebase Patterns
+  entry above) and `lib/types.ts` re-exports; new `eval.compare.*`/
+  `eval.dashboard.na`/`naReason`/`relativeScoresNote`/`runAllAgents*` i18n
+  plus `prReview.finding.turnIntoEvalCase`/`evalCaseCreatedMustFind`/
+  `evalCaseCreatedMustNotFlag` — deliberately minimal, following AC-41's
+  enumerated new-key list; several other UX requirements (version badges,
+  skills-fingerprint caveat, "first run" label, per-case cost estimate
+  captions) were rendered as plain hardcoded English strings instead of new
+  i18n keys, the same established precedent this file already documents for
+  incidental copy (e.g. the hardcoded "Skills Lab"/"Agents" breadcrumb
+  literals in `agents/[id]/page.tsx`). `FindingCard` gained a third
+  action button ("Turn into eval case", `onCreateEvalCase` prop, separate
+  from `onAction`'s `FindingActionKind` union so the shared contract stayed
+  untouched), shown only when `accepted || dismissed`; `FindingsPanel` wires
+  it to `useCreateEvalCaseFromFinding` + a toast confirming which
+  expectation kind was created (UX-2). Agent Editor gained an `evals` tab
+  (`AgentEditor/_components/EvalsTab/`, metrics + case list +
+  `CaseEditorModal` with a live `EvalExpectation.safeParse` validity badge)
+  — `constants.ts`'s `TABS`/derived `TAB_KEYS` needed only one array entry,
+  confirming the 2026-08-13 `TAB_KEYS`-must-be-derived fix (entry above)
+  still holds. New `/evals` route (`EvalDashboardView` master list →
+  `AgentEvalDetail` per-agent trend/history/compare-picker →
+  `EvalCompareView` read-only diff) added to `nav.ts`'s SKILLS LAB group
+  (the sanctioned vendor exception, used again) — this ALSO required fixing
+  `activeKeyFor` (see the new Recurring Errors & Fixes entry above), which
+  is easy to miss since the page still renders fine without it, just with a
+  permanently-unhighlighted sidebar item. `LineChart` is passed explicit
+  `yMin={0} yMax={1}` per AC-39/E-7 (and see the new zero-fill quirk noted
+  in Tool & Library Notes). An EXISTING test file broke from this session's
+  change, not just needed new coverage: `FindingsPanel.test.tsx`'s `vi.mock`
+  for `lib/hooks/reviews` had no equivalent for the newly-added
+  `useCreateEvalCaseFromFinding` call, so the real hook ran and threw "No
+  QueryClient set" — fixed by extending the mock, same "a new child hook
+  call breaks an existing test's mock scaffolding" lesson this file already
+  recorded for SPEC-01 (2026-08-13 entry above). Verified: `tsc --noEmit`
+  clean; full Vitest green (38 files / 228 tests, once the `FindingsPanel`
+  mock fix above landed); zero ad-hoc `fetch(` in any new file
+  (grep-confirmed). New-test authorship for `EvalsTab`/`CaseEditorModal`/
+  `CaseRow`/`EvalDashboardView`/`AgentEvalDetail`/`EvalCompareView`/the
+  `FindingCard` third-button behavior is `test-writer`'s job next, not
+  attempted here beyond the pre-existing suites passing.

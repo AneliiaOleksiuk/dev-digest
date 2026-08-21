@@ -7,6 +7,13 @@ import messages from "../../../../../../../../messages/en/prReview.json";
 vi.mock("../../../../../../../lib/hooks/reviews", () => ({
   useFindingAction: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+// L06 — FindingsPanel now also calls useCreateEvalCaseFromFinding
+// (the "Turn into eval case" action's mutation, WI11); mock it the same
+// way as useFindingAction above so this smoke suite doesn't need a real
+// QueryClientProvider.
+vi.mock("../../../../../../../lib/hooks/eval", () => ({
+  useCreateEvalCaseFromFinding: () => ({ mutate: vi.fn(), isPending: false }),
+}));
 
 import { FindingsPanel } from "./FindingsPanel";
 

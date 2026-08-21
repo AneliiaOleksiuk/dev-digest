@@ -17,6 +17,11 @@ vi.mock("./_components/ContextTab", () => ({
 vi.mock("./_components/SkillsTab", () => ({
   SkillsTab: () => <div>Linked skills</div>,
 }));
+// L06 WI12 — the Evals tab has its own EvalsTab.test.tsx covering its
+// content; here we only need proof AgentEditor routes ?tab=evals to it.
+vi.mock("./_components/EvalsTab", () => ({
+  EvalsTab: () => <div>Eval metrics</div>,
+}));
 
 import { AgentEditor } from "./AgentEditor";
 import { TAB_KEYS } from "./constants";
@@ -64,5 +69,21 @@ describe("A2 Agent Editor (smoke)", () => {
   it("renders the Project Context panel when tab is context", () => {
     renderWithIntl(<AgentEditor agent={AGENT} tab="context" onTab={() => {}} />);
     expect(screen.getByText("Attached documents")).toBeInTheDocument();
+  });
+
+  // L06 AC-34 — "?tab=evals renders the tab and does not snap back to
+  // Config." `TAB_KEYS` (used by `agents/[id]/page.tsx`'s `?tab=` allow-list
+  // as `TAB_KEYS.includes(requested) ? requested : "config"`) MUST contain
+  // "evals" or the page-level guard would silently redirect to config before
+  // AgentEditor ever sees `tab="evals"` — asserted directly here rather than
+  // trusting AgentEditor's own render alone to prove the whole path.
+  it("TAB_KEYS includes 'evals' so ?tab=evals is not rejected by the page allow-list (AC-34)", () => {
+    expect(TAB_KEYS).toContain("evals");
+  });
+
+  it("renders the Evals tab (not Config) when tab is evals (AC-34)", () => {
+    renderWithIntl(<AgentEditor agent={AGENT} tab="evals" onTab={() => {}} />);
+    expect(screen.getByText("Eval metrics")).toBeInTheDocument();
+    expect(screen.queryByText("Configuration")).not.toBeInTheDocument();
   });
 });

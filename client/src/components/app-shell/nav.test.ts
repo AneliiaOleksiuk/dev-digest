@@ -16,7 +16,7 @@
  * actual source of truth the sidebar renders from.
  */
 import { describe, it, expect } from "vitest";
-import { NAV, resolveHref } from "@devdigest/ui";
+import { NAV, resolveHref, SHORTCUTS } from "@devdigest/ui";
 import { activeKeyFor } from "./helpers";
 
 describe("NAV registry — onboarding-tour entry", () => {
@@ -46,6 +46,44 @@ describe("NAV registry — onboarding-tour entry", () => {
     // REAL NAV entry to prove the registry and the predicate agree.
     const item = NAV.flatMap((g) => g.items).find((i) => i.key === "onboarding-tour")!;
     expect(activeKeyFor("/onboarding")).not.toBe(item.key);
+    expect(activeKeyFor(resolveHref(item.href, "repo-1"))).toBe(item.key);
+  });
+});
+
+/**
+ * NAV registry — the Eval Dashboard entry (L06 WI13/AC-36).
+ *
+ * Oracle (derived from docs/plans/eval-pipeline.md WI13 BEFORE reading
+ * `client/src/vendor/ui/nav.ts`): "AC-36 requires the sidebar entry ... Add
+ * `{ key: "evals", label: "Eval Dashboard", icon: "Gauge", href: "/evals",
+ * gKey: "e" }` to the SKILLS LAB group ... plus the matching SHORTCUTS
+ * entry (`g e` is currently unused)." `nav.ts` is do-not-touch
+ * (`client/src/vendor/ui/**`), so — same discipline as the onboarding-tour
+ * block above — this only imports it through the `@devdigest/ui` barrel.
+ */
+describe("NAV registry — evals entry (AC-36)", () => {
+  it("exists exactly once, in the SKILLS LAB group, with a plain (non-templated) /evals href", () => {
+    const skillsLab = NAV.find((g) => g.section === "SKILLS LAB");
+    expect(skillsLab).toBeDefined();
+    const matches = skillsLab!.items.filter((i) => i.key === "evals");
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.href).toBe("/evals");
+    expect(matches[0]!.label).toBe("Eval Dashboard");
+  });
+
+  it("is NOT present in any other group", () => {
+    const nonSkillsLab = NAV.filter((g) => g.section !== "SKILLS LAB");
+    for (const group of nonSkillsLab) {
+      expect(group.items.some((i) => i.key === "evals")).toBe(false);
+    }
+  });
+
+  it("has a matching 'g e' entry in the SHORTCUTS registry", () => {
+    expect(SHORTCUTS.some((s) => s.keys === "g e" && s.group === "Navigation")).toBe(true);
+  });
+
+  it("activeKeyFor highlights this entry when on /evals", () => {
+    const item = NAV.flatMap((g) => g.items).find((i) => i.key === "evals")!;
     expect(activeKeyFor(resolveHref(item.href, "repo-1"))).toBe(item.key);
   });
 });

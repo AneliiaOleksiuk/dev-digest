@@ -431,6 +431,25 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   built this way do NOT preserve x-axis alignment across series when their
   null patterns differ. Worth knowing before reusing `LineChart` for any
   other per-point-nullable metric.
+- **`next-intl`'s missing-message fallback renders the literal message path
+  as visible text, not an empty string** (2026-08-22) — a missing
+  `t("nav.evals")` renders `"nav.evals"` inline (e.g. "Go to nav.evals" /
+  "Go to shell.nav.evals" depending on namespace scope), confirmed by
+  actually reverting the `client/messages/en/shell.json` fix and re-running
+  the test; don't assume a missing key silently blanks out. Separately,
+  `client/src/vendor/ui/command-palette/CommandPalette.tsx` is gated
+  `if (!open) return null` — its command labels (built by
+  `useShellCommands.ts`, one `t(`nav.${it.key}`)` call per `NAV` item) are
+  computed unconditionally during SSR (the `useMemo` runs either way) but
+  never reach the DOM unless a user has actually opened the palette
+  (Cmd/Ctrl+K). A plain `curl` of a page's initial HTML therefore cannot
+  prove or disprove a `nav.ts`-key ↔ `shell.json` `nav.<key>` mismatch for
+  this component — only `next build`'s static-generation error (real, hard
+  failure: `Error: MISSING_MESSAGE: shell.nav.evals (en)`) or a hook-level
+  test rendering the real `useShellCommands()` against a real
+  `NextIntlClientProvider` + real `messages/en/shell.json` (no mocks — see
+  `client/src/components/app-shell/hooks/useShellCommands.test.tsx`) proves
+  it either way.
 
 ## Recurring Errors & Fixes
 
@@ -500,6 +519,21 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   you're about to add, not just that the route-prefix check fires at all —
   grep `activeKeyFor` for the feature's own prefix before assuming a hit
   there is already correct.
+- **Running `next build` while a `next dev` process is already live on the
+  same `client/.next` directory (Windows) leaves the dev server broken
+  afterwards** (2026-08-22) — the build itself completes fine and doesn't
+  error, but the dev process silently starts 500ing subsequent requests
+  once the build finishes (observed: `curl` against a route that was 200
+  moments earlier now 500s, with nothing new in the dev server's own log
+  beyond a stale/earlier error). If a fix-loop task needs BOTH a `next
+  build` verification and a live `curl`/`next dev` verification in the same
+  session: run the build first, then explicitly find and kill whatever
+  process already owns the dev port (`Get-NetTCPConnection -LocalPort
+  <port> | Select-Object OwningProcess`, `Stop-Process -Id <pid> -Force` on
+  Windows) — don't assume a `next dev` you didn't just start yourself is
+  healthy just because it responded 200 earlier in the session — delete
+  `.next`, and start a fresh `next dev` before trusting any `curl` result
+  against it.
 
 ## Session Notes
 
@@ -1282,3 +1316,26 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   expected-list array (see `dashboard.metricCasesCaption`'s entry there) —
   don't leave the test failing or weaken its exact-match assertion into a
   subset check.
+- 2026-08-22 (fix-loop iteration 2, same Phase D session): the deferred
+  `shell.nav.evals` i18n mismatch noted above turned out to be
+  build-breaking, not just a caught console error — `next build`'s static
+  generation for `/evals` and `/agents/[id]` fails outright with `Error:
+  MISSING_MESSAGE: shell.nav.evals (en)` (plan-verifier caught this;
+  `next dev`'s earlier "still 200" observation was misleading — it only
+  held for ALREADY-COMPILED dev routes, not a fresh `next build` pass).
+  Fixed by renaming `messages/en/shell.json`'s `nav.eval` → `nav.evals`
+  (confirmed dead otherwise — grepped for any other `nav.eval` reference
+  before renaming rather than adding a second key). Added two regression
+  layers: a static key-diff test (`components/app-shell/nav.test.ts`) and a
+  real-`next-intl`-runtime hook test
+  (`components/app-shell/hooks/useShellCommands.test.tsx`) — see the Tool &
+  Library Notes entry above for why the static test alone doesn't prove the
+  runtime behavior. Also closed two required-fix items from the same
+  review round: added a contributing-case-count regression test per
+  component (`AgentEvalDetail.test.tsx`, `EvalsTab.test.tsx`, asserting
+  each metric tile's caption reads its OWN `*_cases` field, not
+  `cases_total` or another metric's count) and a
+  response-vs-timestamp-contradiction test in `FindingsPanel.test.tsx`
+  (pins that the "Turn into eval case" confirmation follows the mutation's
+  own response, not a client-side re-derivation from `accepted_at`/
+  `dismissed_at`).

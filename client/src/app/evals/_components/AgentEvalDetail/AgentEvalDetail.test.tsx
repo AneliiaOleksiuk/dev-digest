@@ -205,7 +205,7 @@ describe("AgentEvalDetail — E-17/UX-12 a first batch is 'first run', never a z
     // hardcoded string, so the copy dropped the old "yet." suffix. With only one
     // batch, BOTH the metrics-row note and the compare bar render this same text
     // (getAllByText, not getByText — there are legitimately two instances).
-    expect(screen.getAllByText("First run — nothing to compare").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("First run — nothing to compare").length).toBe(2);
   });
 
   it("does NOT show first-run messaging once a delta exists (>=2 batches)", () => {
@@ -230,6 +230,44 @@ describe("AgentEvalDetail — E-17/UX-12 a first batch is 'first run', never a z
     renderDetail();
 
     expect(screen.queryByText("First run — nothing to compare")).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentEvalDetail — regression: metric captions read their OWN contributing-case count", () => {
+  it("each metric tile's caption shows ITS OWN *_cases field, not cases_total and not another metric's count", () => {
+    // All four numbers deliberately distinct so a caption reading the wrong
+    // field (e.g. cases_total, or another metric's *_cases) is caught.
+    const batch: EvalBatchRecord = {
+      ...BATCH_V5,
+      cases_total: 11,
+      recall_cases: 3,
+      precision_cases: 5,
+      citation_cases: 9,
+    };
+    const dashboard: EvalDashboard = {
+      owner_kind: "agent",
+      owner_id: "ag1",
+      cases_total: 20, // owner's whole case set — must NOT appear in any caption
+      current: { recall: 0.9, precision: 0.9, citation_accuracy: 0.95, traces_passed: 7, traces_total: 8, cost_usd: 0.02 },
+      delta: null,
+      trend: [
+        { batch_id: "b0", agent_version: 5, ran_at: batch.ran_at, recall: 0.9, precision: 0.9, citation_accuracy: 0.95, pass_rate: 0.875, cost_usd: 0.02 },
+      ],
+      recent_runs: [batch],
+      alert: null,
+    };
+    useAgent.mockReturnValue({ data: AGENT });
+    useAgentEvalDashboard.mockReturnValue({ data: dashboard, isLoading: false, isError: false, refetch: vi.fn() });
+    useAgentEvalBatches.mockReturnValue({ data: [batch] });
+    useRunEvalSet.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    renderDetail();
+
+    expect(screen.getByText("3 of 11 cases")).toBeInTheDocument();
+    expect(screen.getByText("5 of 11 cases")).toBeInTheDocument();
+    expect(screen.getByText("9 of 11 cases")).toBeInTheDocument();
+    expect(screen.queryByText("20 of 11 cases")).not.toBeInTheDocument();
+    expect(screen.queryByText(/of 20 cases/)).not.toBeInTheDocument();
   });
 });
 

@@ -132,7 +132,7 @@ export function EvalsTab({ agent }: { agent: Agent }) {
         ))}
       </div>
       {/* E-17/UX-12 — a first batch is "nothing to compare yet", never a
-         zero delta (plain text: not in AC-41's enumerated new-key list). */}
+         zero delta. */}
       {isFirstRun && dashboard.cases_total > 0 && <p style={s.firstRunNote}>{t("compare.firstRunNothing")}</p>}
       <p style={s.relativeNote}>{t("dashboard.relativeScoresNote")}</p>
 

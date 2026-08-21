@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { Agent } from "@devdigest/shared";
-import type { EvalCaseRecord, EvalDashboard } from "@/lib/types";
+import type { EvalBatchRecord, EvalCaseRecord, EvalDashboard } from "@/lib/types";
 import evalMessages from "../../../../../../../../messages/en/eval.json";
 
 const useAgentEvalCases = vi.fn();
@@ -174,6 +174,57 @@ describe("EvalsTab — AC-13 a case with expectation_status 'unusable' renders a
     expect(screen.getByText("invalid JSON")).toBeInTheDocument();
     expect(screen.queryByText("never run")).not.toBeInTheDocument();
     expect(screen.getByText("Run").closest("button")).toBeDisabled();
+  });
+});
+
+describe("EvalsTab — regression: metric captions read their OWN contributing-case count", () => {
+  it("each metric tile's caption shows ITS OWN *_cases field, not cases_total and not another metric's count", () => {
+    // All four numbers deliberately distinct so a caption reading the wrong
+    // field (e.g. cases_total, or another metric's *_cases) is caught.
+    const batch: EvalBatchRecord = {
+      id: "b0",
+      owner_kind: "agent",
+      owner_id: "ag1",
+      agent_version: 6,
+      provider: "openai",
+      model: "gpt-4.1",
+      skills_fingerprint: [],
+      ran_at: "2026-08-10T00:00:00.000Z",
+      status: "completed",
+      cases_total: 11,
+      cases_passed: 7,
+      cases_failed: 1,
+      recall: 0.9,
+      precision: 0.9,
+      citation_accuracy: 0.95,
+      recall_cases: 3,
+      precision_cases: 5,
+      citation_cases: 9,
+      findings_total: 12,
+      duration_ms: 4000,
+      cost_usd: 0.02,
+      error: null,
+    };
+    const dashboard: EvalDashboard = {
+      ...EMPTY_DASHBOARD,
+      cases_total: 20, // owner's whole case set — must NOT appear in any caption
+      current: { recall: 0.9, precision: 0.9, citation_accuracy: 0.95, traces_passed: 7, traces_total: 8, cost_usd: 0.02 },
+      recent_runs: [batch],
+    };
+    useAgentEvalCases.mockReturnValue({ data: [CASE_OK] });
+    useAgentEvalDashboard.mockReturnValue({ data: dashboard });
+    useEvalBatches.mockReturnValue([]);
+    useDeleteEvalCase.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    useRunEvalCase.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    useRunEvalSet.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    renderTab();
+
+    expect(screen.getByText("3 of 11 cases")).toBeInTheDocument();
+    expect(screen.getByText("5 of 11 cases")).toBeInTheDocument();
+    expect(screen.getByText("9 of 11 cases")).toBeInTheDocument();
+    expect(screen.queryByText("20 of 11 cases")).not.toBeInTheDocument();
+    expect(screen.queryByText(/of 20 cases/)).not.toBeInTheDocument();
   });
 });
 

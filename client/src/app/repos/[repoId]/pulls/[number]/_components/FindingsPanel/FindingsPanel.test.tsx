@@ -22,6 +22,10 @@ vi.mock("../../../../../../../lib/hooks/reviews", () => ({
 const KIND_BY_FINDING_ID: Record<string, "must_find" | "must_not_flag"> = {
   "f-accepted": "must_find",
   "f-dismissed": "must_not_flag",
+  // Deliberately CONTRADICTS this finding's own accepted_at (see
+  // ACCEPTED_CONTRADICTED below) — pins that the confirmation text follows
+  // the mutation response, not a client-side re-derivation from timestamps.
+  "f-accepted-contradicted": "must_not_flag",
 };
 type EvalCaseFromFindingResponse = {
   expected_output: { version: 1; must_find: unknown[]; must_not_flag: unknown[] };
@@ -159,6 +163,23 @@ describe("FindingsPanel — Turn into eval case confirmation (L06 UX-2)", () => 
     expect(
       screen.getByText("Eval case created for src/config.ts — will assert this is NOT flagged"),
     ).toBeInTheDocument();
+  });
+
+  it("follows the mutation's RESPONSE, not the finding's own accepted_at, when the two disagree (pins server-derived-only, not client re-derivation)", () => {
+    // ACCEPTED (accepted_at set) — a client-side re-derivation from the
+    // timestamp would say "IS found". The mocked response deliberately
+    // returns must_not_flag instead; the confirmation must follow THAT.
+    const ACCEPTED_CONTRADICTED: FindingRecord = {
+      ...FINDINGS[0]!,
+      id: "f-accepted-contradicted",
+      accepted_at: "2026-08-20T00:00:00.000Z",
+    };
+    renderWithIntl(<FindingsPanel findings={[ACCEPTED_CONTRADICTED]} prId="pr1" />);
+    fireEvent.click(screen.getByText("Turn into eval case"));
+    expect(
+      screen.getByText("Eval case created for src/config.ts — will assert this is NOT flagged"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Eval case created for src/config.ts — will assert this IS found")).not.toBeInTheDocument();
   });
 
   it("the mutation is called with only the finding id — the client never sends the expectation kind (AC-3/D-7: server-derived only)", () => {

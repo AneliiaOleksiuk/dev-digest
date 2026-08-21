@@ -139,6 +139,31 @@ fix moved away from, so it is accepted rather than hidden. See
 for the full detail and a diagram of the two phases (in-memory execution,
 then the one atomic transaction).
 
+## Addendum (Phase D, client) — the contributing-count UI echoes the same snapshot
+
+A short client-side note, added because it is a direct consequence of this
+ADR's decision rather than a new one: the Eval Dashboard, per-agent detail
+view and the Agent Editor's Evals tab (`AgentEvalDetail.tsx`, `EvalsTab.tsx`)
+all render each metric tile's contributing-case caption
+(`recall_cases`/`precision_cases`/`citation_cases`, AC-30/UX-5) by reading
+`dashboard.recent_runs[0]` — the **same** `eval_batches` row the server's
+`buildDashboard` already used to populate `dashboard.current.*`. This was a
+Major finding in the Phase D fix-loop's first iteration: the metric tiles
+originally showed no contributing-count caption at all, and the tempting
+fix — pairing the metric with `dashboard.cases_total` (the owner's whole,
+still-growing case set) — would have been wrong precisely because of what
+this ADR establishes: a batch's numbers are a **frozen snapshot** of the
+case set as it stood at that batch's close, not a live view over the
+owner's current cases. Captioning a frozen batch's mean with today's
+(possibly larger) case count would misreport, e.g., "2 of 8 cases" as "2 of
+20." The client's fix is therefore to always pull the count from the same
+batch record its value came from (`recent_runs[0]`), never from a
+separately-fetched, currently-live total — one more place where treating
+the stored aggregate as authoritative, rather than re-deriving anything
+live, was the only correct choice. See
+[`docs/features/eval-pipeline.md`](../features/eval-pipeline.md#client--evals-ui-phase-d)
+for the full UX decision.
+
 ## Alternatives considered
 
 1. **Nullable `batch_id` + `agent_version` columns on `eval_runs`, aggregate

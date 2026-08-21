@@ -554,6 +554,12 @@ real Postgres + real OpenRouter)
 
 ### Phase D — client (commit 4)
 
+**Status: DONE — 2026-08-22** (commits `6295127`, `89c5edd`, `15fe166`,
+`0fd084a` — build, tests, fix-loop across 2 iterations (a webpack
+`extensionAlias` break that 500'd every `/agents/:id` tab, and a
+`shell.json`/`nav.ts` i18n key mismatch the iteration-1 fix introduced),
+docs incl. ADR 0006 client-side addendum; live smoke test pending)
+
 **WI9. Client data layer.**
 
 - Files: new `client/src/lib/hooks/eval.ts`; `client/src/lib/hooks/index.ts`

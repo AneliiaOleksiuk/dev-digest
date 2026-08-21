@@ -8,11 +8,12 @@ agent versions — with **zero LLM calls** anywhere in scoring, aggregation or
 comparison.
 
 Shipped per [`docs/plans/eval-pipeline.md`](../plans/eval-pipeline.md) (source
-spec: [`specs/eval-pipeline.md`](../../specs/eval-pipeline.md)), across three
+spec: [`specs/eval-pipeline.md`](../../specs/eval-pipeline.md)), across four
 phases: A (contracts + schema), B (case CRUD, create-from-finding, the pure
-scorer), and C (the version-pinned batch runner + read APIs — this document's
-main focus, commits `42763c6`/`3fce7db`/`10ab8f6`). HTTP/contract lookup:
-[`docs/reference/eval-api.md`](../reference/eval-api.md). Batch-storage
+scorer), C (the version-pinned batch runner + read APIs, commits
+`42763c6`/`3fce7db`/`10ab8f6`), and D (the client Evals UI — this document's
+"Client" section, commits `6295127`/`89c5edd`/`15fe166`/`0fd084a`). HTTP/contract
+lookup: [`docs/reference/eval-api.md`](../reference/eval-api.md). Batch-storage
 decision: [ADR 0006](../adr/0006-eval-batches-stored-aggregate.md).
 
 ## What it does
@@ -197,6 +198,160 @@ fixed in this fix-loop:
   correct, but reads more rows than necessary as a workspace's case count
   grows.
 
+## Client — Evals UI (Phase D)
+
+Four surfaces, all built on one React Query hook layer
+(`client/src/lib/hooks/eval.ts`) over `src/lib/api.ts` — no ad-hoc `fetch` in
+any component (AC-40):
+
+- **"Turn into eval case" on `FindingCard`** — a third action button, shown
+  only when `accepted || dismissed` is true (`FindingCard.tsx:68-70,133-143`,
+  AC-4/UX-1). `FindingsPanel.tsx` wires it to
+  `useCreateEvalCaseFromFinding`; the success toast reads which expectation
+  kind was created **from the mutation's own response**
+  (`data.expected_output.must_find.length`), not by re-deriving it
+  client-side from the finding's `accepted_at`/`dismissed_at` — the server's
+  derivation (AC-3, D-7) is authoritative and the client timestamp can be
+  stale relative to it (UX-2, `FindingsPanel.tsx:104-125`).
+- **Evals tab in the Agent Editor** (`AgentEditor/_components/EvalsTab/`,
+  AC-34/AC-35) — one entry added to `constants.ts`'s `TABS` array (so the
+  URL allow-list `TAB_KEYS` follows automatically); the tab renders the
+  agent's current metrics, its case list with per-case pass/fail and last
+  recall, "New case", and per-case Run/Edit/Delete, backed by
+  `CaseEditorModal` (a live `EvalExpectation.safeParse` validity badge on
+  the JSON expectation editor) and `CaseRow`.
+- **Eval Dashboard** (`/evals`, new sidebar entry under `SKILLS LAB` in
+  `client/src/vendor/ui/nav.ts` — AC-36, the sanctioned vendor exception
+  already used for the vendored contracts) — `EvalDashboardView` (one row
+  per agent with a case or a batch, a sparkline, and a "Run all agents"
+  action) drills via `?agent=<id>` into `AgentEvalDetail` (current metrics,
+  a trend `LineChart`, and a recent-runs/batches table), which drills via
+  `?base=<id>&head=<id>` into the read-only `EvalCompareView`.
+- **Data layer** (`lib/hooks/eval.ts`) — the plan's 12 named hooks plus two
+  the plan didn't name: `useEvalBatch`/`useEvalBatches` (a `useQueries`-based
+  batch fetch, same shape as `hooks/context.ts`'s `useSkillContexts`), added
+  because no server endpoint answers "this case's most recent run, across
+  whichever batch it last ran in" (AC-35's per-case last-recall). The Evals
+  tab's `helpers.ts#buildLastRunByCase` reconstructs it client-side by
+  walking an agent's `RECENT_BATCHES_FOR_LAST_RUN = 5` most recent batches
+  newest-first and taking the first run matching each `case_id` — correct
+  for a whole-set run, but a **known limitation** for a single-case run
+  (`POST /eval-cases/:id/run`, a one-case batch): every *other* case's
+  displayed last-run can be stale relative to the just-run case, since no
+  batch containing it was ever re-walked. Documented in the helper's own
+  doc comment and `client/INSIGHTS.md` (2026-08-21), not silently presented
+  as exact.
+
+### Key UX decisions from the spec (AC-34…AC-51, UX-1…UX-13)
+
+- **An undefined metric renders "n/a", never a fabricated `1.00`** (UX-4,
+  E-11). `AgentEvalDetail.tsx`/`EvalsTab.tsx` both render
+  `m.value != null ? "<pct>%" : t("dashboard.na")`, with a `naReason` caption
+  when the agent has cases but this metric specifically has none.
+- **A batch mean states how many cases contributed** (AC-30, UX-5). This was
+  a Major finding closed in the Phase D fix-loop's first iteration: the
+  metric tiles originally had no contributing-count caption at all. The fix
+  reads `recall_cases`/`precision_cases`/`citation_cases` off
+  `dashboard.recent_runs[0]` — the **same** batch `dashboard.current.*` was
+  itself sourced from server-side (`buildDashboard`'s `current = { recall:
+  latest?.recall, ... }` where `latest = batches[0]`) — deliberately never
+  `dashboard.cases_total` (the owner's whole case set, a different and
+  usually larger number that would misreport "2 of 8 this run" as "2 of
+  20"). See `AgentEvalDetail.tsx:97-104`, `EvalsTab.tsx:72-76`.
+- **A first batch shows "first run", not a zero delta** (E-17, UX-12).
+  `isFirstRun = dashboard.delta === null && trend.length <= 1` gates the
+  delta arrow off and shows `compare.firstRunNothing` instead — the same
+  honest-null discipline the server's `buildDashboard` fix from Phase C
+  established for `delta`'s per-field nulls.
+- **The trend `LineChart` gets an explicit `yMin={0} yMax={1}`** (AC-39,
+  E-7, UX-6) — `LineChart`'s own defaults (`yMin=0.6`) would clip exactly
+  the region a deliberately-weakened prompt's precision drop lands in,
+  which is what the homework's own validation experiment (WI16) is designed
+  to produce. A second, separate `LineChart` trap surfaced during Phase D
+  and is worked around rather than fixed (the component is vendored,
+  do-not-touch): it fills a missing series index with a hard-coded `0`
+  (`row[s.name] = s.data[i] ?? 0`), not a gap — passing a `null` metric
+  straight through would render as a real, misleadingly low point.
+  `AgentEvalDetail`'s `trendSeries` helper filters each metric's nulls out
+  independently before handing the series to `LineChart`, at the
+  documented cost that the two lines no longer share the same x index when
+  their null patterns differ (a caption under the chart says so).
+- **Compare view always shows snapshot prompts, never the live prompt**
+  (AC-32, UX-8). `EvalCompareView` reads `base_prompt`/`head_prompt` off the
+  `EvalComparison` the server already resolved through
+  `agent_versions.config_json` snapshots; a missing snapshot renders
+  `compare.promptUnavailable` text, never a silent fallback to the agent's
+  current prompt. Prompts render in a plain `<pre>`, never through a second
+  markdown/HTML renderer (A05 — a stored system prompt is exactly the kind
+  of content that must never reach a second renderer).
+- **The skills-fingerprint caveat on version badges** (Q-3, E-8, UX-7).
+  Every batch row/column is labelled `v<agent_version>` with a `title`
+  tooltip stating skills may have changed without bumping that version;
+  `EvalCompareView/helpers.ts#sameVersionDifferentSkills` structurally
+  compares two batches' `skills_fingerprint` arrays and, when they differ at
+  the same `agent_version`, the compare view renders an explicit
+  `compare.sameVersionDifferentSkills` note above the metrics.
+- **Relative, not absolute, framing** (E-9, UX-13) — `dashboard.
+  relativeScoresNote` is rendered near the metric tiles on all three eval
+  pages/tab, stating that an eval run skips the repo context (callers, repo
+  map, specs, intent) a live review gets.
+
+### Known limitations — client (Phase D, deferred by user decision)
+
+`plan-verifier`'s Phase 2 review found zero Critical findings for Phase D;
+two Minor findings were reported and were **deliberately left open by user
+decision**, not fixed in this fix-loop:
+
+- Two UI strings are hardcoded English instead of routed through
+  `next-intl`: the "estimate assumes one call per case — a case using
+  strategy 'auto' ... can cost more" caveat
+  (`EvalDashboardView.tsx`'s `s.autoNote`, AC-47/E-10) and the "run all
+  agents" per-agent failure toast's fallback string
+  (`` `Run failed for agent ${d.owner_id}` `` in `EvalDashboardView.tsx`'s
+  `runAllAgents`). Both fall outside AC-41's enumerated new-key list, which
+  is why `eval.json`/`prReview.json` weren't extended for them.
+- The `nav.ts` item key ↔ `messages/en/shell.json`'s `nav.<key>` coupling
+  (`useShellCommands.ts`'s `t(`nav.${it.key}`)`) is an **untyped runtime
+  string join**, not a type-checked one — this exact mismatch (`nav.eval`
+  vs. the registered key `"evals"`) broke `next build`'s static generation
+  in the Phase D fix-loop's first iteration and was closed for *this* key
+  by renaming `shell.json`'s entry plus adding a static key-diff test
+  (`components/app-shell/nav.test.ts`) and a real-`next-intl` runtime hook
+  test (`useShellCommands.test.tsx`); the coupling mechanism itself — any
+  future `nav.ts` key addition could reproduce the same class of break —
+  remains untyped by design choice, not by oversight.
+
+Separately, and unrelated to the UI: `next.config.mjs` gained a
+`webpack.resolve.extensionAlias` (`{ ".js": [".ts", ".tsx", ".js"] }`) in
+the fix-loop's first iteration — the only value (non-type) client import of
+the `@devdigest/shared` barrel, `CaseEditorModal.tsx`'s
+`EvalExpectation.safeParse`, 500'd every tab of `/agents/:id` under `next
+build`/`next dev` even though `tsc --noEmit` and Vitest both stayed green,
+because Next's webpack doesn't resolve the barrel's relative `./contracts/
+*.js` → `.ts` specifiers the way `tsc`'s `Bundler` resolution and Vite's
+alias do. The alias makes the barrel (and any contract file) safely
+value-importable everywhere going forward, not just at this one call site.
+
+### Client surface map
+
+The server-side diagram above (persisting a batch) answers "what happens
+inside one transaction"; this one answers a different question — which UI
+surface calls which route — so both stay under the "one diagram per
+document" default with a stated reason rather than being merged:
+
+```mermaid
+flowchart LR
+  FC["FindingCard\n'Turn into eval case'"] -->|useCreateEvalCaseFromFinding| R1["POST /findings/:id/eval-case"]
+
+  ET["Agent Editor › Evals tab"] -->|useAgentEvalCases, useRunEvalSet,\nuseRunEvalCase, useDeleteEvalCase| R2["case CRUD +\nPOST /agents/:id/eval-runs"]
+
+  EDV["Eval Dashboard (/evals)"] -->|useEvalDashboard| R3["GET /eval-dashboard"]
+  EDV --> AED["AgentEvalDetail\n(per-agent)"]
+  AED -->|useAgentEvalDashboard,\nuseAgentEvalBatches| R4["GET /agents/:id/eval-dashboard,\n/eval-batches"]
+  AED -->|"?base=&head="| ECV["EvalCompareView\n(read-only)"]
+  ECV -->|useEvalCompare| R5["GET /agents/:id/eval-compare"]
+```
+
 ## Key source map
 
 | Concern | Location |
@@ -212,4 +367,12 @@ fixed in this fix-loop:
 | Additive cross-module read | `server/src/modules/agents/service.ts`'s `linkedSkillsForRun` |
 | Persistence | `server/src/db/schema/eval.ts` (`evalCases`, `evalBatches`, `evalRuns`) |
 | Contracts | `vendor/shared/contracts/eval-ci.ts` (hand-mirrored to client) |
-| Tests | `server/test/eval-runner-batch.it.test.ts`, `server/test/eval-read-apis.it.test.ts` |
+| Tests (server) | `server/test/eval-runner-batch.it.test.ts`, `server/test/eval-read-apis.it.test.ts` |
+| Client data layer | `client/src/lib/hooks/eval.ts` |
+| Client: create-from-finding | `FindingCard.tsx`, `FindingsPanel.tsx` (both under `client/src/app/repos/[repoId]/pulls/[number]/_components/`) |
+| Client: Agent Editor tab | `client/src/app/agents/[id]/_components/AgentEditor/_components/EvalsTab/` (`EvalsTab.tsx`, `CaseEditorModal/`, `CaseRow/`, `helpers.ts`) |
+| Client: dashboard/detail/compare | `client/src/app/evals/_components/` (`EvalDashboardView/`, `AgentEvalDetail/`, `EvalCompareView/`) |
+| Client: nav registry entry | `client/src/vendor/ui/nav.ts` (`SKILLS LAB` group, key `"evals"`) |
+| Client: i18n | `client/messages/en/eval.json`, `prReview.json`, `shell.json` |
+| Client: webpack fix for barrel value-imports | `client/next.config.mjs` (`webpack.resolve.extensionAlias`) |
+| Tests (client) | `client/src/app/evals/_components/**/*.test.tsx`, `EvalsTab.test.tsx`, `FindingsPanel.test.tsx`, `client/src/i18n/eval-l06-keys.test.ts`, `client/src/components/app-shell/nav.test.ts`, `useShellCommands.test.tsx` |

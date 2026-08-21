@@ -200,7 +200,12 @@ describe("AgentEvalDetail — E-17/UX-12 a first batch is 'first run', never a z
 
     renderDetail();
 
-    expect(screen.getByText("First run — nothing to compare yet.")).toBeInTheDocument();
+    // Phase D fix-loop — this now renders via the shared `compare.firstRunNothing`
+    // i18n key (same key the "recent runs" compare bar already used) instead of a
+    // hardcoded string, so the copy dropped the old "yet." suffix. With only one
+    // batch, BOTH the metrics-row note and the compare bar render this same text
+    // (getAllByText, not getByText — there are legitimately two instances).
+    expect(screen.getAllByText("First run — nothing to compare").length).toBeGreaterThan(0);
   });
 
   it("does NOT show first-run messaging once a delta exists (>=2 batches)", () => {
@@ -224,7 +229,7 @@ describe("AgentEvalDetail — E-17/UX-12 a first batch is 'first run', never a z
 
     renderDetail();
 
-    expect(screen.queryByText("First run — nothing to compare yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("First run — nothing to compare")).not.toBeInTheDocument();
   });
 });
 

@@ -12,15 +12,40 @@ vi.mock("../../../../../../../lib/hooks/reviews", () => ({
 // (the "Turn into eval case" action's mutation, WI11). `mutateEvalCase`
 // resolves onSuccess synchronously so a UX-2 confirmation-text test below
 // can observe the toast without a real QueryClientProvider or network.
+//
+// Phase D fix-loop — FindingsPanel now derives the confirmation's kind from
+// the mutation's OWN response (`expected_output.must_find`/`.must_not_flag`,
+// the server's authoritative derivation), not from `finding.accepted_at`
+// client-side. This mock simulates that same server derivation
+// (helpers.ts's `if (finding.acceptedAt) return 'must_find'`) keyed by the
+// finding id each test below clicks, so the response shape stays realistic.
+const KIND_BY_FINDING_ID: Record<string, "must_find" | "must_not_flag"> = {
+  "f-accepted": "must_find",
+  "f-dismissed": "must_not_flag",
+};
+type EvalCaseFromFindingResponse = {
+  expected_output: { version: 1; must_find: unknown[]; must_not_flag: unknown[] };
+};
 const mutateEvalCase = vi.fn(
-  (_input: unknown, opts?: { onSuccess?: () => void; onError?: (e: unknown) => void }) => {
-    opts?.onSuccess?.();
+  (
+    input: { findingId: string },
+    opts?: { onSuccess?: (data: EvalCaseFromFindingResponse) => void; onError?: (e: unknown) => void },
+  ) => {
+    const kind = KIND_BY_FINDING_ID[input.findingId] ?? "must_find";
+    opts?.onSuccess?.({
+      expected_output: {
+        version: 1,
+        must_find: kind === "must_find" ? [{}] : [],
+        must_not_flag: kind === "must_not_flag" ? [{}] : [],
+      },
+    });
   },
 );
 vi.mock("../../../../../../../lib/hooks/eval", () => ({
   useCreateEvalCaseFromFinding: () => ({
-    mutate: (...args: [unknown, { onSuccess?: () => void; onError?: (e: unknown) => void }?]) =>
-      mutateEvalCase(...args),
+    mutate: (
+      ...args: [{ findingId: string }, { onSuccess?: (data: EvalCaseFromFindingResponse) => void; onError?: (e: unknown) => void }?]
+    ) => mutateEvalCase(...args),
     isPending: false,
   }),
 }));

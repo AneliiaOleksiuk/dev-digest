@@ -12,6 +12,13 @@
  * after Phase D, and the new keys Phase D adds must be exactly the
  * enumerated additions (no surprise renames/collisions elsewhere in the
  * namespace).
+ *
+ * Phase D fix-loop (plan-verifier Phase 1 row 25, AC-30/UX-5) added ONE more
+ * key beyond that original enumeration — `dashboard.metricCasesCaption` —
+ * to state each metric's own contributing-case count ("a mean over 2 of 8
+ * cases is not read as a mean over 8"). This falls outside AC-41's original
+ * list (which predates that finding) but is a legitimate, spec-justified
+ * addition, not a silent one — see `expectedNewKeys` below.
  */
 import { describe, it, expect } from "vitest";
 import evalMessages from "../../messages/en/eval.json";
@@ -132,7 +139,7 @@ describe("AC-41 — no pre-existing eval.json key was redefined or reworded", ()
     }
   });
 
-  it("the only genuinely new eval.json keys are the ones AC-41 enumerates (dashboard run-all-agents/estimate/na + a new compare block)", () => {
+  it("the only genuinely new eval.json keys are the ones AC-41 enumerates (dashboard run-all-agents/estimate/na + a new compare block), plus the Phase D fix-loop's metricCasesCaption (AC-30/UX-5)", () => {
     const newKeys = Object.keys(CURRENT_EVAL_FLAT).filter((k) => !(k in EVAL_BASELINE_FLAT));
     const expectedNewKeys = [
       "dashboard.runAllAgents",
@@ -141,6 +148,9 @@ describe("AC-41 — no pre-existing eval.json key was redefined or reworded", ()
       "dashboard.na",
       "dashboard.naReason",
       "dashboard.relativeScoresNote",
+      // Phase D fix-loop, plan-verifier Phase 1 row 25 (AC-30/UX-5) — see
+      // this file's top doc comment.
+      "dashboard.metricCasesCaption",
       "compare.title",
       "compare.base",
       "compare.head",

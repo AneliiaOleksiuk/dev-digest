@@ -1209,3 +1209,76 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `CaseRow`/`EvalDashboardView`/`AgentEvalDetail`/`EvalCompareView`/the
   `FindingCard` third-button behavior is `test-writer`'s job next, not
   attempted here beyond the pre-existing suites passing.
+
+- 2026-08-22: L06 Eval Pipeline, Phase D plan-verifier fix-loop iteration 1.
+  **A `@devdigest/shared` VALUE import (not `import type`) breaks Next's
+  webpack bundler even though `tsc --noEmit` and Vitest both stay green —
+  and it takes down every route that reaches it, not just the one that
+  imports it.** `CaseEditorModal.tsx` had `import { EvalExpectation } from
+  "@devdigest/shared"` (a runtime `.safeParse()` call, not just a type) —
+  the only non-`import type` client usage of the barrel in this codebase.
+  `client/src/vendor/shared/index.ts` re-exports via relative `./contracts/
+  *.js` specifiers pointing at `.ts` source files (the NodeNext convention —
+  `tsc`'s `moduleResolution: "Bundler"` and Vitest's Vite alias both resolve
+  this natively). Next's webpack does NOT, by default: `next dev` 500'd on
+  EVERY tab of `/agents/:id` (not just Evals — any route whose module graph
+  reaches the barrel at runtime), and `next build` failed with `Module not
+  found: Can't resolve './contracts/*.js'`. **Verified the narrower-looking
+  fix does NOT work**: importing the specific contract file directly
+  (`@devdigest/shared/contracts/eval-ci`, bypassing the barrel) still fails,
+  because `eval-ci.ts` itself has its own relative `.js` imports (`./
+  findings.js`, `./knowledge.js`) for schemas it genuinely uses at runtime
+  (`Verdict.default(...)`, `EvalOwnerKind` in a field type) — the `.js`→
+  `.ts` mismatch is a property of ANY relative import in `vendor/shared`,
+  not something scoped to the barrel file. The actual fix: `next.config.mjs`
+  gets a `webpack: (config) => { config.resolve.extensionAlias = { ...,
+  ".js": [".ts", ".tsx", ".js"] }; return config; }` — this is the ONE
+  non-vendor file allowed to touch this, and it makes the barrel (and any
+  contract file) safely value-importable everywhere going forward, not just
+  at this one call site. Confirmed live, not just via `tsc`/`vitest`
+  (plan-verifier explicitly flagged those as blind to this class of break):
+  `next dev` serving `/agents/:id?tab=evals` (and `config`, `/evals`, `/`)
+  all 200 before AND after adding the alias would be the wrong test — the
+  500 only reproduces via `next build`'s webpack pass or a `next dev` route
+  that hasn't been compiled yet in that dev session; a stale `.next` cache
+  can hide it. Always verify a webpack-resolution fix with a fresh `next
+  build` (exit code, not just skimming for "Compiled successfully"), not
+  `tsc --noEmit` alone.
+- 2026-08-22 (same session): **`dashboard.current.recall/precision/
+  citation_accuracy` (both `AgentEvalDetail` and `EvalsTab`) are sourced
+  server-side from `recent_runs[0]` (the LATEST batch), not aggregated
+  across the owner's whole case history** — see `server/src/modules/eval/
+  service.ts`'s `buildDashboard`: `current = { recall: latest?.recall, ... }`
+  where `latest = batches[0]`. So that SAME batch's own `recall_cases`/
+  `precision_cases`/`citation_cases`/`cases_total` (already on
+  `EvalBatchRecord`, already present in `dashboard.recent_runs[0]` — no new
+  endpoint needed) are the correct per-metric contributing-case caption for
+  AC-30/UX-5, NOT `dashboard.cases_total` (the owner's whole case set,
+  which is deliberately a different, larger number and would misrepresent
+  "17 of 8 cases" as "17 of 20"). `MetricCard` (`vendor/ui/charts/
+  MetricCard.tsx`) has no caption/subtitle prop and is do-not-touch vendor
+  code — render the caption as a sibling `<p>` inside the existing
+  `metricWrap` flex column instead of extending the component.
+- 2026-08-22 (same session): a pre-existing i18n typo (`shell.nav.evals` —
+  `useShellCommands.ts` builds `t(`nav.${it.key}`)` from `nav.ts`'s item key
+  `"evals"`, but `messages/en/shell.json`'s `nav` block only has the
+  singular `eval`) fires as a caught `MISSING_MESSAGE` console error on
+  EVERY route (confirmed via live `next dev` log, including `/`) — it does
+  NOT fail the request (still 200) and is unrelated to any work this session
+  touched. Left alone (out of scope for this fix-loop's required items); if
+  picked up later, the fix is either renaming `messages/en/shell.json`'s
+  `nav.eval` → `nav.evals` or the reverse in `nav.ts`, not touching
+  `useShellCommands.ts`.
+- 2026-08-22 (same session): an "enumerated new-keys" inventory test
+  (`src/i18n/eval-l06-keys.test.ts`, AC-41) asserts the FULL exact list of
+  new `eval.json` keys added since a captured pre-Phase-D baseline — adding
+  any new key anywhere in that file, even a deliberately spec-justified one
+  from a later fix-loop, fails this test until the new key is added to its
+  `expectedNewKeys` array too. This is correct/expected behavior for this
+  test's design, not a test to route around: when a fix instruction says
+  "note this addition plainly, it falls outside the original enumerated
+  list," that plainly-noted addition belongs BOTH in a code comment near the
+  new key's usage AND as an explicit, commented addition to this test's
+  expected-list array (see `dashboard.metricCasesCaption`'s entry there) —
+  don't leave the test failing or weaken its exact-match assertion into a
+  subset check.

@@ -49,9 +49,11 @@ export function EvalsTab({ agent }: { agent: Agent }) {
   );
   const batchQueries = useEvalBatches(recentBatchIds);
   const batchData = batchQueries.map((q) => q.data);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-derive only
-  // when a batch's fetched data actually changes, not on every render.
-  const lastRunByCase = React.useMemo(() => buildLastRunByCase(batchData), batchData);
+  // No useMemo here — `batchData` (size <= RECENT_BATCHES_FOR_LAST_RUN) as a
+  // dependency array is invalid (React requires a constant-size deps array),
+  // and the fold itself is a cheap O(<=5) walk, so recomputing every render
+  // is fine.
+  const lastRunByCase = buildLastRunByCase(batchData);
 
   const [editing, setEditing] = React.useState<"new" | string | null>(null);
 
@@ -67,19 +69,32 @@ export function EvalsTab({ agent }: { agent: Agent }) {
   const editingCase = editing && editing !== "new" ? cases.find((c) => c.id === editing) : undefined;
   const isFirstRun = dashboard.delta === null && (dashboard.recent_runs?.length ?? 0) <= 1;
 
+  // `current.*` is sourced from `recent_runs[0]` server-side (see
+  // AgentEvalDetail's identical comment) — that same batch's own
+  // `*_cases`/`cases_total` is the honest contributing-case count for the
+  // metric shown here (AC-30, UX-5), not `dashboard.cases_total`.
+  const latestBatch = dashboard.recent_runs[0];
   const metrics = [
-    { key: "recall", label: t("dashboard.metrics.recall"), value: dashboard.current.recall, delta: dashboard.delta?.recall },
+    {
+      key: "recall",
+      label: t("dashboard.metrics.recall"),
+      value: dashboard.current.recall,
+      delta: dashboard.delta?.recall,
+      cases: latestBatch?.recall_cases,
+    },
     {
       key: "precision",
       label: t("dashboard.metrics.precision"),
       value: dashboard.current.precision,
       delta: dashboard.delta?.precision,
+      cases: latestBatch?.precision_cases,
     },
     {
       key: "citation",
       label: t("dashboard.metrics.citationAccuracy"),
       value: dashboard.current.citation_accuracy,
       delta: dashboard.delta?.citation_accuracy,
+      cases: latestBatch?.citation_cases,
     },
   ] as const;
 
@@ -108,12 +123,17 @@ export function EvalsTab({ agent }: { agent: Agent }) {
               delta={!isFirstRun ? (m.delta ?? undefined) : undefined}
             />
             {m.value == null && dashboard.cases_total > 0 && <p style={s.naNote}>{t("dashboard.naReason")}</p>}
+            {latestBatch && (
+              <p style={s.naNote}>
+                {t("dashboard.metricCasesCaption", { count: m.cases, total: latestBatch.cases_total })}
+              </p>
+            )}
           </div>
         ))}
       </div>
       {/* E-17/UX-12 — a first batch is "nothing to compare yet", never a
          zero delta (plain text: not in AC-41's enumerated new-key list). */}
-      {isFirstRun && dashboard.cases_total > 0 && <p style={s.firstRunNote}>First run — nothing to compare yet.</p>}
+      {isFirstRun && dashboard.cases_total > 0 && <p style={s.firstRunNote}>{t("compare.firstRunNothing")}</p>}
       <p style={s.relativeNote}>{t("dashboard.relativeScoresNote")}</p>
 
       <div style={s.casesHeader}>

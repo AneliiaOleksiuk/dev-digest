@@ -34,6 +34,7 @@
     "runAllAgentsEstimate": "≈{calls} model call(s) across {agents} agent(s) · last total cost {cost}",
     "na": "n/a",
     "naReason": "no data for this metric on this run",
+    "metricCasesCaption": "{count} of {total, plural, one {# case} other {# cases}}",
     "relativeScoresNote": "Eval scores are relative, not absolute — this run skips the repo context (callers, repo map, specs, intent) a live review gets. Compare movement between runs; don't read one number as production quality."
   },
   "compare": {

@@ -102,17 +102,22 @@ export function FindingsPanel({
               headSha={headSha}
               onAction={(actionKind) => action.mutate({ findingId: finding.id, action: actionKind, prId })}
               onCreateEvalCase={() => {
-                // UX-2 — state which kind of case the click just created.
-                // Kind is derived server-side from the SAME accepted_at/
-                // dismissed_at this card already renders (AC-3) — never
-                // taken from a body field the client would have to guess.
-                const key = finding.accepted_at
-                  ? "finding.evalCaseCreatedMustFind"
-                  : "finding.evalCaseCreatedMustNotFlag";
                 createEvalCase.mutate(
                   { findingId: finding.id },
                   {
-                    onSuccess: () => notify.success(t(key, { file: finding.file })),
+                    onSuccess: (data) => {
+                      // UX-2 — state which kind of case the click just
+                      // created. Read off the mutation's OWN response
+                      // (`expected_output.must_find`/`.must_not_flag`) —
+                      // the server's authoritative derivation (AC-3, D-7) —
+                      // rather than re-deriving it client-side from
+                      // `finding.accepted_at`, which can be stale/inferred
+                      // wrong relative to what the server actually wrote.
+                      const key = data.expected_output?.must_find.length
+                        ? "finding.evalCaseCreatedMustFind"
+                        : "finding.evalCaseCreatedMustNotFlag";
+                      notify.success(t(key, { file: finding.file }));
+                    },
                     onError: (err) =>
                       notify.error(err instanceof Error ? err.message : "Couldn't create eval case"),
                   },

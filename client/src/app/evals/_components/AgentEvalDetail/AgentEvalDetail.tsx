@@ -95,15 +95,37 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
   }
 
   const isFirstRun = dashboard.delta === null && dashboard.trend.length <= 1;
+  // `current.*` is sourced from `recent_runs[0]` (see the server's
+  // `buildDashboard`) — so that SAME batch's own `*_cases`/`cases_total` are
+  // the honest contributing-case count for the metric shown here (AC-30,
+  // UX-5). Deliberately NOT `dashboard.cases_total` (the owner's whole
+  // case set) — a mean over 2 of this batch's 8 cases must not be read as a
+  // mean over the owner's full N.
+  const latestBatch = dashboard.recent_runs[0];
   const metrics = [
-    { key: "recall", label: t("dashboard.metrics.recall"), value: dashboard.current.recall, delta: dashboard.delta?.recall, color: "var(--accent)" },
-    { key: "precision", label: t("dashboard.metrics.precision"), value: dashboard.current.precision, delta: dashboard.delta?.precision, color: "var(--ok)" },
+    {
+      key: "recall",
+      label: t("dashboard.metrics.recall"),
+      value: dashboard.current.recall,
+      delta: dashboard.delta?.recall,
+      color: "var(--accent)",
+      cases: latestBatch?.recall_cases,
+    },
+    {
+      key: "precision",
+      label: t("dashboard.metrics.precision"),
+      value: dashboard.current.precision,
+      delta: dashboard.delta?.precision,
+      color: "var(--ok)",
+      cases: latestBatch?.precision_cases,
+    },
     {
       key: "citation",
       label: t("dashboard.metrics.citationAccuracy"),
       value: dashboard.current.citation_accuracy,
       delta: dashboard.delta?.citation_accuracy,
       color: "var(--warn)",
+      cases: latestBatch?.citation_cases,
     },
   ] as const;
 
@@ -154,10 +176,15 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
                 delta={!isFirstRun ? (m.delta ?? undefined) : undefined}
               />
               {m.value == null && dashboard.cases_total > 0 && <p style={s.naNote}>{t("dashboard.naReason")}</p>}
+              {latestBatch && (
+                <p style={s.naNote}>
+                  {t("dashboard.metricCasesCaption", { count: m.cases, total: latestBatch.cases_total })}
+                </p>
+              )}
             </div>
           ))}
         </div>
-        {isFirstRun && dashboard.cases_total > 0 && <p style={s.naNote}>First run — nothing to compare yet.</p>}
+        {isFirstRun && dashboard.cases_total > 0 && <p style={s.naNote}>{t("compare.firstRunNothing")}</p>}
         <p style={s.note}>{t("dashboard.relativeScoresNote")}</p>
 
         <div>

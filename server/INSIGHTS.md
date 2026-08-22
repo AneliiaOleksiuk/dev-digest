@@ -418,6 +418,65 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   unlike the `project_context_docs`/`risk_areas` ripples documented
   elsewhere in this file.
 
+- **`modules/ci/service.ts`'s shared `generateFiles()` ALWAYS writes the
+  Preview-only placeholder for the runner bundle entry — Install and the zip
+  export MUST re-swap it for the real bytes themselves, or the shipped
+  `.devdigest/runner/index.js` is a ~150-byte comment string, not the runner
+  (2026-08-23, SPEC-04 Phase C, WI13).** `generateFiles()` (Phase B) reads
+  `readRunnerBundle()` only to get a byte count for `previewPlaceholder(n)`
+  and discards the real content — correct for Preview (Q-3: real bytes never
+  cross to the client) but silently wrong if reused as-is for Install/zip,
+  since the plan's own WI13 text ("zip... including the real bundle bytes")
+  is the only place this requirement is stated; the phase's numbered
+  step-list does not call it out as its own step. Fixed with a small
+  post-processing method, `CiService.withRealBundle(files)`, that re-reads
+  the bundle and replaces the `RUNNER_PATH` entry's `contents`/
+  `preview_omitted` — called from both `install()` and `exportZip()`, never
+  from `generateFiles()` itself, so Preview's "placeholder only" guarantee
+  holds by construction. Verified live: `POST .../export-ci/zip`'s returned
+  zip had `.devdigest/runner/index.js` at 1,596,253 bytes (the real
+  `ncc`-bundled `agent-runner/dist/index.js`), not the placeholder string.
+  Re-reading the bundle a second time (once in `generateFiles`, once in
+  `withRealBundle`) is a deliberate, cheap tradeoff over widening
+  `generateFiles`'s signature — it's a local disk read, and Preview's
+  already-reviewed (Phase B) behavior stays untouched.
+
+- **AC-39's "never produce a target tree containing two manifests" cannot be
+  satisfied by actual git-level file DELETION through the existing
+  `commitFiles({path, contents})` port — only by overwriting a path in place
+  (2026-08-23, SPEC-04 Phase C, WI13, flagged for human review).** GitHub's
+  Git Data API needs a tree entry with `sha: null` to remove a path; `CommitFile`
+  (`vendor/shared/adapters.ts`) has no field to express that, and Phase C's
+  own constraints (D-10/AC-80 "no new adapter method"; WI13's file scope is
+  `service.ts`/`routes.ts` only, never `adapters/github/octokit.ts`) rule out
+  adding one. Resolved by exploiting `agent-runner/src/manifest.ts`'s
+  `findManifestPath`, which refuses on file COUNT under `.devdigest/agents/`,
+  never on filename: on a confirmed `replace_existing` conflict,
+  `CiService.avoidDoubleManifest` looks up the CONFLICTING installation's own
+  agent (guaranteed to still exist — `ci_installations.agent_id` is `ON
+  DELETE CASCADE`, so a conflicting row can't outlive its agent), re-derives
+  that agent's manifest path via the same `slugify()` used at generation
+  time, and rewrites the NEW agent's manifest file entry to that exact path
+  before committing — one file, one path, no deletion needed. Tradeoff: the
+  new agent's manifest ships under a filename that no longer matches its own
+  slug in this one replace-conflict case. A real fix needs a GitHub adapter
+  change (a `CommitFile` deletion signal) in a future phase, not a Phase C
+  workaround.
+
+- **`POST /ci/ingest` deliberately does NOT declare `schema: { body:
+  CiIngestInput }`, breaking this repo's usual "every route validates its
+  body via the zod type provider" convention — and that is the correct call
+  here, not an oversight (2026-08-23, SPEC-04 Phase C, WI14).** Fastify runs
+  schema-body validation BEFORE the route handler; this route's binding
+  order (Spec's flowchart, AC-51/AC-53) requires the header credential check
+  to run and fail closed (401, writes nothing) BEFORE the body is ever
+  parsed against a schema — an unauthenticated caller must learn nothing
+  about whether their body would even have been well-formed. `CiService
+  .ingest()` does the zod `.safeParse()` itself, manually, AFTER the
+  constant-time token check succeeds. If a future session is tempted to "fix"
+  this route to match the usual convention, re-read AC-51/AC-53's ordering
+  first — the deviation is the fix, not the bug.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -687,6 +746,34 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `.it.test.ts` suite (or a throwaway ad hoc one against `startPg()`) is a
   strictly stronger correctness check than unit tests alone for anything
   touching `repository.drizzle.ts`.
+
+- **`node:crypto`'s `timingSafeEqual` THROWS `RangeError` on a length
+  mismatch instead of returning `false` — always rule out length first
+  (2026-08-23, SPEC-04 Phase C, WI14, `modules/ci/service.ts`'s
+  `constantTimeEqual`).** The naive "constant-time compare" implementation
+  (`a.length === b.length && timingSafeEqual(a, b)`, short-circuit `&&`) is
+  actually fine here specifically because BOTH sides are fixed-length sha256
+  digests in the normal case (32 bytes each) — the length check only ever
+  differs on a corrupt/truncated stored hash, an astronomically rare and
+  non-adversarially-controllable case, so the theoretical timing leak from
+  the short-circuit is not exploitable for this call site. Don't reuse this
+  exact shape for a comparison where an attacker CAN control both operands'
+  length (e.g. comparing two attacker-influenced strings) without
+  re-deriving whether the short-circuit is still safe there. Verified live:
+  a wrong-length or wrong-value presented token both correctly 401 with no
+  throw, no stack trace, and a response body containing neither the token
+  nor the hash.
+- **`ci_installations.token_hash` is stored as a lowercase HEX string (via
+  `createHash('sha256').update(token,'utf8').digest('hex')`), not the raw
+  32-byte digest** (2026-08-23, SPEC-04 Phase C) — the ingest path re-hashes
+  the presented token to a raw `Buffer` via `.digest()` (no encoding arg)
+  and must `Buffer.from(storedHex, 'hex')` the stored column value before
+  `timingSafeEqual` can compare them; comparing a hex STRING against a raw
+  digest Buffer would always fail even on the correct token. If a future
+  session inserts a test fixture row directly via SQL (as this session did,
+  to exercise the ingest endpoint's auth paths without needing a real
+  `GITHUB_TOKEN`), the `token_hash` column value must be the hex digest
+  string, not base64 and not the raw bytes.
 
 ## Recurring Errors & Fixes
 
@@ -1507,3 +1594,58 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   DB) would look exactly like this at first glance and needs the same
   "diff the file count against the row count" sanity check to rule out
   before applying, not just eyeballing the id.
+
+- 2026-08-23: SPEC-04 Phase C (`docs/plans/spec-04-export-to-ci.md` WI12-16,
+  Install/ingest/read APIs — the most security-sensitive phase of this
+  feature). `repository.ts`/`repository.drizzle.ts` gained the full CI
+  installation + CI run CRUD (every `workspaceId`-taking method joins through
+  `agents.workspace_id`, since `ci_installations` has no tenancy column of
+  its own; `findInstallationById`/`insertCiRun` are the two documented
+  ingest-path exceptions). `service.ts` gained `install` (WI13 — token
+  minted only on create via `randomBytes(32)`/sha256, no half-state on a
+  post-commit PR failure, AC-39 conflict handling — see the new Codebase
+  Patterns entry above for why it overwrites rather than deletes),
+  `exportZip` (zero GitHub writes, zero DB writes, no token — flagged
+  interpretation per the plan), `ingest` (WI14 — header-authenticated,
+  constant-time token check, `getContext` never called, one explicit-column
+  insert idempotent on the DB unique index), `listRuns`/`listInstallations`
+  (WI15), `deleteInstallation` (WI16). `routes.ts` wires all of the above;
+  `POST /ci/ingest` deliberately skips the usual zod-schema-on-route
+  convention (see Codebase Patterns). Added `UnauthorizedError` (401) to
+  `platform/errors.ts`. No schema/migration changes — Phase A already added
+  every column this phase needed. `pnpm typecheck`/`pnpm arch:check` both
+  clean. Live-verified end to end against the real running app (Docker
+  Postgres was up): built `agent-runner/dist/index.js` fresh
+  (`cd agent-runner && pnpm build`) so Preview/zip could exercise the real
+  bundle-swap path; confirmed Preview unaffected (Phase B regression check);
+  confirmed the zip download's `.devdigest/runner/index.js` is the real
+  1.6MB bundle, not the ~150-byte placeholder; exercised Install's
+  validation-refusal paths (bad `target`, bad `repo` shape, a
+  `workflow_override` containing `pull_request_target` — all refused before
+  any GitHub call could happen); inserted a `ci_installations` row directly
+  via SQL (with a known token/hash pair) to exercise `POST /ci/ingest`
+  without a real `GITHUB_TOKEN` — confirmed 401 + zero rows written for
+  absent headers, an unknown installation id, a wrong token, and a
+  non-UUID-shaped installation id; confirmed a valid token succeeds (201)
+  and the persisted `agent_runs` row's `workspace_id` exactly matches the
+  installation's agent's own workspace (tenancy resolved purely from the
+  authenticated installation, never a session); confirmed idempotency (a
+  duplicate `actions_run_id` left exactly one row, with the ORIGINAL
+  `findings_count`, not the duplicate's fabricated one); confirmed a
+  repo-mismatch body is rejected; confirmed a failure-shaped body (`result:
+  null`) persists with every metric genuinely `null`, never invented zeros;
+  confirmed `GET /ci/runs`/`GET /agents/:id/ci-installations` render
+  correctly (agent name resolved via left join, `pr_title: null` denormalized
+  fallback, filters narrow correctly) and `DELETE /ci/installations/:id`
+  404s on a nonexistent id, 204/200s on a real one, sets
+  `agent_runs.ci_installation_id` null (not cascade-deleting the runs,
+  E-24), and a subsequent ingest against the deleted installation 401s. Did
+  NOT live-test Install's actual `commitFiles`/`openPullRequest` path (would
+  need a real `GITHUB_TOKEN` and a real target repo — out of scope for this
+  environment, and the session's own sandboxed shell classifier declined the
+  one attempt to try it against a placeholder repo). All test data (the SQL
+  fixture row, the two `agent_runs` rows) deleted before ending the session;
+  zero `process.env` reads and zero log calls carrying
+  token/hash/contents/systemPrompt/body confirmed by grep across
+  `modules/ci/*.ts`. No test authorship this session (explicit user
+  instruction for this pass, not just the usual "test-writer's job next").

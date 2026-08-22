@@ -109,7 +109,9 @@ export function EvalDashboardView() {
         )}
 
         <div style={s.list}>
-          {(dashboards ?? []).map((d) => (
+          {(dashboards ?? []).map((d) => {
+            const recallTrend = trendSparkline(d, "recall");
+            return (
             <Card key={d.owner_id ?? "unknown"} hover onClick={() => d.owner_id && selectAgent(d.owner_id)}>
               <div style={s.row}>
                 <div style={s.rowMain}>
@@ -136,12 +138,18 @@ export function EvalDashboardView() {
                       </div>
                     );
                   })}
-                  <Sparkline data={trendSparkline(d, "recall")} w={64} h={22} />
+                  {/* Sparkline divides by `data.length - 1` to place points,
+                     so a single-point series (one batch so far) is a
+                     division-by-zero -> NaN cx/cy React DOM error, not a
+                     rendering no-op. Same guard AgentEvalDetail's MetricCard
+                     trend already applies. */}
+                  {recallTrend.length > 1 && <Sparkline data={recallTrend} w={64} h={22} />}
                   {d.alert && <Badge color="var(--warn)">{d.alert}</Badge>}
                 </div>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       </div>
     </AppShell>

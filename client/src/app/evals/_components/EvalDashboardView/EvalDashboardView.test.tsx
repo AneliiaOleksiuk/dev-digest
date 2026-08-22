@@ -93,6 +93,24 @@ describe("EvalDashboardView — E-15 an owner that no longer resolves to a live 
   });
 });
 
+describe("EvalDashboardView — regression: a one-batch trend must not crash Sparkline", () => {
+  it("renders no sparkline (rather than a NaN cx/cy circle) when only one batch has ever run", () => {
+    // Sparkline places each point at `i / (data.length - 1)` — with exactly
+    // one point that's a division by zero, producing NaN cx/cy and a React
+    // DOM console error (not a thrown exception, so a naive test would still
+    // pass while the real page shows Next's error overlay).
+    useEvalDashboard.mockReturnValue({ data: [LIVE_ROW], isLoading: false, isError: false, refetch: vi.fn() });
+    useAgents.mockReturnValue({ data: [{ id: "ag1", name: "Security Reviewer" }] });
+    useRunEvalSet.mockReturnValue({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false });
+
+    const { container } = renderDashboard();
+
+    // Sparkline is the only thing on this page that renders a `<circle>` —
+    // other icons (e.g. the "Run all agents" Play icon) use polygons/paths.
+    expect(container.querySelector("circle")).not.toBeInTheDocument();
+  });
+});
+
 describe("EvalDashboardView — AC-47/UX-9 the run-all-agents estimate states the multiplied figure before the click", () => {
   it("shows the calls × agents × cost estimate next to 'Run all agents'", () => {
     useEvalDashboard.mockReturnValue({ data: [LIVE_ROW], isLoading: false, isError: false, refetch: vi.fn() });

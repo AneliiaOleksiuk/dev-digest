@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Badge, Button, ErrorState, Icon, LineChart, MetricCard, Skeleton } from "@devdigest/ui";
+import { Badge, Button, ErrorState, Icon, LineChart, MetricCard, ProgressBar, Skeleton } from "@devdigest/ui";
 import { useAgent } from "@/lib/hooks/agents";
 import { useAgentEvalBatches, useAgentEvalDashboard, useRunEvalSet } from "@/lib/hooks/eval";
 import { formatCost } from "@/helpers/format";
@@ -104,6 +104,7 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
       delta: dashboard.delta?.recall,
       color: "var(--accent)",
       cases: latestBatch?.recall_cases,
+      trend: trendSeries(dashboard, "recall"),
     },
     {
       key: "precision",
@@ -112,6 +113,7 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
       delta: dashboard.delta?.precision,
       color: "var(--ok)",
       cases: latestBatch?.precision_cases,
+      trend: trendSeries(dashboard, "precision"),
     },
     {
       key: "citation",
@@ -120,6 +122,7 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
       delta: dashboard.delta?.citation_accuracy,
       color: "var(--warn)",
       cases: latestBatch?.citation_cases,
+      trend: trendSeries(dashboard, "citation_accuracy"),
     },
   ] as const;
 
@@ -128,6 +131,18 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
     { name: t("dashboard.legend.precision"), color: "var(--ok)", data: trendSeries(dashboard, "precision") },
     { name: t("dashboard.legend.citation"), color: "var(--warn)", data: trendSeries(dashboard, "citation_accuracy") },
   ].filter((sr) => sr.data.length > 0);
+
+  const metricBarCell = (value: number | null, color: string) =>
+    value == null ? (
+      t("dashboard.na")
+    ) : (
+      <div style={s.metricBarCell}>
+        <div style={s.metricBarTrack}>
+          <ProgressBar value={value * 100} color={color} />
+        </div>
+        <span>{Math.round(value * 100)}%</span>
+      </div>
+    );
 
   return (
     <AppShell crumb={crumb}>
@@ -169,6 +184,7 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
                 value={m.value != null ? `${Math.round(m.value * 100)}%` : t("dashboard.na")}
                 color={m.color}
                 delta={!isFirstRun ? (m.delta ?? undefined) : undefined}
+                trend={m.trend.length > 1 ? m.trend : undefined}
               />
               {m.value == null && dashboard.cases_total > 0 && <p style={s.naNote}>{t("dashboard.naReason")}</p>}
               {latestBatch && (
@@ -183,7 +199,19 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
         <p style={s.note}>{t("dashboard.relativeScoresNote")}</p>
 
         <div>
-          <h2 style={s.sectionTitle}>{t("dashboard.metricTrend")}</h2>
+          <div style={s.sectionHeader}>
+            <h2 style={s.sectionTitle}>{t("dashboard.metricTrend")}</h2>
+            {series.length > 0 && (
+              <div style={s.legendRow}>
+                {series.map((sr) => (
+                  <span key={sr.name} style={s.legendItem}>
+                    <span style={s.legendDot(sr.color)} />
+                    {sr.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           {series.length === 0 ? (
             <p style={s.naNote}>{t("dashboard.noRuns")}</p>
           ) : (
@@ -202,7 +230,19 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
         </div>
 
         <div>
-          <h2 style={s.sectionTitle}>{t("dashboard.recentRuns")}</h2>
+          <div style={s.sectionHeader}>
+            <h2 style={s.sectionTitle}>{t("dashboard.recentRuns")}</h2>
+            {(batches ?? []).length >= 2 && (
+              <div style={s.compareBar}>
+                <span style={s.selectionCount}>
+                  {selected.length > 0 ? `${selected.length} selected` : "Select two runs to compare"}
+                </span>
+                <Button kind="primary" size="sm" icon="Layers" disabled={selected.length !== 2} onClick={compareSelected}>
+                  Compare
+                </Button>
+              </div>
+            )}
+          </div>
           {(batches ?? []).length === 0 ? (
             <p style={s.naNote}>{t("dashboard.noRuns")}</p>
           ) : (
@@ -244,11 +284,9 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
                         </span>
                       </Badge>
                     </td>
-                    <td style={s.td}>{b.recall != null ? `${Math.round(b.recall * 100)}%` : t("dashboard.na")}</td>
-                    <td style={s.td}>{b.precision != null ? `${Math.round(b.precision * 100)}%` : t("dashboard.na")}</td>
-                    <td style={s.td}>
-                      {b.citation_accuracy != null ? `${Math.round(b.citation_accuracy * 100)}%` : t("dashboard.na")}
-                    </td>
+                    <td style={s.td}>{metricBarCell(b.recall, "var(--accent)")}</td>
+                    <td style={s.td}>{metricBarCell(b.precision, "var(--ok)")}</td>
+                    <td style={s.td}>{metricBarCell(b.citation_accuracy, "var(--warn)")}</td>
                     <td style={s.td}>
                       <span style={{ color: b.status === "failed" ? "var(--crit)" : "var(--text-primary)" }}>
                         {b.cases_passed}/{b.cases_total}
@@ -260,19 +298,12 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
               </tbody>
             </table>
           )}
-          <div style={s.compareBar}>
-            <Icon.Layers size={14} style={{ color: "var(--text-muted)" }} />
-            {(batches ?? []).length < 2 ? (
+          {(batches ?? []).length < 2 && (
+            <div style={s.compareBar}>
+              <Icon.Layers size={14} style={{ color: "var(--text-muted)" }} />
               <span style={s.naNote}>{t("compare.firstRunNothing")}</span>
-            ) : (
-              <>
-                <span style={s.naNote}>Select two runs above to compare.</span>
-                <Button kind="secondary" size="sm" disabled={selected.length !== 2} onClick={compareSelected}>
-                  Compare
-                </Button>
-              </>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
       {baseId && headId && (

@@ -21,7 +21,7 @@
  *     cost.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { EvalBatchRecord, EvalDashboard } from "@/lib/types";
 import evalMessages from "../../../../../messages/en/eval.json";
@@ -271,6 +271,42 @@ describe("AgentEvalDetail — regression: metric captions read their OWN contrib
   });
 });
 
+describe("AgentEvalDetail — the Compare action lives at the top of Recent runs, and enables only once exactly two rows are picked", () => {
+  it("shows a selection count and enables Compare only after selecting two of the two available rows", () => {
+    const dashboard: EvalDashboard = {
+      owner_kind: "agent",
+      owner_id: "ag1",
+      cases_total: 8,
+      current: { recall: 0.9, precision: 0.3, citation_accuracy: 0.9, traces_passed: 2, traces_total: 8, cost_usd: 0.02 },
+      delta: { recall: 0, precision: -0.6, citation_accuracy: -0.05 },
+      trend: [
+        { batch_id: "b0", agent_version: 5, ran_at: BATCH_V5.ran_at, recall: 0.9, precision: 0.9, citation_accuracy: 0.95, pass_rate: 0.875, cost_usd: 0.02 },
+        { batch_id: "b1", agent_version: 6, ran_at: BATCH_V6_WEAKENED.ran_at, recall: 0.9, precision: 0.3, citation_accuracy: 0.9, pass_rate: 0.25, cost_usd: 0.02 },
+      ],
+      recent_runs: [BATCH_V6_WEAKENED, BATCH_V5],
+      alert: null,
+    };
+    useAgent.mockReturnValue({ data: AGENT });
+    useAgentEvalDashboard.mockReturnValue({ data: dashboard, isLoading: false, isError: false, refetch: vi.fn() });
+    useAgentEvalBatches.mockReturnValue({ data: [BATCH_V6_WEAKENED, BATCH_V5] });
+    useRunEvalSet.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    renderDetail();
+
+    expect(screen.getByText("Select two runs to compare")).toBeInTheDocument();
+    const compareButton = screen.getByRole("button", { name: /Compare/ });
+    expect(compareButton).toBeDisabled();
+
+    fireEvent.click(screen.getByText("v5"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(compareButton).toBeDisabled();
+
+    fireEvent.click(screen.getByText("v6"));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(compareButton).not.toBeDisabled();
+  });
+});
+
 describe("AgentEvalDetail — AC-37 the recent-runs table has exactly the named columns and renders batch rows", () => {
   it("renders ran-at/recall/precision/citation/pass/cost headers, plus the batch's own agent_version and formatted cost", () => {
     const dashboard: EvalDashboard = {
@@ -292,8 +328,12 @@ describe("AgentEvalDetail — AC-37 the recent-runs table has exactly the named 
 
     renderDetail();
 
+    // Scoped to table column headers specifically — the metric-trend legend
+    // added alongside the chart reuses the same short labels ("Recall" etc)
+    // for its own dots, so a page-wide text query would be ambiguous here.
+    const columnHeaderNames = screen.getAllByRole("columnheader").map((th) => th.textContent);
     for (const header of ["Ran at", "Recall", "Precision", "Citation", "Pass", "Cost"]) {
-      expect(screen.getByText(header)).toBeInTheDocument();
+      expect(columnHeaderNames).toContain(header);
     }
     expect(screen.getByText("v5")).toBeInTheDocument();
     expect(screen.getByText("7/8")).toBeInTheDocument();

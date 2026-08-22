@@ -17,8 +17,26 @@ export const s = {
     paddingLeft: 10,
   } satisfies CSSProperties,
   chartCaption: { fontSize: 11, color: "var(--text-muted)", margin: "6px 0 0" } satisfies CSSProperties,
-  sectionTitle: { fontSize: 15, fontWeight: 700, margin: "0 0 10px" } satisfies CSSProperties,
+  sectionHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    margin: "0 0 10px",
+  } satisfies CSSProperties,
+  sectionTitle: { fontSize: 15, fontWeight: 700, margin: 0 } satisfies CSSProperties,
+  legendRow: { display: "flex", gap: 14, fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  legendItem: { display: "flex", alignItems: "center", gap: 6 } satisfies CSSProperties,
+  legendDot: (color: string): CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: color,
+    display: "inline-block",
+  }),
   table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 } satisfies CSSProperties,
+  metricBarCell: { display: "flex", alignItems: "center", gap: 8, minWidth: 100 } satisfies CSSProperties,
+  metricBarTrack: { width: 60, flexShrink: 0 } satisfies CSSProperties,
   th: {
     textAlign: "left" as const,
     fontSize: 11,
@@ -31,4 +49,5 @@ export const s = {
   rowSelectable: { cursor: "pointer" } satisfies CSSProperties,
   rowSelected: { background: "var(--bg-hover)" } satisfies CSSProperties,
   compareBar: { display: "flex", alignItems: "center", gap: 10, marginTop: 10 } satisfies CSSProperties,
+  selectionCount: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
 } as const;

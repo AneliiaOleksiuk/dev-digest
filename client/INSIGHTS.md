@@ -1419,3 +1419,45 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   tests authored this pass (explicit user decision, `test-writer` runs
   separately); `tsc --noEmit` clean and the full existing Vitest suite (45
   files / 276 tests, including `AgentEditor.test.tsx`) passed unchanged.
+
+- 2026-08-23: Export to CI, Phase E — final phase (`docs/plans/spec-04-export-to-ci.md`
+  WI21-WI23). New `/ci-runs` page (`app/ci-runs/page.tsx` +
+  `_components/CiRunsView/`): one `useCiRuns({ since_days })` fetch per
+  page, scoped server-side only by the time-window filter; the other four
+  filters (agent/repo/status/source) narrow that SAME result set
+  client-side (`helpers.ts` `applyFilters`) rather than issuing a second
+  server round-trip per filter change — the agent/repo/source dropdown
+  option lists are also derived from that one fetched set
+  (`distinctAgentOptions`/`distinctRepoOptions`/`distinctSourceOptions`),
+  so picking one filter never shrinks another filter's own option list.
+  Findings column has three explicit states (`findingsDisplay`:
+  `"split"` when any of critical/warning/suggestion is non-null,
+  `"total"` falling back to `findings_count` when all three are null,
+  `"unknown"` rendering a dash when even the total is null) — this is the
+  concrete shape of AC-64/AC-66's "never render a 0 for a severity you
+  don't know" rule; a null field is OMITTED from the split render, never
+  coerced to 0. `source` renders `run.source` verbatim with zero validation
+  against `CiTarget` (D-13) — confirmed by reading the contract
+  (`CiRun.source: z.string().nullable()`, no enum) and writing
+  `sourceLabel()` as a straight passthrough with no branch on the value.
+  Nav entry added to `vendor/ui/nav.ts` (`key: "ci-runs"`, SKILLS LAB
+  group, `gKey: "i"` — confirmed free by reading the live `SHORTCUTS`
+  array first, not by trusting the plan's claim) — this is the one
+  sanctioned do-not-touch exception for this plan, purely additive, no
+  neighboring entry touched. Hit the exact SAME shared-machine port
+  gotcha the Phase D entry above documents: both `:3000` and `:3001` on
+  this machine belong to a `D:\htdocs\devDigest` checkout, not this
+  worktree (confirmed via `wmic process ... get CommandLine`), so a
+  live-against-`pnpm dev` check for `/ci-runs` was not attempted this
+  session — verified instead via `tsc --noEmit` (clean) and the full
+  existing Vitest suite (45 files / 276 tests, including `nav.test.ts`'s
+  9 tests and `smoke.test.tsx`) passing unchanged. No new tests authored
+  this pass (explicit scope: no `test-writer` stage). Also ran the
+  server-side WI23 sweep from this same session: `tsc --noEmit` and
+  `depcruise` both clean on `server/`; `git diff --no-index` between the
+  two `eval-ci.ts` vendor mirrors printed nothing; a literal
+  `grep -rn "process.env" server/src/modules/ci/` still matches 2 lines,
+  but both are doc-comments (one describing the GENERATED CI runner's own
+  env usage, one asserting `service.ts` itself has zero such reads) —
+  not actual code, and pre-existing from Phases C/D, not from this
+  session's changes.

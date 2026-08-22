@@ -564,3 +564,21 @@ _(to be filled in)_
   No decision yet on whether this becomes a course lesson, a `agents/`
   addition, or stays out of scope — flagging so a future session doesn't
   assume skill-creator's benchmark already covers it.
+
+- 2026-08-22: Added `scripts/verify-l06.sh` (Phase E, WI14/WI15 of
+  `docs/plans/eval-pipeline.md`) — same five-lane shape as `verify-l03.sh`
+  plus a new `depcruise --config .dependency-cruiser.cjs src` lane (Q-5,
+  Recommendation 4): server typecheck, server `arch:check`, server unit
+  tests narrowed to the four non-`.it.test.ts` L06 suites
+  (`eval-ci-contracts`, `eval-helpers`, `eval-runner`, `eval-scorer`), client
+  typecheck, client's full `vitest run`. Verified live exactly like
+  `verify-l03.sh` got: the real `devdigest-postgres` container was actually
+  `docker stop`ped (not just "assumed down") before the full run, confirming
+  none of the five lanes touch Postgres; then a deliberate `number`/`string`
+  type mismatch in `modules/eval/scorer.ts` made the script fail at lane 1
+  with a non-zero exit and the lane named, then was fully reverted (`git
+  diff` on the file empty, `git status` showing only the new script
+  untracked) before restarting the container to leave the environment as
+  found. WI16 (the validation experiment) is untouched by design — it is
+  human-run, spends real provider money, and needs a browser; the same
+  precedent as SPEC-01 WI13 (2026-08-13 entry above) applies.

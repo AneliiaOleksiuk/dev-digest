@@ -45,6 +45,8 @@ import type { BriefSources } from '../modules/brief/sources.js';
 import { NodeBriefSources } from '../modules/brief/sources.node.js';
 import type { EvalRepository } from '../modules/eval/repository.js';
 import { DrizzleEvalRepository } from '../modules/eval/repository.drizzle.js';
+import type { CiRepository } from '../modules/ci/repository.js';
+import { DrizzleCiRepository } from '../modules/ci/repository.drizzle.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -76,6 +78,7 @@ export interface ContainerOverrides {
   briefRepo?: BriefRepository;
   briefSources?: BriefSources;
   evalRepo?: EvalRepository;
+  ciRepo?: CiRepository;
 }
 
 export class Container {
@@ -107,6 +110,7 @@ export class Container {
   private _briefRepo?: BriefRepository;
   private _briefSources?: BriefSources;
   private _evalRepo?: EvalRepository;
+  private _ciRepo?: CiRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -174,6 +178,11 @@ export class Container {
   get evalRepo(): EvalRepository {
     if (this.overrides.evalRepo) return this.overrides.evalRepo;
     return (this._evalRepo ??= new DrizzleEvalRepository(this.db));
+  }
+
+  get ciRepo(): CiRepository {
+    if (this.overrides.ciRepo) return this.overrides.ciRepo;
+    return (this._ciRepo ??= new DrizzleCiRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {

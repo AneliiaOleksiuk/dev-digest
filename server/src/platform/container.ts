@@ -43,6 +43,8 @@ import type { BriefRepository } from '../modules/brief/repository.js';
 import { DrizzleBriefRepository } from '../modules/brief/repository.drizzle.js';
 import type { BriefSources } from '../modules/brief/sources.js';
 import { NodeBriefSources } from '../modules/brief/sources.node.js';
+import type { EvalRepository } from '../modules/eval/repository.js';
+import { DrizzleEvalRepository } from '../modules/eval/repository.drizzle.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -73,6 +75,7 @@ export interface ContainerOverrides {
   onboardingRepo?: OnboardingRepository;
   briefRepo?: BriefRepository;
   briefSources?: BriefSources;
+  evalRepo?: EvalRepository;
 }
 
 export class Container {
@@ -103,6 +106,7 @@ export class Container {
   private _onboardingRepo?: OnboardingRepository;
   private _briefRepo?: BriefRepository;
   private _briefSources?: BriefSources;
+  private _evalRepo?: EvalRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -165,6 +169,11 @@ export class Container {
   get briefSources(): BriefSources {
     if (this.overrides.briefSources) return this.overrides.briefSources;
     return (this._briefSources ??= new NodeBriefSources(this));
+  }
+
+  get evalRepo(): EvalRepository {
+    if (this.overrides.evalRepo) return this.overrides.evalRepo;
+    return (this._evalRepo ??= new DrizzleEvalRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {

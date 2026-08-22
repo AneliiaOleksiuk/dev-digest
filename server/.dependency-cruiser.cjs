@@ -68,6 +68,19 @@ module.exports = {
         path: '^src/db/|^src/adapters/|^src/platform/container\\.ts$',
       },
     },
+    {
+      name: 'no-other-module-file-to-db-or-adapter',
+      severity: 'error',
+      comment:
+        'Every module file other than routes.ts/service.ts/helpers.ts (each checked above) or repository.drizzle.ts (the one file a module is allowed to touch Drizzle/Postgres from) must stay off the DB and concrete adapters too — this catches module-specific files the four named-file rules above don\'t enumerate (e.g. a runner.ts or scorer.ts) and the port file (repository.ts) itself, which must stay pure.',
+      from: {
+        path: '^src/modules/[^/]+/(?!repository\\.drizzle\\.ts$)(?!routes\\.ts$)(?!service\\.ts$)(?!helpers\\.ts$)[^/]+\\.ts$',
+        pathNot: PRE_EXISTING_MODULES,
+      },
+      to: {
+        path: '^src/db/(schema|client)|^src/adapters/|node_modules/(drizzle-orm|postgres)/',
+      },
+    },
   ],
   options: {
     tsPreCompilationDeps: true,
@@ -78,7 +91,13 @@ module.exports = {
       path: 'node_modules',
     },
     exclude: {
-      path: '\\.(test|it\\.test)\\.ts$',
+      // src/modules/orders/orders.ts is a deliberately-broken review-bait
+      // fixture (not a real onion-architecture module — it's never
+      // registered in modules/index.ts), already excluded from typecheck at
+      // tsconfig.json's own "exclude" for the same reason. Cruising it would
+      // fail the new no-other-module-file-to-db-or-adapter rule below on a
+      // file that was never meant to satisfy any architecture rule.
+      path: '\\.(test|it\\.test)\\.ts$|^src/modules/orders/',
     },
   },
 };

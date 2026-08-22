@@ -20,9 +20,6 @@ import evalMessages from "../../../../../messages/en/eval.json";
 
 const useEvalCompare = vi.fn();
 
-vi.mock("@/components/app-shell", () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
 vi.mock("@/lib/hooks/eval", () => ({
   useEvalCompare: (...args: unknown[]) => useEvalCompare(...args),
 }));
@@ -37,7 +34,7 @@ afterEach(() => {
 function renderCompare() {
   return render(
     <NextIntlClientProvider locale="en" messages={{ eval: evalMessages }}>
-      <EvalCompareView agentId="ag1" baseId="b0" headId="b1" agentName="Security Reviewer" onClose={() => {}} />
+      <EvalCompareView agentId="ag1" baseId="b0" headId="b1" onClose={() => {}} />
     </NextIntlClientProvider>,
   );
 }
@@ -96,6 +93,25 @@ describe("EvalCompareView — AC-32/UX-8 each batch shows its OWN snapshot promp
     // v5 and v6 each label their OWN column with their OWN recorded version.
     expect(screen.getByText("v5")).toBeInTheDocument();
     expect(screen.getByText("v6")).toBeInTheDocument();
+  });
+});
+
+describe("EvalCompareView — prompt diff highlights changed lines instead of dumping both prompts side by side", () => {
+  it("renders unchanged lines once, and marks only the added/removed lines", () => {
+    const comparison: EvalComparison = {
+      base: BASE_BATCH,
+      head: HEAD_BATCH,
+      delta: { recall: 0, precision: -0.6, citation_accuracy: -0.05, cost_usd: null },
+      base_prompt: "You are a reviewer.\nFlag secrets.",
+      head_prompt: "You are a reviewer.\nFlag secrets.\nFlag unused imports.",
+    };
+    useEvalCompare.mockReturnValue({ data: comparison, isLoading: false, isError: false, refetch: vi.fn() });
+
+    renderCompare();
+
+    // The shared line appears exactly once — a side-by-side dump would show it twice.
+    expect(screen.getAllByText("You are a reviewer.")).toHaveLength(1);
+    expect(screen.getByText("Flag unused imports.")).toBeInTheDocument();
   });
 });
 

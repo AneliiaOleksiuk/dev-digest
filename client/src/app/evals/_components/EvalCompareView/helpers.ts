@@ -1,4 +1,21 @@
+import { diffLines } from "diff";
 import type { EvalBatchRecord } from "@/lib/types";
+
+export type PromptDiffLine = { text: string; kind: "added" | "removed" | "unchanged" };
+
+/** Line-level diff between two system-prompt snapshots (AC-32/UX-8 — a diff
+ *  of the two recorded versions, never the agent's current prompt). Either
+ *  side may be `null` when its snapshot is missing (agent_versions row gone)
+ *  — in that case there is nothing to diff against, so the caller falls
+ *  back to rendering the one available prompt as plain, unhighlighted text. */
+export function promptDiffLines(basePrompt: string, headPrompt: string): PromptDiffLine[] {
+  return diffLines(basePrompt, headPrompt).flatMap((part) =>
+    part.value
+      .split("\n")
+      .filter((line, i, arr) => !(i === arr.length - 1 && line === ""))
+      .map((text) => ({ text, kind: part.added ? "added" : part.removed ? "removed" : "unchanged" }) as const),
+  );
+}
 
 /** Q-3/E-8 — a skill link/order/version change never bumps `agents.version`,
  *  so two batches can share the SAME recorded version yet have run

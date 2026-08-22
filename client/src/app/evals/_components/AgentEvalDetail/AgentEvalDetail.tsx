@@ -48,12 +48,6 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  if (baseId && headId) {
-    return (
-      <EvalCompareView agentId={agentId} baseId={baseId} headId={headId} agentName={agent?.name} onClose={clearCompare} />
-    );
-  }
-
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -281,6 +275,9 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
           </div>
         </div>
       </div>
+      {baseId && headId && (
+        <EvalCompareView agentId={agentId} baseId={baseId} headId={headId} onClose={clearCompare} />
+      )}
     </AppShell>
   );
 }

@@ -2,15 +2,18 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, Button, ErrorState, Skeleton } from "@devdigest/ui";
+import { Badge, ErrorState, Modal, Skeleton } from "@devdigest/ui";
 import { useEvalCompare } from "@/lib/hooks/eval";
 import { formatCost } from "@/helpers/format";
-import { AppShell } from "@/components/app-shell";
-import { deltaColor, fmtDeltaPct, sameVersionDifferentSkills } from "./helpers";
+import { deltaColor, fmtDeltaPct, promptDiffLines, sameVersionDifferentSkills } from "./helpers";
 import { s } from "./styles";
 
 /**
- * Read-only compare view (AC-31/AC-32, D-8/Q-2 — no promote, no revert).
+ * Read-only compare view (AC-31/AC-32, D-8/Q-2 — no promote, no revert), a
+ * modal opened on top of `AgentEvalDetail` rather than a separate page — the
+ * reference mockup shows it as a popup with metric deltas and a prompt diff
+ * over the dashboard; only its "Promote" button was deliberately dropped
+ * (D-8's own rationale — nothing in this module can act on it).
  * Both system prompts are the batch's own SNAPSHOT (`agent_versions.
  * config_json` at that version), never the agent's current prompt — a
  * missing snapshot renders `compare.promptUnavailable` instead of silently
@@ -23,59 +26,51 @@ export function EvalCompareView({
   agentId,
   baseId,
   headId,
-  agentName,
   onClose,
 }: {
   agentId: string;
   baseId: string;
   headId: string;
-  agentName?: string;
   onClose: () => void;
 }) {
   const t = useTranslations("eval");
   const { data: comparison, isLoading, isError, refetch } = useEvalCompare(agentId, baseId, headId);
 
-  const crumb = [
-    { label: t("page.crumbSkillsLab") },
-    { label: t("page.crumbEvalDashboard"), href: "/evals" },
-    { label: agentName ?? t("page.crumbAgents") },
-    { label: t("compare.title") },
-  ];
-
   if (isLoading || !comparison) {
     return (
-      <AppShell crumb={crumb}>
-        <div style={s.page}>
-          <Skeleton height={32} width={240} />
-          <Skeleton height={320} />
+      <Modal title={t("compare.title")} onClose={onClose}>
+        <div style={s.body}>
+          <Skeleton height={80} />
+          <Skeleton height={220} />
         </div>
-      </AppShell>
+      </Modal>
     );
   }
   if (isError) {
     return (
-      <AppShell crumb={crumb}>
-        <ErrorState fullScreen body="Couldn't load this comparison." onRetry={() => refetch()} />
-      </AppShell>
+      <Modal title={t("compare.title")} onClose={onClose}>
+        <div style={s.body}>
+          <ErrorState body="Couldn't load this comparison." onRetry={() => refetch()} />
+        </div>
+      </Modal>
     );
   }
 
   const { base, head, delta, base_prompt, head_prompt } = comparison;
   const columns = [
-    { label: t("compare.base"), batch: base, prompt: base_prompt },
-    { label: t("compare.head"), batch: head, prompt: head_prompt },
+    { label: t("compare.base"), batch: base },
+    { label: t("compare.head"), batch: head },
   ];
+  const diffLines = base_prompt != null && head_prompt != null ? promptDiffLines(base_prompt, head_prompt) : null;
 
   return (
-    <AppShell crumb={crumb}>
-      <div style={s.page}>
-        <div style={s.header}>
-          <Button kind="ghost" size="sm" icon="ChevronLeft" onClick={onClose}>
-            {agentName ?? t("page.crumbAgents")}
-          </Button>
-          <h1 style={s.h1}>{t("compare.title")}</h1>
-        </div>
-
+    <Modal
+      width={920}
+      title={t("compare.title")}
+      subtitle={`v${base.agent_version} → v${head.agent_version}`}
+      onClose={onClose}
+    >
+      <div style={s.body}>
         {sameVersionDifferentSkills(base, head) && (
           <p style={s.note}>{t("compare.sameVersionDifferentSkills")}</p>
         )}
@@ -138,16 +133,44 @@ export function EvalCompareView({
                   <div style={s.metricValue}>{formatCost(c.batch.cost_usd)}</div>
                 </div>
               </div>
-              <div style={s.promptTitle}>{t("compare.promptDiffTitle")}</div>
-              {c.prompt == null ? (
-                <p style={s.note}>{t("compare.promptUnavailable")}</p>
-              ) : (
-                <pre style={s.prompt}>{c.prompt}</pre>
-              )}
             </div>
           ))}
         </div>
+
+        <div style={s.diffSection}>
+          <div style={s.diffHeader}>
+            <span style={s.diffTitle}>{t("compare.promptDiffTitle")}</span>
+            {diffLines && (
+              <div style={s.diffLegend}>
+                <span style={s.legendItem}>
+                  <span style={s.legendDot("var(--crit)")} />
+                  {t("compare.base")} (v{base.agent_version})
+                </span>
+                <span style={s.legendItem}>
+                  <span style={s.legendDot("var(--ok)")} />
+                  {t("compare.head")} (v{head.agent_version})
+                </span>
+              </div>
+            )}
+          </div>
+          {diffLines ? (
+            <pre style={s.diffBlock}>
+              {diffLines.map((line, i) => (
+                <div key={i} style={s.diffLine(line.kind)}>
+                  {line.text || " "}
+                </div>
+              ))}
+            </pre>
+          ) : base_prompt == null && head_prompt == null ? (
+            <p style={s.note}>{t("compare.promptUnavailable")}</p>
+          ) : (
+            <>
+              <pre style={s.diffBlock}>{base_prompt ?? head_prompt}</pre>
+              <p style={s.note}>{t("compare.promptUnavailable")}</p>
+            </>
+          )}
+        </div>
       </div>
-    </AppShell>
+    </Modal>
   );
 }

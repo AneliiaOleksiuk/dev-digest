@@ -69,7 +69,12 @@ export function useCreateEvalCaseFromFinding() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ findingId, name }: { findingId: string; name?: string }) =>
-      api.post<EvalCaseRecord>(`/findings/${findingId}/eval-case`, name ? { name } : undefined),
+      // The server requires a JSON body here (EvalCaseFromFindingInput is a
+      // z.object, even though `name` itself is optional) — `{}` still counts
+      // as "a body was sent", `undefined` doesn't (api.post skips the
+      // content-type header entirely when body is falsy), which Fastify's
+      // zod validator then rejects as 422 on an absent body.
+      api.post<EvalCaseRecord>(`/findings/${findingId}/eval-case`, name ? { name } : {}),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["agent-eval-cases", data.owner_id] });
       qc.invalidateQueries({ queryKey: ["eval-dashboard"] });

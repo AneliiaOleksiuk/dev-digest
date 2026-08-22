@@ -81,6 +81,11 @@ above (server typecheck + narrowed unit tests, client typecheck + full test
 suite) as one pre-submission command — see the script's `--help` for the
 exact lanes and why `reviewer-core` is excluded.
 
+Lesson gate (L06): `./scripts/verify-l06.sh` is the same idea for the Eval
+Pipeline lesson — server typecheck + `arch:check` (onion boundary) + narrowed
+unit tests, client typecheck + full test suite — see the script's `--help`
+for the exact lanes.
+
 ## Conventions
 
 - **Integration tests end in `*.it.test.ts`.** The unit lane excludes that glob

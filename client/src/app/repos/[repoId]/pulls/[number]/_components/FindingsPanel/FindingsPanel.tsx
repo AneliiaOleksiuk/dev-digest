@@ -8,6 +8,8 @@ import { Toggle, EmptyState } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
 import { useFindingAction } from "../../../../../../../lib/hooks/reviews";
+import { useCreateEvalCaseFromFinding } from "../../../../../../../lib/hooks/eval";
+import { notify } from "../../../../../../../lib/toast";
 import { KEY_TO_ACTION } from "./constants";
 import { visibleFindings, filterBySeverity } from "./helpers";
 import { s } from "./styles";
@@ -33,6 +35,7 @@ export function FindingsPanel({
 }) {
   const t = useTranslations("prReview");
   const action = useFindingAction();
+  const createEvalCase = useCreateEvalCaseFromFinding();
   const [hideLow, setHideLow] = React.useState(false);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
 
@@ -94,10 +97,32 @@ export function FindingsPanel({
               defaultExpanded={index === 0}
               forceExpanded={finding.id === targetFindingId}
               highlighted={finding.id === targetFindingId}
-              pending={action.isPending}
+              pending={action.isPending || createEvalCase.isPending}
               repoFullName={repoFullName}
               headSha={headSha}
               onAction={(actionKind) => action.mutate({ findingId: finding.id, action: actionKind, prId })}
+              onCreateEvalCase={() => {
+                createEvalCase.mutate(
+                  { findingId: finding.id },
+                  {
+                    onSuccess: (data) => {
+                      // UX-2 — state which kind of case the click just
+                      // created. Read off the mutation's OWN response
+                      // (`expected_output.must_find`/`.must_not_flag`) —
+                      // the server's authoritative derivation (AC-3, D-7) —
+                      // rather than re-deriving it client-side from
+                      // `finding.accepted_at`, which can be stale/inferred
+                      // wrong relative to what the server actually wrote.
+                      const key = data.expected_output?.must_find.length
+                        ? "finding.evalCaseCreatedMustFind"
+                        : "finding.evalCaseCreatedMustNotFlag";
+                      notify.success(t(key, { file: finding.file }));
+                    },
+                    onError: (err) =>
+                      notify.error(err instanceof Error ? err.message : "Couldn't create eval case"),
+                  },
+                );
+              }}
             />
           ))
         )}

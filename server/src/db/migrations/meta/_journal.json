@@ -134,6 +134,20 @@
       "when": 1786713940933,
       "tag": "0018_real_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787253006782,
+      "tag": "0019_unique_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787254295737,
+      "tag": "0020_early_korvac",
+      "breakpoints": true
     }
   ]
 }

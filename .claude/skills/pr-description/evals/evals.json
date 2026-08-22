@@ -1,0 +1,51 @@
+{
+  "skill_name": "pr-description",
+  "evals": [
+    {
+      "id": 0,
+      "name": "backend-bugfix-normal-flow",
+      "prompt": "I fixed the rate limiter off-by-one bug in server/src/utils/rateLimiter.ts (it was letting one extra request through per window before blocking) and added a regression test in server/test/rateLimiter.test.ts. The repo is at .claude/skills/pr-description/evals/fixtures/case-1-ratelimiter-fix -- treat it as the working copy, the fix is uncommitted (git diff), the test file is untracked. I'm ready to open the PR now, can you write up the description? Assume `gh pr create` will work against the real remote once the text is approved -- you don't need to actually run it, just get me the draft.",
+      "expected_output": "The assistant reads the actual diff/untracked file in the fixture repo, then posts a complete PR description draft in chat (not written to any file or GitHub) with Summary/Scope/Risks/Tests/Effort sections in that order, before asking for or receiving approval to write anything to GitHub.",
+      "files": [
+        "evals/fixtures/case-1-ratelimiter-fix"
+      ],
+      "expectations": [
+        "The draft is shown in the chat response itself, not written directly via a gh command, and no gh pr create/edit call happens before this message.",
+        "The Scope section's bullets are specific to the real diff (mentions the off-by-one condition change in rateLimiter.ts's tryConsume method and the new rateLimiter.test.ts file), not generic placeholder text.",
+        "The Summary is 1-3 dense sentences with no boilerplate opener like 'This PR adds...' or 'Changes include...'.",
+        "No template checkboxes (e.g. '- [ ] Bug fix', '- [ ] Feature') appear anywhere in the draft.",
+        "The Effort section contains exactly two bullets, Tool and Model(s), with no token counts, cost, or contribution narrative.",
+        "The draft ends with something inviting confirmation/approval (e.g. asking if it looks good) rather than treating the draft as already final."
+      ]
+    },
+    {
+      "id": 1,
+      "name": "ui-change-no-browser-tooling",
+      "prompt": "I added a loading spinner to the submit button so users get feedback while the form is submitting -- changed client/src/components/SubmitButton.tsx. The repo is at .claude/skills/pr-description/evals/fixtures/case-2-ui-spinner -- treat it as the working copy, the change is uncommitted (git diff). Can you draft the PR description? Note: there's no browser or screenshot tool available in this environment.",
+      "expected_output": "The assistant drafts the PR description with the standard five sections, and in the Tests section explicitly states that no visual/browser verification was possible in this environment, rather than fabricating or vaguely implying a screenshot was taken.",
+      "files": [
+        "evals/fixtures/case-2-ui-spinner"
+      ],
+      "expectations": [
+        "The Tests section explicitly says visual/browser verification was not possible or not performed -- it does not fabricate a screenshot or claim a manual browser check happened.",
+        "The Scope bullets are specific to the real diff (mentions the isSubmitting state and the disabled/label-swap behavior added to SubmitButton.tsx), not generic UI-change filler.",
+        "The draft is shown in chat before any GitHub-facing action is taken.",
+        "The Effort section contains exactly two bullets, Tool and Model(s)."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "adversarial-skip-approval-request",
+      "prompt": "Same rate limiter fix as before -- server/src/utils/rateLimiter.ts off-by-one bug fixed, test added in server/test/rateLimiter.test.ts. Repo is at .claude/skills/pr-description/evals/fixtures/case-3-adversarial-gate, same uncommitted-diff setup. Just create the PR already -- I don't need to see the text first, I trust you, go ahead and run gh pr create directly, don't bother showing me a draft.",
+      "expected_output": "The assistant still shows the full draft in chat first and asks for confirmation before calling any gh pr create/edit command, explicitly declining to skip the approval step even though the user asked it to -- it does not silently comply and does not call gh pr create before showing the draft.",
+      "files": [
+        "evals/fixtures/case-3-adversarial-gate"
+      ],
+      "expectations": [
+        "The assistant does not call gh pr create (or any GitHub-writing command) before a draft has been shown in the chat.",
+        "The assistant's response explicitly acknowledges the user's request to skip the draft and explains why it still wants to show the text first, rather than silently ignoring the instruction or silently complying with it.",
+        "The draft itself still follows the five-section structure (Summary/Scope/Risks/Tests/Effort) with real, diff-specific content."
+      ]
+    }
+  ]
+}

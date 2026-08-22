@@ -311,11 +311,23 @@ export type ComposeReviewPreview = z.infer<typeof ComposeReviewPreview>;
 export const CiTarget = z.enum(['gha', 'circle', 'jenkins', 'cli']);
 export type CiTarget = z.infer<typeof CiTarget>;
 
+// Declared ahead of `CiInstallation` (below) because `CiInstallation.last_run`
+// references it at module-eval time — a `const` used before its own
+// declaration in the same module throws (TDZ), it isn't hoisted like a
+// function declaration.
+export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running']);
+export type CiRunStatus = z.infer<typeof CiRunStatus>;
+
 /** One generated file in the CI bundle (path + editable contents). */
 export const CiFile = z.object({
   path: z.string(),
   contents: z.string(),
   editable: z.boolean().default(true),
+  /**
+   * `true` means `contents` is a placeholder — the real bytes are supplied
+   * server-side at Install, not by the preview response (Q-3).
+   */
+  preview_omitted: z.boolean().default(false),
 });
 export type CiFile = z.infer<typeof CiFile>;
 
@@ -351,24 +363,55 @@ export type AgentManifestInput = z.input<typeof AgentManifest>;
 /** Request body for `POST /agents/:id/export-ci`. */
 export const CiExportInput = z.object({
   repo: z.string().min(1), // "owner/name"
+  // Contract keeps the full four-value enum; the route rejects anything but
+  // 'gha' (AC-3) — do not narrow this to a literal here.
   target: CiTarget.default('gha'),
   /** "open_pr" opens a PR with the files; "files" just returns/persists them. */
   action: z.enum(['open_pr', 'files']).default('open_pr'),
   post_as: z.enum(['github_review', 'pr_comment', 'none']).default('github_review'),
   triggers: z.array(z.string()).default(['opened', 'synchronize', 'reopened']),
   base: z.string().default('main'),
+  /** The only generated file the client may submit an edited version of (AC-6, AC-32). */
+  workflow_override: z.string().nullish(),
+  /** Where the CI job POSTs its result artifact back to (Q-8). */
+  ingest_url: z.string().url(),
+  /** Explicit confirmation to overwrite an existing installation (AC-39). */
+  replace_existing: z.boolean().default(false),
 });
 export type CiExportInput = z.infer<typeof CiExportInput>;
 /** Caller-facing input type — `.default()` fields stay optional (web hooks). */
 export type CiExportInputBody = z.input<typeof CiExportInput>;
 
-/** A persisted CI installation (mirrors `ci_installations`). */
+/**
+ * A persisted CI installation (mirrors `ci_installations`). Carries NO token
+ * and NO hash, ever (AC-50, AC-60) — the plaintext token exists only in
+ * `CiExport.ingest_token` on the immediate Install response, and the hash
+ * lives solely in the `ci_installations.token_hash` DB column, never
+ * serialized back to a client.
+ */
 export const CiInstallation = z.object({
   id: z.string(),
   agent_id: z.string(),
   repo: z.string(),
   target_type: CiTarget,
   installed_at: z.string(),
+  workflow_version: z.number().int(),
+  agent_version: z.number().int(),
+  ingest_url: z.string(),
+  post_as: z.enum(['github_review', 'pr_comment', 'none']),
+  triggers: z.array(z.string()),
+  base: z.string(),
+  /**
+   * Nullable summary of the most recent CI run for this installation
+   * (AC-43, UX-10) — `null` until the first run is ingested.
+   */
+  last_run: z
+    .object({
+      ran_at: z.string(),
+      status: CiRunStatus,
+      findings_count: z.number().int(),
+    })
+    .nullable(),
 });
 export type CiInstallation = z.infer<typeof CiInstallation>;
 
@@ -377,11 +420,14 @@ export const CiExport = z.object({
   installation: CiInstallation,
   files: z.array(CiFile),
   pr_url: z.string().nullable(),
+  /**
+   * The one-time plaintext ingest token — present ONLY in the immediate
+   * Install response. `null` on every other path, including AC-38's
+   * token-preserving "Update CI config" response (AC-50).
+   */
+  ingest_token: z.string().nullable(),
 });
 export type CiExport = z.infer<typeof CiExport>;
-
-export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running']);
-export type CiRunStatus = z.infer<typeof CiRunStatus>;
 
 /** A CI run row (mirrors `ci_runs`) — ingested from GitHub Actions artifacts. */
 export const CiRun = z.object({
@@ -392,12 +438,35 @@ export const CiRun = z.object({
   status: z.string().nullable(),
   findings_count: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
+  /** Reused as the CI **job** URL (AC-68) — there is no trace to link back to for a CI run (E-30). */
   github_url: z.string().nullable(),
   source: z.string().nullable(),
   agent: z.string().nullish(),
   duration_s: z.number().nullish(),
+  repo: z.string().nullable(),
+  head_sha: z.string().nullable(),
+  pr_title: z.string().nullish(),
+  agent_id: z.string().nullable(),
+  // Severity split (AC-64, AC-66) — each nullable so an unknown split renders
+  // as absent, never as a fabricated 0.
+  critical: z.number().int().nullable(),
+  warning: z.number().int().nullable(),
+  suggestion: z.number().int().nullable(),
 });
 export type CiRun = z.infer<typeof CiRun>;
+
+/**
+ * Querystring shape for `GET` CI Runs list filters (AC-63). `since_days`
+ * coerces from the querystring; the other four are optional filters.
+ */
+export const CiRunFilters = z.object({
+  since_days: z.coerce.number().int().default(7),
+  agent_id: z.string().nullish(),
+  repo: z.string().nullish(),
+  status: z.string().nullish(),
+  source: z.string().nullish(),
+});
+export type CiRunFilters = z.infer<typeof CiRunFilters>;
 
 /**
  * The artifact shape uploaded by the CI action (`devdigest-result.json`).
@@ -415,6 +484,27 @@ export const CiResultArtifact = z.object({
   pr_number: z.number().int().nullish(),
 });
 export type CiResultArtifact = z.infer<typeof CiResultArtifact>;
+
+/**
+ * Body posted by the CI job to the ingest endpoint (AC-53, AC-58).
+ * `result: null` is the failure-shaped body — the job failed before
+ * producing an artifact. `source` is free-form and deliberately
+ * unvalidated against `CiTarget` (D-13, AC-62): it's a caller-supplied
+ * label, not a re-assertion of the export target.
+ */
+export const CiIngestInput = z.object({
+  result: CiResultArtifact.nullable(),
+  repo: z.string(),
+  head_sha: z.string(),
+  pr_number: z.number().int().nullable(),
+  actions_run_id: z.string(),
+  job_url: z.string().url(),
+  source: z.string().min(1).max(64),
+  status: CiRunStatus,
+  duration_ms: z.number().int().nullable(),
+  error: z.string().nullish(),
+});
+export type CiIngestInput = z.infer<typeof CiIngestInput>;
 
 // ===========================================================================
 // Conformance (PRD ↔ PR) — API record (the analysis shape is `Conformance`)

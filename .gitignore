@@ -1,9 +1,15 @@
 node_modules/
 dist/
-# agent-runner ships as a JS GitHub Action — its bundled dist/ MUST be committed
-# (GitHub runs action.yml `main: dist/index.js` as-is, with no build step).
+# agent-runner/dist/index.js is a build artifact (`cd agent-runner && pnpm build`),
+# read from disk at export time and embedded into the TARGET repo as
+# .devdigest/runner/index.js — it is never committed to this repository.
+# agent-runner/.gitignore:2 (`dist/`) is the rule that actually keeps it
+# untracked (confirmed via `git check-ignore -v`); the negation below never
+# re-included anything by itself (it only re-opens traversal into the
+# directory, and the nested .gitignore's `dist/` re-excludes it anyway) — its
+# now-redundant `!agent-runner/dist/**` follow-up line was removed as dead
+# weight rather than kept as a misleading no-op.
 !agent-runner/dist/
-!agent-runner/dist/**
 build/
 .next/
 out/
@@ -33,3 +39,4 @@ test-results/
 .claude/skills/pr-description/evals/fixtures/case-1-ratelimiter-fix/
 .claude/skills/pr-description/evals/fixtures/case-2-ui-spinner/
 .claude/skills/pr-description/evals/fixtures/case-3-adversarial-gate/
+.claude/settings.local.json

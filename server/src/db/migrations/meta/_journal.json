@@ -148,6 +148,13 @@
       "when": 1787254295737,
       "tag": "0020_early_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787435424411,
+      "tag": "0021_wide_cerebro",
+      "breakpoints": true
     }
   ]
 }

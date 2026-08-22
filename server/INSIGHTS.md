@@ -1464,3 +1464,46 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Errors & Fixes entry above, which THIS check surfaced). Both throwaway
   files deleted before this session's Implementation Report; test-writer
   owns the real, committed integration coverage next.
+
+- 2026-08-23: Phase A of `docs/plans/spec-04-export-to-ci.md` (WI1-WI4,
+  contracts/schema/deps, zero runtime behavior) — a couple of
+  environment-level findings worth keeping. **(1) A `const` used inside
+  another `z.object({...})` at module-eval time must be declared BEFORE
+  the object that references it, or it's a TDZ `ReferenceError` at import
+  time, not a type error** — `CiInstallation.last_run.status: CiRunStatus`
+  needed `CiRunStatus` moved from its old position (after `CiInstallation`/
+  `CiExport`) to right after `CiTarget`, near the top of the CI section in
+  both vendored `eval-ci.ts` copies. `tsc --noEmit` does NOT catch this
+  ordering bug — it only shows up as a real runtime crash the first time
+  the module is imported, since TypeScript's structural typing doesn't care
+  about declaration order for `const`, only real JS TDZ semantics do.
+  Similarly, `CiIngestInput` (which references `CiResultArtifact`) had to be
+  placed AFTER `CiResultArtifact`'s own declaration, not just anywhere
+  convenient in the "Export-to-CI" section. **(2) This is a brand-new git
+  worktree with no `node_modules` anywhere (server/client/reviewer-core all
+  needed a fresh `pnpm install`/`npm install` before `tsc --noEmit` would
+  even resolve imports)** — a `tsc` failure whose errors are entirely inside
+  `../reviewer-core/src/**` (module-not-found for `openai`/`zod`) when you
+  haven't touched that package is very likely this, not a real regression;
+  confirm via `ls reviewer-core/node_modules` before debugging further.
+  **(3) `cd server && pnpm add yaml jszip` did NOT hit the documented
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` this session** — ran cleanly
+  first try once `node_modules` already existed from the fresh install
+  above; the abort is a lockfile/node_modules-drift-triggered reinstall
+  prompt, not something that fires on every `pnpm add` in this environment.
+  **(4) The shared `devdigest-postgres` Docker container's
+  `__drizzle_migrations.id` is a plain serial counter, one row per applied
+  file in journal order — an `id` that looks alarmingly high (e.g. `21`)
+  right after a fresh `drizzle-kit generate` is almost certainly just "the
+  Nth pre-existing committed migration," not evidence of some other
+  worktree/branch having raced ahead on the same container.** Cross-checked
+  by comparing `ls server/src/db/migrations/*.sql` (21 files, 0000-0020)
+  against `id`s in the table before generating anything — same count,
+  confirming no anomaly — before trusting a `pnpm db:migrate` run against
+  this always-on, cross-worktree-shared container. Worth remembering that
+  this container genuinely IS shared state across every worktree on this
+  machine, though: a real drift (two different worktrees both minting a
+  numerically-colliding-but-content-different `0021_*.sql` against the same
+  DB) would look exactly like this at first glance and needs the same
+  "diff the file count against the row count" sanity check to rule out
+  before applying, not just eyeballing the id.

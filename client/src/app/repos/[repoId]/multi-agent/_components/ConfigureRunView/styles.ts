@@ -3,6 +3,20 @@ import type React from "react";
 export const s = {
   root: { display: "flex", flexDirection: "column", gap: 24, maxWidth: 720, margin: "0 auto" } as React.CSSProperties,
   step: { display: "flex", flexDirection: "column", gap: 10 } as React.CSSProperties,
+  stepHead: { display: "flex", alignItems: "center", gap: 8 } as React.CSSProperties,
+  stepBadge: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 20,
+    height: 20,
+    borderRadius: "50%",
+    background: "var(--accent)",
+    color: "#fff",
+    fontSize: 11.5,
+    fontWeight: 700,
+    flexShrink: 0,
+  } as React.CSSProperties,
   stepTitle: { fontSize: 13, fontWeight: 700, letterSpacing: "0.03em", color: "var(--text-muted)", textTransform: "uppercase" } as React.CSSProperties,
   hint: { fontSize: 13, color: "var(--text-muted)" } as React.CSSProperties,
   selectedPrRow: {

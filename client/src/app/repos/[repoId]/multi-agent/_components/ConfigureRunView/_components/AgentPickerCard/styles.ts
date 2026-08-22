@@ -1,13 +1,16 @@
 import type React from "react";
 
 export const s = {
-  card: (checked: boolean): React.CSSProperties => ({
+  card: (checked: boolean, accentColor: string): React.CSSProperties => ({
     display: "flex",
     alignItems: "center",
     gap: 12,
     padding: "12px 14px",
     borderRadius: 8,
-    border: "1px solid " + (checked ? "var(--accent)" : "var(--border-strong)"),
+    borderTop: "1px solid " + (checked ? accentColor : "var(--border-strong)"),
+    borderRight: "1px solid " + (checked ? accentColor : "var(--border-strong)"),
+    borderBottom: "1px solid " + (checked ? accentColor : "var(--border-strong)"),
+    borderLeft: "3px solid " + accentColor,
     background: "var(--bg-elevated)",
     marginBottom: 8,
   }),

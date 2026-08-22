@@ -134,8 +134,9 @@
     },
     "crumb": "Multi-Agent Review",
     "steps": {
-      "pr": "1 Pull request",
-      "agents": "2 Agents to run"
+      "pr": "Pull request",
+      "agents": "Agents to run",
+      "selectAll": "Select all"
     },
     "agentCard": {
       "estimate": "≈{duration}s · ≈{cost}",

@@ -16,6 +16,7 @@ import { Button, CircularScore, Icon, LiveLogStream, type LogLine } from "@devdi
 import type { AgentColumn } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
 import { useRunEvents } from "@/lib/hooks/reviews";
+import { agentVisual } from "../../../../agent-visuals";
 import { statusMetaFor } from "./helpers";
 import { s } from "./styles";
 
@@ -31,6 +32,8 @@ export function AgentColumnCard({
   const t = useTranslations("runs");
   const meta = statusMetaFor(column.status);
   const StatusIcon = Icon[meta.icon];
+  const visual = agentVisual(column.agent_name);
+  const VisualIcon = Icon[visual.icon];
 
   // Stream ONLY while this column is actually running — a settled column's
   // state is already fully described by the persisted `column` fields, and
@@ -44,9 +47,9 @@ export function AgentColumnCard({
   const durationS = column.duration_ms != null ? Math.round(column.duration_ms / 1000) : null;
 
   return (
-    <div style={s.card}>
+    <div style={s.card(visual.color)}>
       <div style={s.head}>
-        <Icon.Cpu size={14} style={{ color: "var(--text-muted)" }} />
+        <VisualIcon size={14} style={{ color: visual.color }} />
         <span style={s.agentName}>{column.agent_name}</span>
         <span style={s.statusChip(meta.color)}>
           <StatusIcon size={13} />

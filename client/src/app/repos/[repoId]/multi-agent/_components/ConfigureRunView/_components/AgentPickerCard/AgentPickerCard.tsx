@@ -11,6 +11,7 @@ import type { Agent } from "@devdigest/shared";
 import type { AgentCostEstimate } from "@/lib/hooks/multi-agent";
 import { formatCost } from "@/helpers/format";
 import { agentEstimateFor } from "../../helpers";
+import { agentVisual } from "../../../../agent-visuals";
 import { s } from "./styles";
 
 export function AgentPickerCard({
@@ -26,17 +27,19 @@ export function AgentPickerCard({
 }) {
   const t = useTranslations("runs");
   const estimate = agentEstimateFor(stats);
+  const visual = agentVisual(agent.name);
+  const VisualIcon = Icon[visual.icon];
 
   return (
-    <div style={s.card(checked)}>
+    <div style={s.card(checked, visual.color)}>
       <Checkbox checked={checked} onChange={onToggle} />
       <div style={s.main}>
         <div style={s.nameRow}>
-          <Icon.Cpu size={14} style={{ color: "var(--text-muted)" }} />
+          <VisualIcon size={14} style={{ color: visual.color }} />
           {agent.name}
         </div>
         <div style={s.metaRow}>
-          <span className="mono">{agent.model}</span>
+          <span>{agent.description || agent.model}</span>
           {!agent.enabled && <span>· {t("page.agentCard.disabled")}</span>}
         </div>
       </div>

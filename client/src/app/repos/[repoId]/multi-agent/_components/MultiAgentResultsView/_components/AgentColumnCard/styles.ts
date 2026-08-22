@@ -1,15 +1,15 @@
 import type React from "react";
 
 export const s = {
-  card: {
+  card: (accentColor: string): React.CSSProperties => ({
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    border: "1px solid var(--border-strong)",
+    border: "1px solid " + accentColor,
     borderRadius: 10,
     background: "var(--bg-surface)",
     padding: 14,
-  } as React.CSSProperties,
+  }),
   head: { display: "flex", alignItems: "center", gap: 8 } as React.CSSProperties,
   agentName: { fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 } as React.CSSProperties,
   statusChip: (color: string): React.CSSProperties => ({

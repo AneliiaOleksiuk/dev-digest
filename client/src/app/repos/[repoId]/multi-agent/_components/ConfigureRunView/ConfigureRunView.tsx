@@ -88,7 +88,10 @@ export function ConfigureRunView({
   return (
     <div style={s.root}>
       <div style={s.step}>
-        <div style={s.stepTitle}>{t("page.steps.pr")}</div>
+        <div style={s.stepHead}>
+          <span style={s.stepBadge}>1</span>
+          <div style={s.stepTitle}>{t("page.steps.pr")}</div>
+        </div>
         {prId && selectedPr ? (
           <div style={s.selectedPrRow}>
             <span className="mono">#{selectedPr.number}</span>
@@ -118,7 +121,15 @@ export function ConfigureRunView({
       </div>
 
       <div style={s.step}>
-        <div style={s.stepTitle}>{t("page.steps.agents")}</div>
+        <div style={{ ...s.stepHead, justifyContent: "space-between" }}>
+          <div style={s.stepHead}>
+            <span style={s.stepBadge}>2</span>
+            <div style={s.stepTitle}>{t("page.steps.agents")}</div>
+          </div>
+          <Button kind="ghost" size="sm" onClick={() => setSelectedIds(agents.map((a) => a.id))}>
+            {t("page.steps.selectAll")}
+          </Button>
+        </div>
         {agents.map((agent) => (
           <AgentPickerCard
             key={agent.id}

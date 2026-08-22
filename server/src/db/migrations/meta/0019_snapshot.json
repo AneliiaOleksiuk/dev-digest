@@ -1,5 +1,5 @@
 {
-  "id": "cc1d45ce-44de-48ce-bb3d-257e62071800",
+  "id": "1072174e-3856-4c7c-a72b-086bcf37b3de",
   "prevId": "f975485d-599e-4f70-aaa9-176b51c35b34",
   "version": "7",
   "dialect": "postgresql",
@@ -1747,6 +1747,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "learned_finding_id": {
+          "name": "learned_finding_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1780,6 +1786,21 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "memory_learned_finding_uq": {
+          "name": "memory_learned_finding_uq",
+          "columns": [
+            {
+              "expression": "learned_finding_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2644,7 +2665,36 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "eval_cases_ws_owner_uq": {
+          "name": "eval_cases_ws_owner_uq",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"eval_cases\".\"owner_kind\" = 'finding'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "eval_cases_workspace_id_workspaces_id_fk": {
           "name": "eval_cases_workspace_id_workspaces_id_fk",

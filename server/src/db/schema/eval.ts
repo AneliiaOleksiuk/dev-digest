@@ -9,6 +9,7 @@ import {
   doublePrecision,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
 
@@ -33,8 +34,13 @@ export const evalCases = pgTable(
   (t) => ({
     // "Turn into eval case" idempotency (L07, SPEC-04) — a DB-level guarantee
     // against a concurrent double-submit racing past the app-level
-    // SELECT-then-INSERT check in `eval-case.ts`.
-    uq: uniqueIndex('eval_cases_ws_owner_uq').on(t.workspaceId, t.ownerKind, t.ownerId),
+    // SELECT-then-INSERT check in `eval-case.ts`. Scoped to owner_kind='finding'
+    // only: pre-existing skill/agent eval fixtures legitimately have multiple
+    // cases per (workspace, owner_kind, owner_id) (confirmed against real data —
+    // an unscoped constraint fails migration on this repo's own dev database).
+    uq: uniqueIndex('eval_cases_ws_owner_uq')
+      .on(t.workspaceId, t.ownerKind, t.ownerId)
+      .where(sql`${t.ownerKind} = 'finding'`),
   }),
 );
 

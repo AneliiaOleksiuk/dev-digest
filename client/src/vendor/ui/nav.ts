@@ -37,13 +37,6 @@ export const NAV: NavGroup[] = [
         href: "/repos/:repoId/onboarding",
         gKey: "o",
       },
-      {
-        key: "multi-agent",
-        label: "Multi-Agent Review",
-        icon: "Users",
-        href: "/repos/:repoId/multi-agent",
-        gKey: "m",
-      },
     ],
   },
   {
@@ -57,6 +50,18 @@ export const NAV: NavGroup[] = [
         icon: "ListChecks",
         href: "/repos/:repoId/conventions",
         gKey: "c",
+      },
+    ],
+  },
+  {
+    section: "GLOBAL",
+    items: [
+      {
+        key: "multi-agent",
+        label: "Multi-Agent Review",
+        icon: "Users",
+        href: "/repos/:repoId/multi-agent",
+        gKey: "m",
       },
     ],
   },

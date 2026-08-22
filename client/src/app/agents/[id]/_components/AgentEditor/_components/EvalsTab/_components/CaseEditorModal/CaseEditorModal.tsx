@@ -115,7 +115,7 @@ export function CaseEditorModal({
       footer={
         <div style={s.footer}>
           {!isNew && (
-            <Button kind="secondary" icon="Play" disabled={runCase.isPending} onClick={run}>
+            <Button kind="secondary" icon="Play" loading={runCase.isPending} onClick={run}>
               {runCase.isPending ? t("caseEditor.running") : t("caseEditor.runCase")}
             </Button>
           )}

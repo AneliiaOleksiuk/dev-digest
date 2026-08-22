@@ -151,7 +151,8 @@ export function EvalsTab({ agent }: { agent: Agent }) {
             kind="primary"
             size="sm"
             icon="Play"
-            disabled={cases.length === 0 || runSet.isPending}
+            loading={runSet.isPending}
+            disabled={cases.length === 0}
             onClick={() =>
               runSet.mutate(agent.id, { onError: (err) => notify.error(errMsg(err, "Run failed")) })
             }

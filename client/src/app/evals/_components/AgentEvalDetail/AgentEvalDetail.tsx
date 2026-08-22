@@ -147,7 +147,8 @@ export function AgentEvalDetail({ agentId, onBack }: { agentId: string; onBack: 
             kind="primary"
             size="sm"
             icon="Play"
-            disabled={runSet.isPending || dashboard.cases_total === 0}
+            loading={runSet.isPending}
+            disabled={dashboard.cases_total === 0}
             onClick={() =>
               runSet.mutate(agentId, {
                 onError: (err) => notify.error(err instanceof Error ? err.message : "Run failed"),

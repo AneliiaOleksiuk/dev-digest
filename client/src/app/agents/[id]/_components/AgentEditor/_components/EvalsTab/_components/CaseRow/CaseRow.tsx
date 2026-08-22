@@ -48,7 +48,7 @@ export function CaseRow({
         )}
       </div>
       <div style={s.actions}>
-        <Button kind="ghost" size="sm" icon="Play" disabled={running || unusable} onClick={onRun}>
+        <Button kind="ghost" size="sm" icon="Play" loading={running} disabled={unusable} onClick={onRun}>
           {running ? t("evalsTab.running") : t("evalsTab.run")}
         </Button>
         <Button kind="ghost" size="sm" icon="Edit" onClick={onEdit}>

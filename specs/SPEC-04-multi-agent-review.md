@@ -288,13 +288,17 @@ deciding how much review to buy for this particular PR, and reading the result.
 - **AC-37** — The response shall include the created row's id as `memoryId`,
   matching what the client mutation already expects
   (`client/src/lib/hooks/reviews.ts:181-186`).
-- **AC-38** — WHERE embeddings are enabled (`container.embedder()` is gated by
-  `config.embeddingsEnabled`, `server/src/platform/container.ts:266-278`), the
-  system shall populate the row's `embedding`; IF embeddings are disabled or the
-  embedder call fails, THEN the memory row shall still be written with a null
-  `embedding` and the action shall still report success — a learn must never fail
-  because embeddings are off.
-  *(verify: integration test with `embeddingsEnabled` false.)*
+- **AC-38** — The system shall insert the `memory` row with `embedding: null`
+  and shall **not** call the embedder as part of this feature. Confirmed by
+  reading the code: `memory.embedding` (`schema/knowledge.ts:22`) has zero
+  readers anywhere in the codebase today — no retrieval, no vector search, no
+  other reference beyond the schema file and its barrel re-export — and
+  `container.embedder()` (`platform/container.ts:266`) has zero callers. Wiring
+  Learn to the embedder now would add a network call, a config gate, and a
+  failure-handling branch that produce a column nothing reads. Populating
+  `embedding` is the future Memory/retrieval feature's job, not this one's.
+  *(verify: integration test asserting a learned row's `embedding` is null and
+  no embedder call was made.)*
 - **AC-39** — IF the same finding is learned twice, THEN the system shall not
   create a second `memory` row and shall return the existing `memoryId`.
 - **AC-40** — Learn shall be **additive**, not terminal: it shall not set
@@ -364,17 +368,26 @@ assumed):**
 Every case below is grounded in a file that was actually read.
 
 - **E-1 — Concurrent cold-start intent classification.** `getOrClassify` reads
-  `pr_intent`, and on a head-SHA miss classifies and upserts
-  (`intent-service.ts:120-127, 312`) with no lock. Today's sequential loop means
-  agent 1 warms the cache for agents 2..N. Under concurrent fan-out on a cold
-  cache, **N agents may each fire an intent classification LLM call** and race on
-  the upsert. Cost and correctness both bite here. The orchestration must ensure
-  the batch classifies intent **once** before fanning out.
+  `pr_intent` first and only classifies+upserts on a head-SHA miss
+  (`intent-service.ts:114-128`), so it is naturally cache-friendly — a second
+  call for the same head SHA just reads, it doesn't reclassify — **provided the
+  two calls aren't truly concurrent** (there's no lock around read-then-upsert,
+  so two calls racing before either has written could both classify). The fix
+  is ordering, not locking: the orchestrator `await`s one `getOrClassify` call
+  **before** starting the fan-out, so the row already exists by the time any of
+  the N per-agent `executeRuns()` calls reaches its own `buildOrLoadIntent`.
+  Zero new synchronization code — just one await ahead of `Promise.all`.
 - **E-2 — N× diff loads.** `loadDiff` calls `container.git.diff(...)` and falls
-  back to reconstructing from `pr_files` (`diff-loader.ts:12-30`). `executeRuns`
-  loads it once per invocation (`run-executor.ts:107`), so N single-agent
-  invocations means N diff loads — N git/GitHub round-trips for identical bytes.
-  Must be avoided or explicitly accepted; it also distorts AC-49's comparison.
+  back to reconstructing from `pr_files` (`diff-loader.ts:12-30`), with **no
+  caching today** — confirmed by reading the file. `executeRuns` loads it once
+  per invocation (`run-executor.ts:107`, before its per-agent loop), so calling
+  it N times (once per agent, to get concurrency without touching
+  `run-executor.ts`) means N diff loads. The fix is a small, self-contained
+  addition to `diff-loader.ts` itself (not `run-executor.ts`, so it stays in
+  bounds): an in-memory `Map` memoizing `loadDiff`'s result keyed by
+  `` `${pull.id}:${pull.headSha}` `` — both already available at every call
+  site. A handful of lines, no shared-context plumbing through modified
+  function signatures.
 - **E-3 — Shared-logger fan-out is wrong for columns.** `RunLogger` is
   constructed over *every* runId in the batch (`run-executor.ts:74-79`), so
   pre-work events are duplicated into every run's buffer. With one agent per
@@ -514,8 +527,8 @@ categories.
   correctness requirement.
 - **NFR-10 — Availability / partial failure.** One failing run must not fail the
   batch (AC-13/AC-21). The existing per-agent isolation contract
-  (`run-executor.ts:44,159-167`) is preserved, not weakened. Likewise a failed
-  embedder must not fail a Learn (AC-38).
+  (`run-executor.ts:44,159-167`) is preserved, not weakened. (Learn has no
+  embedder call to fail in the first place — AC-38.)
 - **NFR-11 — Observability.** Every child run keeps its own full `run_traces`
   document, so a reviewer can always answer "what did *this* agent see and what
   did it cost" (`runs.ts:35-40`, `RunTrace.stats`). The batch adds a grouping
@@ -563,8 +576,8 @@ naming. Any contract edit must be hand-mirrored into both copies (root
 | Endpoint | Status | Note |
 |---|---|---|
 | `POST /pulls/:id/multi-agent-run` | **new** | body = agent id subset; returns batch id + child run ids immediately |
-| `GET /pulls/:id/multi-agent` or `GET /multi-agent-runs/:id` | **new** | `MultiAgentRun` incl. columns, conflicts, groups (E-9: address a specific batch) |
-| agent estimate aggregation (e.g. `GET /agents/:id/stats` or a batched variant) | **new** | no stats route exists today (`modules/agents/routes.ts:74-174`) |
+| `GET /multi-agent-runs/:id` | **new** | `MultiAgentRun` incl. columns, conflicts, groups. Addresses one specific batch by id, never "the latest batch for this PR" (E-9) — the only shape that satisfies that requirement, so no alternative is offered. |
+| `GET /agents/stats` | **new** | Returns the aggregate (avg duration, avg cost) for every workspace agent in one call — the configure-run screen needs all of them at once for the checkbox list (AC-3/AC-4), so one batched endpoint is simpler than either an N-call loop or a parametrized single-id variant. No stats route exists today (`modules/agents/routes.ts:74-174`). |
 | `POST /findings/:id/learn` | **new** | writes one `memory` row, returns `memoryId` (AC-35..AC-40) |
 | `POST /findings/:id/eval-case` | **new** | AC-42 |
 | `POST /pulls/:id/review` | reuse, unchanged | `routes.ts:41-57` |
@@ -748,10 +761,16 @@ this section states a layout fact, both sources back it.
   layer creates the parent row and kicks off each agent's existing single-agent
   execution path concurrently. Confirmed by the user; also the smallest diff
   against the worktree-A boundary.
-- **D-2 — Shared pre-work stays shared.** Because D-1 invokes the per-agent path
-  N times, intent classification and diff loading must be hoisted to the batch
-  level (E-1, E-2). Without this, D-1 silently multiplies LLM cost and races on
-  the `pr_intent` upsert.
+- **D-2 — Shared pre-work, via two small local fixes, not a shared-context
+  refactor.** Because D-1 invokes the per-agent path N times, intent
+  classification and diff loading must not repeat N times (E-1, E-2). The
+  simplest fix for each, confirmed against the actual code: (a) the
+  orchestrator awaits one `getOrClassify` call before starting the fan-out —
+  ordering, exploiting the service's existing read-before-write cache, zero new
+  locking code; (b) `diff-loader.ts` gets a small in-memory memoization keyed by
+  `pullId:headSha` — a few lines in one file that is not `run-executor.ts`.
+  Neither requires passing a shared context object through any modified
+  function signature.
 - **D-3 — Grouping is derived and non-destructive.** Computed at read time from
   persisted findings; originals keep id, `reviewId`, and full text. Matches how
   `Conflict` is already specified ("computed from persisted findings; not
@@ -779,10 +798,12 @@ this section states a layout fact, both sources back it.
   (`modules/reviews/findings.ts:6-9` "the `learn → memory` action";
   `hooks/reviews.ts:181-186`; `memory.json:10`). Scope stops at the write — no
   Memory page, no retrieval (Non-goals, E-20).
-- **D-11 — Learn is additive, idempotent, and embedding-optional.** It does not
-  set accept/dismiss state (AC-40), it will not create a second row for the same
-  finding (AC-39), and it succeeds with a null `embedding` when embeddings are
-  disabled or the embedder fails (AC-38).
+- **D-11 — Learn is additive, idempotent, and never touches the embedder.** It
+  does not set accept/dismiss state (AC-40), it will not create a second row for
+  the same finding (AC-39), and it always writes `embedding: null` without
+  calling the embedder at all (AC-38) — simplest possible correct behavior,
+  since nothing reads that column yet (confirmed by codebase audit) and this
+  spec ships no retrieval path regardless.
 - **D-12 — The picker lists every workspace agent, General Reviewer included.**
   Confirmed by the user. No hardcoded allow-list, no filtering of "superseded"
   personas — the picker reflects the `agents` table, so user-created agents
@@ -800,6 +821,16 @@ this section states a layout fact, both sources back it.
   header, AC-34a) sets it, and a single conditionally-rendered `RunTraceDrawer`
   reads it. This is the whole implementation — no new drawer variant, no
   per-agent drawer state, no change inside `RunTraceDrawer.tsx`.
+- **D-14 — Groups and conflicts are two views over one per-location index, not
+  two matching engines.** AC-22 (grouping, same-category) and AC-27/AC-30
+  (conflicts, category-agnostic per E-11) look like separate algorithms but
+  both start from the same fact: for every location any agent flagged, which
+  participating agents flagged it and which stayed silent. Build **one**
+  function that produces that per-location, per-agent index (agent → finding
+  or `'ignored'`) once per batch read; derive finding-groups from it by also
+  requiring same-category, and derive conflicts from it by checking for a
+  severity difference or a silent agent. One data structure, two filters over
+  it — not two independent scans of `findings`.
 
 ## Open questions
 

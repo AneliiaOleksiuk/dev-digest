@@ -1,23 +1,42 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  boolean,
+  jsonb,
+  timestamp,
+  doublePrecision,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
 
 // ============================================================ Eval / Conformance / Compose
 
-export const evalCases = pgTable('eval_cases', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  workspaceId: uuid('workspace_id')
-    .notNull()
-    .references(() => workspaces.id, { onDelete: 'cascade' }),
-  ownerKind: text('owner_kind', { enum: ['skill', 'agent'] }).notNull(),
-  ownerId: uuid('owner_id').notNull(),
-  name: text('name').notNull(),
-  inputDiff: text('input_diff'),
-  inputFiles: jsonb('input_files'),
-  inputMeta: jsonb('input_meta'),
-  expectedOutput: jsonb('expected_output'),
-  notes: text('notes'),
-});
+export const evalCases = pgTable(
+  'eval_cases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    ownerKind: text('owner_kind', { enum: ['skill', 'agent', 'finding'] }).notNull(),
+    ownerId: uuid('owner_id').notNull(),
+    name: text('name').notNull(),
+    inputDiff: text('input_diff'),
+    inputFiles: jsonb('input_files'),
+    inputMeta: jsonb('input_meta'),
+    expectedOutput: jsonb('expected_output'),
+    notes: text('notes'),
+  },
+  (t) => ({
+    // "Turn into eval case" idempotency (L07, SPEC-04) — a DB-level guarantee
+    // against a concurrent double-submit racing past the app-level
+    // SELECT-then-INSERT check in `eval-case.ts`.
+    uq: uniqueIndex('eval_cases_ws_owner_uq').on(t.workspaceId, t.ownerKind, t.ownerId),
+  }),
+);
 
 export const evalRuns = pgTable('eval_runs', {
   id: uuid('id').primaryKey().defaultRandom(),

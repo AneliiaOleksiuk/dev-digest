@@ -134,6 +134,20 @@
       "when": 1786713940933,
       "tag": "0018_real_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787433718487,
+      "tag": "0019_soft_spirit",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787437531133,
+      "tag": "0020_aberrant_captain_cross",
+      "breakpoints": true
     }
   ]
 }

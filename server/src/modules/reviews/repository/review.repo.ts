@@ -78,6 +78,33 @@ export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | u
   return row;
 }
 
+/**
+ * Findings for a SET of `agent_runs.id`s, via the `reviews.runId` join
+ * (L07 — the multi-agent batch read composes each child column's findings
+ * from this). Only `kind='review'` rows count (mirrors `reviewsForPull`'s
+ * sibling `listRunsForPull` severity rollup) — a failed/cancelled run has no
+ * matching review row and is simply absent from the result, not an empty
+ * placeholder.
+ */
+export async function findingsForRunIds(
+  db: Db,
+  runIds: string[],
+): Promise<{ runId: string; review: ReviewRow; findings: FindingRow[] }[]> {
+  if (runIds.length === 0) return [];
+  const reviews = await db
+    .select()
+    .from(t.reviews)
+    .where(and(inArray(t.reviews.runId, runIds), eq(t.reviews.kind, 'review')));
+  if (reviews.length === 0) return [];
+  const reviewIds = reviews.map((r) => r.id);
+  const findings = await db.select().from(t.findings).where(inArray(t.findings.reviewId, reviewIds));
+  return reviews.map((review) => ({
+    runId: review.runId!,
+    review,
+    findings: findings.filter((f) => f.reviewId === review.id),
+  }));
+}
+
 /** Delete a whole review (one agent's run) + its findings (cascade), scoped
  *  to the workspace. Returns false if not found in the workspace. */
 export async function deleteReview(

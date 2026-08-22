@@ -1,0 +1,29 @@
+import type React from "react";
+
+export const s = {
+  root: { display: "flex", flexDirection: "column", gap: 24, maxWidth: 720, margin: "0 auto" } as React.CSSProperties,
+  step: { display: "flex", flexDirection: "column", gap: 10 } as React.CSSProperties,
+  stepTitle: { fontSize: 13, fontWeight: 700, letterSpacing: "0.03em", color: "var(--text-muted)", textTransform: "uppercase" } as React.CSSProperties,
+  hint: { fontSize: 13, color: "var(--text-muted)" } as React.CSSProperties,
+  selectedPrRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "1px solid var(--border-strong)",
+    background: "var(--bg-elevated)",
+  } as React.CSSProperties,
+  footer: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: "16px 0 0",
+    borderTop: "1px solid var(--border)",
+  } as React.CSSProperties,
+  estimateBlock: { display: "flex", flexDirection: "column", gap: 2, fontSize: 13 } as React.CSSProperties,
+  estimateLine: { color: "var(--text-secondary)" } as React.CSSProperties,
+  estimatePartial: { color: "var(--warn)" } as React.CSSProperties,
+  selectionCount: { fontSize: 12.5, color: "var(--text-muted)" } as React.CSSProperties,
+};

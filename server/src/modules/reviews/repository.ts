@@ -22,6 +22,15 @@ export type ReviewRow = typeof t.reviews.$inferSelect;
 import * as reviewRepo from './repository/review.repo.js';
 import * as runRepo from './repository/run.repo.js';
 import * as pullRepo from './repository/pull.repo.js';
+import * as knowledgeRepo from './repository/knowledge.repo.js';
+import type { MemoryKind, MemoryScope, MemorySource } from '@devdigest/shared';
+import type { MultiAgentRunRow, AgentRunRow } from './repository/run.repo.js';
+import type {
+  MemoryRow,
+  EvalCaseRow,
+  EvalCaseOwnerKind,
+} from './repository/knowledge.repo.js';
+export type { MultiAgentRunRow, AgentRunRow, MemoryRow, EvalCaseRow, EvalCaseOwnerKind };
 
 export class ReviewRepository {
   constructor(private db: Db) {}
@@ -151,8 +160,88 @@ export class ReviewRepository {
     prId: string;
     provider: string | null;
     model: string | null;
+    multiAgentRunId?: string | null;
   }): Promise<string> {
     return runRepo.createAgentRun(this.db, values);
+  }
+
+  // ---- multi-agent batches (L07, SPEC-04) --------------------------------
+
+  createMultiAgentRun(values: { workspaceId: string; prId: string }): Promise<string> {
+    return runRepo.createMultiAgentRun(this.db, values);
+  }
+
+  getMultiAgentRun(workspaceId: string, id: string): Promise<MultiAgentRunRow | undefined> {
+    return runRepo.getMultiAgentRun(this.db, workspaceId, id);
+  }
+
+  listChildRuns(
+    workspaceId: string,
+    multiAgentRunId: string,
+  ): Promise<{ run: AgentRunRow; agentName: string | null }[]> {
+    return runRepo.listChildRuns(this.db, workspaceId, multiAgentRunId);
+  }
+
+  /** Findings for a set of run ids, via `reviews.runId` (batch column read). */
+  findingsForRunIds(
+    runIds: string[],
+  ): Promise<{ runId: string; review: ReviewRow; findings: FindingRow[] }[]> {
+    return reviewRepo.findingsForRunIds(this.db, runIds);
+  }
+
+  /** Per-agent avg duration + avg cost for EVERY agent id given, in ONE
+   *  query (fix-loop iteration 1 — replaces the former N+1
+   *  `avgStatsForAgentModel`, called once per agent). Grouped by
+   *  `(agent_id, model)`; the caller matches each agent's own current model. */
+  avgStatsForAgents(
+    workspaceId: string,
+    agentIds: string[],
+  ): Promise<
+    { agentId: string; model: string | null; avgDurationMs: number | null; avgCostUsd: number | null; sampleSize: number }[]
+  > {
+    return runRepo.avgStatsForAgents(this.db, workspaceId, agentIds);
+  }
+
+  // ---- Learn → memory / Turn into eval case (L07, SPEC-04) ---------------
+
+  insertMemory(values: {
+    workspaceId: string;
+    repoId: string | null;
+    scope: MemoryScope;
+    kind: MemoryKind;
+    content: string;
+    confidence: number | null;
+    sources: MemorySource[];
+    learnedFindingId?: string | null;
+  }): Promise<MemoryRow> {
+    return knowledgeRepo.insertMemory(this.db, values);
+  }
+
+  /** Idempotency lookup for the Learn action (AC-39) — see
+   *  `knowledge.repo.ts`'s `findMemoryByLearnedFinding` for the contract. */
+  findMemoryByLearnedFinding(workspaceId: string, findingId: string): Promise<MemoryRow | undefined> {
+    return knowledgeRepo.findMemoryByLearnedFinding(this.db, workspaceId, findingId);
+  }
+
+  findEvalCaseByOwner(
+    workspaceId: string,
+    ownerKind: EvalCaseOwnerKind,
+    ownerId: string,
+  ): Promise<EvalCaseRow | undefined> {
+    return knowledgeRepo.findEvalCaseByOwner(this.db, workspaceId, ownerKind, ownerId);
+  }
+
+  insertEvalCase(values: {
+    workspaceId: string;
+    ownerKind: EvalCaseOwnerKind;
+    ownerId: string;
+    name: string;
+    inputDiff: string | null;
+    inputFiles: unknown;
+    inputMeta: unknown;
+    expectedOutput: unknown;
+  }): Promise<EvalCaseRow> {
+    return knowledgeRepo.insertEvalCase(this.db, values);
   }
 
   completeAgentRun(

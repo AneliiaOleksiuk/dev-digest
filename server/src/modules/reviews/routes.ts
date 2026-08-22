@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
 import { RunRequest } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
@@ -7,6 +8,7 @@ import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
 import type { IntentLogSink } from './intent-service.js';
+import { MAX_MULTI_AGENT_BATCH_SIZE } from './constants.js';
 
 /** 3-line adapter over `req.log` — the manual `POST /pulls/:id/intent` route's
  *  version of `RunLogger`'s structural sink (which the background run path
@@ -25,11 +27,22 @@ function intentLogSink(log: FastifyBaseLogger): IntentLogSink {
  *   GET    /runs/:id/events                            → SSE stream of RunEvent (replay-first)
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
- *   POST   /findings/:id/(accept|dismiss)              → finding actions
+ *   POST   /findings/:id/(accept|dismiss|learn)        → finding actions
+ *   POST   /findings/:id/eval-case                      → turn a finding into an eval case
  *   POST   /pulls/:id/intent                           → force re-classify a PR's intent
  *   GET    /pulls/:id/intent                            → persisted intent, or `null`
+ *   POST   /pulls/:id/multi-agent-run                   → L07: run an explicit agent subset as one batch
+ *   GET    /multi-agent-runs/:id                        → L07: read a batch (columns + derived groups/conflicts)
  */
-const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
+const FINDING_ACTIONS = ['accept', 'dismiss', 'learn'] as const;
+
+/** Body of `POST /pulls/:id/multi-agent-run` — a non-empty, duplicate-free
+ *  (enforced in the service, not here) set of workspace agent uuids, capped
+ *  defensively at the route (see `MAX_MULTI_AGENT_BATCH_SIZE`'s docblock for
+ *  why this differs from OQ-4's real business-rule cap). */
+const MultiAgentRunBody = z.object({
+  agent_ids: z.array(z.string().uuid()).min(1).max(MAX_MULTI_AGENT_BATCH_SIZE),
+});
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -172,7 +185,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     return { ok: true };
   });
 
-  // ---- Finding actions (accept / dismiss) ---------------------------------
+  // ---- Finding actions (accept / dismiss / learn) -------------------------
   for (const action of FINDING_ACTIONS) {
     app.post(`/findings/:id/${action}`, { schema: { params: IdParams } }, async (req) => {
       const { workspaceId } = await getContext(container, req);
@@ -180,4 +193,33 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       return result;
     });
   }
+
+  // ---- "Turn into eval case" — registered SEPARATELY: not a
+  // FindingActionKind, so it does NOT go through the FINDING_ACTIONS loop
+  // above / the accept-dismiss-learn switch in findings.ts.
+  app.post('/findings/:id/eval-case', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.createEvalCaseFromFinding(workspaceId, req.params.id);
+  });
+
+  // ---- Multi-agent batch review (L07, SPEC-04) ----------------------------
+  // Tight per-route limit, at least as strict as POST /pulls/:id/review
+  // above — each call fans out to N expensive LLM runs, not just one.
+  app.post(
+    '/pulls/:id/multi-agent-run',
+    {
+      schema: { params: IdParams, body: MultiAgentRunBody },
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.multiAgent.runBatch(workspaceId, req.params.id, req.body.agent_ids, req.log);
+    },
+  );
+
+  // ---- Multi-agent batch read — workspace-scoped; a foreign id 404s -------
+  app.get('/multi-agent-runs/:id', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.multiAgentRead.getBatch(workspaceId, req.params.id);
+  });
 }

@@ -132,6 +132,53 @@
       "bodySelect": "Select a PR to begin.",
       "cta": "Run all agents"
     },
-    "crumb": "Multi-Agent Review"
+    "crumb": "Multi-Agent Review",
+    "steps": {
+      "pr": "1 Pull request",
+      "agents": "2 Agents to run"
+    },
+    "agentCard": {
+      "estimate": "≈{duration}s · ≈{cost}",
+      "fromRuns": "{count, plural, one {from # past run} other {from # past runs}}",
+      "noEstimate": "no estimate yet",
+      "disabled": "disabled"
+    },
+    "selection": {
+      "count": "{count, plural, =0 {No agents selected} one {# agent selected} other {# agents selected}}",
+      "estimate": "≈{duration}s (slowest agent) · ≈{cost}",
+      "estimatePartial": "partial — missing history for some agents",
+      "noEstimate": "No estimate yet for this selection.",
+      "run": "{count, plural, one {Run # agent} other {Run # agents}}"
+    },
+    "back": "Back to configure",
+    "metaPartial": "partial",
+    "groups": {
+      "title": "Grouped findings",
+      "subtitle": "Findings flagged in the same file, category and overlapping line range across agents.",
+      "sameLocationNote": "Groups require a matching category — the disagreement block below only matches by location, so the same finding can appear in one but not the other.",
+      "memberCount": "{count, plural, one {# agent flagged this} other {# agents flagged this}}",
+      "empty": "No grouped findings yet.",
+      "expand": "expand",
+      "collapse": "collapse"
+    },
+    "learn": {
+      "action": "Learn",
+      "saved": "Saved to memory"
+    },
+    "evalCase": {
+      "action": "Turn into eval case",
+      "saved": "Added to eval cases"
+    },
+    "columnCard": {
+      "viewTrace": "View trace",
+      "score": "Score",
+      "status": {
+        "running": "Running",
+        "done": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
+    },
+    "liveRegion": "{done} of {total} agents done"
   }
 }

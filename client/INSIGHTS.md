@@ -1097,3 +1097,151 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   architecture bug this test targets IS fixed and verified (failure mode
   changed from "element not found" to "multiple elements found," proving the
   group+file now mount correctly).
+
+- 2026-08-22/23: Multi-Agent Review (SPEC-04/L07) client G3 — new
+  `repos/[repoId]/multi-agent/` route (`MultiAgentPageView` orchestrates
+  `?pr=`/`?run=` URL state → `ConfigureRunView` (subset picker, pure
+  `computeSelectionEstimate`/`agentEstimateFor` helpers — sums cost, takes
+  MAX duration, per WI11) or `MultiAgentResultsView` (Columns/Tabs toggle +
+  `FindingGroupsSection` + `DisagreementSection`, always below either
+  layout)); new `lib/hooks/multi-agent.ts`
+  (`useAgentStats`/`useStartMultiAgentRun`/`useMultiAgentRun`/
+  `useTurnIntoEvalCase` — the last two endpoints, `GET /agents/stats` and
+  `POST /findings/:id/eval-case`, were built against G2's FIXED contract
+  before G2's server routes existed, per the concurrent multi-agent split);
+  added a `multi-agent` entry to `vendor/ui/nav.ts`'s WORKSPACE group (5th
+  use of the sanctioned do-not-touch exception, icon `Users`, `gKey: "m"`)
+  + a matching `SHORTCUTS` row — `activeKeyFor`/`shell.json`'s
+  `nav["multi-agent"]` label were ALREADY pre-wired for this route before
+  this session (same "pre-authored code anticipates the UX" pattern this
+  file already documents), only the `NAV` array entry itself was missing.
+  **Cross-route component reuse works via the `@/` alias despite bracket
+  folder names**: `RunTraceDrawer` and `FindingCard` (both under
+  `pulls/[number]/_components/`) are imported from the sibling
+  `multi-agent/` route as `@/app/repos/[repoId]/pulls/[number]/_components/
+  <Name>` — TypeScript/webpack resolve `[repoId]`/`[number]` as ordinary
+  literal path segments, no dynamic-route/glob semantics apply to a static
+  import specifier. Exactly ONE `openRunId` state + ONE `<RunTraceDrawer>`
+  mount lives in `MultiAgentResultsView` (not per-column) — Columns'
+  `AgentColumnCard` and Tabs' `AgentTabsView` both just call the SAME
+  `onOpenTrace` callback passed down.
+  **`AgentColumn` (observability.ts, G1-owned) has no dedicated `error`
+  field** — unlike `RunSummary` (`trace.ts`), which does. `AgentColumnCard`
+  treats `column.summary` as the error text when `status === 'failed'`
+  (the field the server presumably repurposes on failure); flagged below
+  for G1/a follow-up rather than guessed at silently, since I can't edit
+  the do-not-touch contract file to add a real `error` field myself.
+  **Reused `usePrReviews(prId)` (unmodified) as the enrichment source for
+  BOTH the Tabs view's per-agent findings (filtered by `review.run_id`) and
+  `FindingGroupsSection`'s per-member `FindingCard`s (looked up by finding
+  `id` in a flat `Map`)** — `AgentColumnFinding`/`FindingGroupMember` (the
+  lightweight projections `MultiAgentRun` actually carries) don't have every
+  field `FindingCard` needs (no `accepted_at`/`dismissed_at`/full
+  `category`/`file`/lines for members), but the SAME PR's `ReviewRecord[]`
+  from the ordinary reviews endpoint already has full `FindingRecord`s for
+  every run in the batch (each multi-agent run is an ordinary `agent_runs`
+  row) — no server change needed, and accept/dismiss done anywhere
+  (Tabs, a finding group) invalidates `["reviews", prId]` the normal way, so
+  every other view showing the same finding id updates for free.
+  `FindingGroupsSection/helpers.ts`'s `memberFindingRecord` falls back to
+  reconstructing a projection-only record (accept/dismiss defaulted to
+  unset) only for the rare case the reviews cache hasn't caught up yet.
+  **"Show only conflicts" (WI13) toggle semantics had to be inferred, not
+  read off a server contract** — `MultiAgentRun.conflicts` is, by its OWN
+  doc comment, already filtered to genuine disagreements server-side (some
+  agent flagged it and another didn't, OR severities diverge), so a
+  client-side toggle can't mean "hide agreement rows" (there are none in
+  this array). Implemented as: OFF (default) shows every row the server
+  sent, including pure "some flagged it, others just didn't cover it" rows
+  (`did not flag` is a first-class verdict, shown by default); ON narrows
+  to `isSeverityDivergent` rows only — where the agents that DID flag it
+  actively disagree on severity. Confirm this reading against G2's actual
+  `conflicts[]` semantics once the server side lands; the pure helper
+  (`DisagreementSection/helpers.ts`) is isolated and cheap to change if the
+  real intent differs.
+  **`Toggle` (`vendor/ui/primitives/Toggle.tsx`) takes `on`, not
+  `checked`** — easy to guess wrong by analogy with `Checkbox`'s `checked`
+  prop; caught by `tsc`, not by a runtime surprise, but worth remembering
+  since this is the first place in the codebase this session that reached
+  for `Toggle` instead of `Checkbox`.
+  Verified: `tsc --noEmit` clean; full Vitest green (51 files / 280 tests,
+  up from 51/... — 15 new self-check test files this session, one per
+  colocated component/helpers pair, per this feature's plan explicitly
+  requiring them). `smoke.test.tsx` (`/showcase`) still passes. No live
+  browser click-through — G2 (server routes) and G4 (agent roster seed
+  data) were running concurrently in the same working tree and hadn't
+  landed yet, so there was nothing running to click through against.
+  **Flagged, not resolved here**: (1) `AgentColumn`'s missing `error` field
+  (above); (2) the "Show only conflicts" semantics need reconciling against
+  G2's actual server-side `conflicts[]` computation once it lands; (3) no
+  `nav.test.ts` assertion was added for the new `multi-agent` NAV entry
+  (`onboarding-tour`'s precedent test file) — out of this session's file
+  scope (`client/src/components/app-shell/nav.test.ts` was not in the
+  assigned exclusive scope), left for a follow-up/test-writer pass.
+
+- 2026-08-23: Multi-Agent Review (SPEC-04/L07) plan-verifier fix-loop
+  iteration 1, client side (companion to the same-day server fix pass) —
+  resolves all three items flagged above in the 2026-08-22/23 entry.
+  **(1) `GET /agents/stats` field-name mismatch (Fix A, blocking)**:
+  `lib/hooks/multi-agent.ts` was importing the WRONG shared contract —
+  `@devdigest/shared`'s `AgentStats` (`runs`/`avg_latency_ms`/accept-rate/
+  trend/…) is `GET /agents/:id/stats`'s richer per-agent-DETAIL shape, a
+  different endpoint entirely; the actual `GET /agents/stats` response is
+  the server's local, unvendored `AgentCostEstimate`
+  (`server/src/modules/agents/helpers.ts`:
+  `{agent_id, agent_name, avg_duration_ms, avg_cost_usd, sample_size}`).
+  Because `lib/api.ts`'s fetch wrapper does zero runtime validation
+  (`as T`), this never threw — every field silently read as `undefined`,
+  so `agentEstimateFor`'s null-check always tripped and EVERY agent showed
+  "no estimate yet" regardless of real history. Fixed by defining a local
+  `AgentCostEstimate` interface in `lib/hooks/multi-agent.ts` (mirroring
+  the server's shape field-for-field, exported for reuse) instead of
+  importing the mismatched vendor type, and updating every consumer
+  (`ConfigureRunView/helpers.ts`'s `agentEstimateFor`/
+  `computeSelectionEstimate`, `AgentPickerCard.tsx`) to read
+  `avg_duration_ms`/`sample_size` instead of `avg_latency_ms`/`runs`.
+  **Lesson: a vendored contract with the exact right-looking field names
+  for a DIFFERENT endpoint of the same resource is a worse trap than a
+  missing type** — `AgentStats` type-checked cleanly against every call
+  site because both interfaces exist and are structurally plausible;
+  `lib/api.ts`'s zero-runtime-validation `as T` cast means nothing catches
+  this until manual field-by-field comparison against the actual server
+  response. Always trace a hook's response type back to the server
+  handler/service that actually implements the route, not just to a
+  same-named export.
+  **(2) `AgentColumn.error` not rendered for `failed`/`cancelled` (Fix B,
+  Major)**: the server added a real `error: z.string().nullish()` field
+  (populated for `status === 'failed' | 'cancelled'` only); `AgentColumn`
+  had none before (see the 2026-08-22/23 entry's flag). `AgentColumnCard.tsx`
+  now branches on `status === 'failed' || status === 'cancelled'` (was
+  `'failed'` only) and reads `column.error` (was `column.summary`, which
+  the server no longer overloads for this — it only ever carries a genuine
+  review summary now).
+  **(3) "Show only conflicts" toggle didn't implement AC-30 (Fix C,
+  blocking)**: the 2026-08-22/23 entry's `isSeverityDivergent`-only ON
+  filter was too narrow — it never treated a silent/`'ignored'` take as a
+  conflict on its own, only severity divergence among non-ignored takes.
+  The server-side prerequisite for a correct OFF state also landed this
+  same fix pass: `conflicts[]` now emits EVERY shared location unfiltered
+  (previously pre-filtered server-side to only AC-30 matches, so OFF could
+  never actually show a non-conflicting row — there were none to show).
+  `DisagreementSection/helpers.ts` renamed `isSeverityDivergent` →
+  `isConflict` and implemented AC-30's real OR-definition: `hasSilentParticipant
+  (conflict) || hasSeverityDivergence(conflict)` — either alone is
+  sufficient, they are not required together. **Test fixture gotcha**: the
+  pre-existing `DisagreementSection.test.tsx` "toggle narrows" test used a
+  fixture with one flagged + one ignored take and asserted that toggling ON
+  HID it — that assertion was itself encoding the old, wrong semantics (a
+  silent participant now correctly counts as a conflict, so ON must KEEP
+  it). Replaced with two fixtures: the original (flagged + ignored) to
+  prove ON now keeps a silent-participant row, and a new all-agree fixture
+  (every agent flagged it, all same severity) to prove ON still correctly
+  excludes genuine non-conflicts. Same fixture-encoded-the-bug gotcha in
+  `AgentColumnCard.test.tsx`'s "status is never color-only" test — with
+  `error: null`, both the status chip AND the error box's status-key
+  fallback render the literal text "Cancelled", so `getByText` throws
+  "multiple elements found"; switched to `getAllByText(...).length >
+  0` since the test only cares that SOME text label renders, not the count.
+  Verified: `tsc --noEmit` clean; full Vitest green (51 files / 284 tests,
+  up from 51/280 — 4 new test cases across the three fixed helpers/
+  components, no new test files). `smoke.test.tsx` still passes.

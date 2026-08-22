@@ -679,6 +679,11 @@ docs incl. ADR 0006 client-side addendum; live smoke test pending)
 
 ### Phase E — gate + validation experiment (commit 5)
 
+**Status: WI14/WI15 DONE — 2026-08-22** (commits `ce4d293`, `4bb63c0`,
+`de13142` — verify-l06.sh, plan-verifier's Minor arch-check gap closed
+(`no-other-module-file-to-db-or-adapter` + `orders.ts` fixture exclusion),
+docs. **WI16 remains not-done — human-run only**, see below.)
+
 **WI14. `./scripts/verify-l06.sh`.**
 
 - Files: new `scripts/verify-l06.sh`.

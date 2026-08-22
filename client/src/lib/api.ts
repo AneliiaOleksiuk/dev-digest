@@ -62,6 +62,50 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return (await res.json()) as T;
 }
 
+/* A binary-response counterpart to apiFetch — used only for the CI export
+   zip download (`POST /agents/:id/export-ci/zip` returns
+   application/zip, not JSON). Kept here, not as an ad-hoc `fetch` in a
+   hook/component, per this file's own "all fetching goes through api.ts"
+   convention (client/AGENTS.md). */
+export async function apiFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.body != null ? { "content-type": "application/json" } : {}),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (e) {
+    throw new ApiError(
+      `Cannot reach the DevDigest engine at ${API_BASE}. Is the API running?`,
+      0,
+      "network_error",
+      e
+    );
+  }
+
+  if (!res.ok) {
+    let code: string | undefined;
+    let message = `${res.status} ${res.statusText}`;
+    let details: unknown;
+    try {
+      const body = await res.json();
+      if (body?.error) {
+        code = body.error.code;
+        message = body.error.message ?? message;
+        details = body.error.details;
+      }
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(message, res.status, code, details);
+  }
+
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => apiFetch<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -71,4 +115,6 @@ export const api = {
   patch: <T>(path: string, body?: unknown) =>
     apiFetch<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   del: <T>(path: string) => apiFetch<T>(path, { method: "DELETE" }),
+  postBlob: (path: string, body?: unknown) =>
+    apiFetchBlob(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
 };

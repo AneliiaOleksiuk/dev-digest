@@ -81,6 +81,13 @@ deps — see each package's AGENTS.md.
   contract lookup.
 - [docs/adr/0005-composite-key-brief-persistence.md](docs/adr/0005-composite-key-brief-persistence.md)
   — composite-key persistence + in-process concurrency-guard decision for PR Brief.
+- [docs/features/multi-agent-review.md](docs/features/multi-agent-review.md) —
+  Multi-Agent Review with live statuses (configure → concurrent fan-out →
+  Columns/Tabs results, plus derived finding groups and where-agents-disagree).
+- [docs/reference/multi-agent-api.md](docs/reference/multi-agent-api.md) —
+  Multi-Agent Review HTTP + contract lookup.
+- [docs/adr/0006-concurrency-without-modifying-run-executor.md](docs/adr/0006-concurrency-without-modifying-run-executor.md)
+  — concurrency-via-N-single-element-`executeRuns`-calls decision, `run-executor.ts` untouched.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.
 - Package maps: [server/README.md](server/README.md) ·
   [client/README.md](client/README.md) ·

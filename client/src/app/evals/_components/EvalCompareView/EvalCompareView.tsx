@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, ErrorState, Modal, Skeleton } from "@devdigest/ui";
+import { Badge, ErrorState, Icon, Modal, Skeleton } from "@devdigest/ui";
 import { useEvalCompare } from "@/lib/hooks/eval";
 import { formatCost } from "@/helpers/format";
 import { deltaColor, fmtDeltaPct, promptDiffLines, sameVersionDifferentSkills } from "./helpers";
@@ -57,11 +57,13 @@ export function EvalCompareView({
   }
 
   const { base, head, delta, base_prompt, head_prompt } = comparison;
-  const columns = [
-    { label: t("compare.base"), batch: base },
-    { label: t("compare.head"), batch: head },
-  ];
   const diffLines = base_prompt != null && head_prompt != null ? promptDiffLines(base_prompt, head_prompt) : null;
+  const pct = (v: number | null) => (v != null ? `${Math.round(v * 100)}%` : t("dashboard.na"));
+  const metricCards = [
+    { key: "recall", label: t("dashboard.table.recall"), base: pct(base.recall), head: pct(head.recall), delta: delta.recall, invert: false },
+    { key: "precision", label: t("dashboard.table.precision"), base: pct(base.precision), head: pct(head.precision), delta: delta.precision, invert: false },
+    { key: "citation", label: t("dashboard.table.citation"), base: pct(base.citation_accuracy), head: pct(head.citation_accuracy), delta: delta.citation_accuracy, invert: false },
+  ] as const;
 
   return (
     <Modal
@@ -75,66 +77,42 @@ export function EvalCompareView({
           <p style={s.note}>{t("compare.sameVersionDifferentSkills")}</p>
         )}
 
-        <div style={s.deltaBar}>
-          {(
-            [
-              { label: t("dashboard.table.recall"), value: delta.recall, invert: false },
-              { label: t("dashboard.table.precision"), value: delta.precision, invert: false },
-              { label: t("dashboard.table.citation"), value: delta.citation_accuracy, invert: false },
-            ] as const
-          ).map((d) => (
-            <div key={d.label} style={s.deltaTile}>
-              <span style={s.deltaLabel}>{d.label} Δ</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: deltaColor(d.value, d.invert) }}>
-                {fmtDeltaPct(d.value)}
+        <div style={s.metaRow}>
+          <span>
+            <Badge mono>v{base.agent_version}</Badge> {new Date(base.ran_at).toLocaleString()}
+          </span>
+          <Icon.ArrowRight size={13} />
+          <span>
+            <Badge mono>v{head.agent_version}</Badge> {new Date(head.ran_at).toLocaleString()}
+          </span>
+        </div>
+
+        <div style={s.metricCardsRow}>
+          {metricCards.map((m) => (
+            <div key={m.key} style={s.metricCard}>
+              <div style={s.metricCardLabel}>{m.label}</div>
+              <div style={s.metricCardValue}>
+                <span style={s.metricCardOld}>{m.base}</span>
+                <span style={s.metricCardArrow}>→</span>
+                <span>{m.head}</span>
+              </div>
+              <span style={{ ...s.metricCardDelta, color: deltaColor(m.delta, m.invert) }}>
+                {fmtDeltaPct(m.delta)}
               </span>
             </div>
           ))}
-          <div style={s.deltaTile}>
-            <span style={s.deltaLabel}>{t("dashboard.table.cost")} Δ</span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: deltaColor(delta.cost_usd, true) }}>
+          <div style={s.metricCard}>
+            <div style={s.metricCardLabel}>{t("dashboard.table.cost")}</div>
+            <div style={s.metricCardValue}>
+              <span style={s.metricCardOld}>{formatCost(base.cost_usd)}</span>
+              <span style={s.metricCardArrow}>→</span>
+              <span>{formatCost(head.cost_usd)}</span>
+            </div>
+            <span style={{ ...s.metricCardDelta, color: deltaColor(delta.cost_usd, true) }}>
               {/* E-16 — a null cost renders null, never an invented figure. */}
               {delta.cost_usd == null ? "—" : formatCost(delta.cost_usd)}
             </span>
           </div>
-        </div>
-
-        <div style={s.columns}>
-          {columns.map((c) => (
-            <div key={c.label} style={s.column}>
-              <span style={s.columnLabel}>{c.label}</span>
-              <div style={s.metaRow}>
-                <Badge mono>v{c.batch.agent_version}</Badge>
-                <span>{new Date(c.batch.ran_at).toLocaleString()}</span>
-              </div>
-              <div style={s.metricsRow}>
-                <div style={s.metric}>
-                  <div style={s.metricLabel}>{t("dashboard.table.recall")}</div>
-                  <div style={s.metricValue}>
-                    {c.batch.recall != null ? `${Math.round(c.batch.recall * 100)}%` : t("dashboard.na")}
-                  </div>
-                </div>
-                <div style={s.metric}>
-                  <div style={s.metricLabel}>{t("dashboard.table.precision")}</div>
-                  <div style={s.metricValue}>
-                    {c.batch.precision != null ? `${Math.round(c.batch.precision * 100)}%` : t("dashboard.na")}
-                  </div>
-                </div>
-                <div style={s.metric}>
-                  <div style={s.metricLabel}>{t("dashboard.table.citation")}</div>
-                  <div style={s.metricValue}>
-                    {c.batch.citation_accuracy != null
-                      ? `${Math.round(c.batch.citation_accuracy * 100)}%`
-                      : t("dashboard.na")}
-                  </div>
-                </div>
-                <div style={s.metric}>
-                  <div style={s.metricLabel}>{t("dashboard.table.cost")}</div>
-                  <div style={s.metricValue}>{formatCost(c.batch.cost_usd)}</div>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
 
         <div style={s.diffSection}>

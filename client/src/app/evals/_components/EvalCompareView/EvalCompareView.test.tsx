@@ -128,8 +128,8 @@ describe("EvalCompareView — E-16 a null cost delta renders null, never an inve
 
     renderCompare();
 
-    const costDeltaLabel = screen.getByText("Cost Δ");
-    expect(costDeltaLabel.parentElement?.textContent).toContain("—");
+    const costLabel = screen.getByText("Cost");
+    expect(costLabel.parentElement?.textContent).toContain("—");
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   });
 });

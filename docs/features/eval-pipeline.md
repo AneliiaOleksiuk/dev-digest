@@ -8,12 +8,14 @@ agent versions — with **zero LLM calls** anywhere in scoring, aggregation or
 comparison.
 
 Shipped per [`docs/plans/eval-pipeline.md`](../plans/eval-pipeline.md) (source
-spec: [`specs/eval-pipeline.md`](../../specs/eval-pipeline.md)), across four
+spec: [`specs/eval-pipeline.md`](../../specs/eval-pipeline.md)), across five
 phases: A (contracts + schema), B (case CRUD, create-from-finding, the pure
 scorer), C (the version-pinned batch runner + read APIs, commits
-`42763c6`/`3fce7db`/`10ab8f6`), and D (the client Evals UI — this document's
-"Client" section, commits `6295127`/`89c5edd`/`15fe166`/`0fd084a`). HTTP/contract
-lookup: [`docs/reference/eval-api.md`](../reference/eval-api.md). Batch-storage
+`42763c6`/`3fce7db`/`10ab8f6`), D (the client Evals UI — this document's
+"Client" section, commits `6295127`/`89c5edd`/`15fe166`/`0fd084a`), and E (the
+`scripts/verify-l06.sh` self-check gate — this document's "Verification gate"
+section, commits `ce4d293`/`4bb63c0`). HTTP/contract lookup:
+[`docs/reference/eval-api.md`](../reference/eval-api.md). Batch-storage
 decision: [ADR 0006](../adr/0006-eval-batches-stored-aggregate.md).
 
 ## What it does
@@ -332,6 +334,57 @@ because Next's webpack doesn't resolve the barrel's relative `./contracts/
 alias do. The alias makes the barrel (and any contract file) safely
 value-importable everywhere going forward, not just at this one call site.
 
+## Verification gate (Phase E)
+
+Phase E (commits `ce4d293`, `4bb63c0`) ships no application code — it is the
+self-check gate that proves Phases A–D's deliverables still compile, still
+respect the module boundary rules, and still pass their tests, as one
+pre-submission command (Q-5's plan decision).
+
+- **`./scripts/verify-l06.sh`** — five fail-fast lanes, in order: (1) server
+  typecheck (`tsc --noEmit -p tsconfig.json`); (2) server `arch:check`
+  (`depcruise --config .dependency-cruiser.cjs src`); (3) server unit tests
+  narrowed to the four L06 suites (`test/eval-ci-contracts.test.ts`,
+  `test/eval-helpers.test.ts`, `test/eval-runner.test.ts`,
+  `test/eval-scorer.test.ts`) with `--exclude '**/*.it.test.ts'`; (4) client
+  typecheck; (5) client's full `vitest run`. It follows
+  `scripts/verify-l03.sh`'s conventions exactly: `set -euo pipefail`, a
+  `--help` block, ordered lanes that name the failing one and stop there,
+  local binaries invoked directly (`./node_modules/.bin/tsc`/`vitest`/
+  `depcruise`, never `pnpm <script>` — root `INSIGHTS.md`'s
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` note), and a prerequisite check
+  that fails with an actionable message when `server/node_modules` or
+  `client/node_modules` is missing. Designed to pass with **Docker stopped** —
+  the unit lane excludes `*.it.test.ts`. `reviewer-core` is deliberately
+  excluded: unlike L03 (which touched `reviewer-core/src/prompt.ts`), the Eval
+  Pipeline consumes `reviewPullRequest` exactly as-is and never imports or
+  modifies `reviewer-core` at all (Scope: "a second grounding implementation
+  is forbidden"), so there is nothing there for a `reviewer-core` lane to
+  verify.
+- **A boundary-check gap the gate itself closes**
+  (`server/.dependency-cruiser.cjs`'s new `no-other-module-file-to-db-or-adapter`
+  rule). `plan-verifier`'s Phase 2 architecture review found it: the four
+  pre-existing rules only named files literally called `service.ts` /
+  `routes.ts` / `helpers.ts`, so a new module's *other* files — `modules/eval/
+  runner.ts`, `scorer.ts`, `constants.ts`, and the port `repository.ts` itself
+  — could import `src/db/(schema|client)` or a concrete `src/adapters/**`
+  completely undetected by `pnpm arch:check`. The new rule is a catch-all: any
+  file in a non-`PRE_EXISTING_MODULES` module folder other than `routes.ts` /
+  `service.ts` / `helpers.ts` / `repository.drizzle.ts` (the one file a module
+  may touch Drizzle/Postgres from) is now forbidden from importing those
+  paths. `modules/eval/` is the first module the widened rule actually covers.
+  The scan's `exclude` also now names `server/src/modules/orders/orders.ts` —
+  a deliberately-broken review-bait fixture, never registered in
+  `modules/index.ts` and already excluded from `tsc` via `tsconfig.json`'s own
+  `exclude` — since it was never meant to satisfy any architecture rule and
+  would otherwise false-positive against the new catch-all.
+- **The validation experiment (WI16) is not part of this gate, and is not
+  done.** Creating ≥8 real eval cases from real findings, running a batch,
+  editing the agent's system prompt, and re-running to show recall/precision
+  movement in the compare view is human-run only per the plan — it spends
+  real provider money and needs a browser. Pending the user; `verify-l06.sh`
+  does not (and cannot) exercise it.
+
 ### Client surface map
 
 The server-side diagram above (persisting a batch) answers "what happens
@@ -376,3 +429,4 @@ flowchart LR
 | Client: i18n | `client/messages/en/eval.json`, `prReview.json`, `shell.json` |
 | Client: webpack fix for barrel value-imports | `client/next.config.mjs` (`webpack.resolve.extensionAlias`) |
 | Tests (client) | `client/src/app/evals/_components/**/*.test.tsx`, `EvalsTab.test.tsx`, `FindingsPanel.test.tsx`, `client/src/i18n/eval-l06-keys.test.ts`, `client/src/components/app-shell/nav.test.ts`, `useShellCommands.test.tsx` |
+| Verification gate (Phase E) | `scripts/verify-l06.sh`; boundary-check widening in `server/.dependency-cruiser.cjs` |

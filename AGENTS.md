@@ -104,7 +104,7 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
   of deriving it from `eval_runs` on every read.
 - [docs/features/eval-pipeline.md](docs/features/eval-pipeline.md) — Eval
   Pipeline (create case from finding → zero-LLM scorer → version-pinned
-  batch runner → dashboard/history/compare).
+  batch runner → dashboard/history/compare → `verify-l06.sh` gate).
 - [docs/reference/eval-api.md](docs/reference/eval-api.md) — Eval Pipeline
   HTTP + contract lookup.
 - [evals/README.md](evals/README.md) — self-check harness (skills/agents/workflow

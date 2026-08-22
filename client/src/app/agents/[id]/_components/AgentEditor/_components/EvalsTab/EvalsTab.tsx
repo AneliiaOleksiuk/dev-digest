@@ -171,7 +171,13 @@ export function EvalsTab({ agent }: { agent: Agent }) {
               key={c.id}
               evalCase={c}
               lastRun={lastRunByCase.get(c.id)}
-              running={runCase.isPending}
+              // Scoped to THIS row's own case id — `runCase` is one shared
+              // mutation instance for the whole list, so `isPending` alone
+              // would flip every row to "Running…" the moment any one of
+              // them is clicked (a real bug: it read as "running one runs
+              // them all" even though the server only ever ran the one case).
+              running={runCase.isPending && runCase.variables?.caseId === c.id}
+              runDisabled={runCase.isPending && runCase.variables?.caseId !== c.id}
               onRun={() =>
                 runCase.mutate(
                   { caseId: c.id, ownerId: agent.id },

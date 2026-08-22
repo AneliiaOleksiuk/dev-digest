@@ -17,13 +17,19 @@ export function CaseRow({
   evalCase,
   lastRun,
   running,
+  runDisabled,
   onRun,
   onEdit,
   onDelete,
 }: {
   evalCase: EvalCaseRecord;
   lastRun?: EvalRunRecord;
+  /** THIS case is the one currently running (drives the spinner + label). */
   running?: boolean;
+  /** A DIFFERENT case in the same list is running — the server allows only
+   *  one in-flight batch per agent, so block the click rather than let it
+   *  round-trip into a rejected-batch error toast. */
+  runDisabled?: boolean;
   onRun: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -48,7 +54,7 @@ export function CaseRow({
         )}
       </div>
       <div style={s.actions}>
-        <Button kind="ghost" size="sm" icon="Play" loading={running} disabled={unusable} onClick={onRun}>
+        <Button kind="ghost" size="sm" icon="Play" loading={running} disabled={unusable || runDisabled} onClick={onRun}>
           {running ? t("evalsTab.running") : t("evalsTab.run")}
         </Button>
         <Button kind="ghost" size="sm" icon="Edit" onClick={onEdit}>

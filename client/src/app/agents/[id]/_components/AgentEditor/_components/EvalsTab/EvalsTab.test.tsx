@@ -228,6 +228,32 @@ describe("EvalsTab — regression: metric captions read their OWN contributing-c
   });
 });
 
+describe("EvalsTab — regression: running one case does not show every OTHER case as running too", () => {
+  it("only the case named in the in-flight mutation's own variables shows the running state", () => {
+    const CASE_OK_2: EvalCaseRecord = { ...CASE_OK, id: "c3", name: "n-plus-one-query" };
+    const dashboard: EvalDashboard = { ...EMPTY_DASHBOARD, cases_total: 2 };
+    useAgentEvalCases.mockReturnValue({ data: [CASE_OK, CASE_OK_2] });
+    useAgentEvalDashboard.mockReturnValue({ data: dashboard });
+    useEvalBatches.mockReturnValue([]);
+    useDeleteEvalCase.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    // A single shared mutation hook instance, mid-flight for case "c1" only —
+    // exactly react-query's real shape (one `variables` for whichever call
+    // is in flight), the actual cause of the bug this test guards against.
+    useRunEvalCase.mockReturnValue({ mutate: vi.fn(), isPending: true, variables: { caseId: "c1", ownerId: "ag1" } });
+    useRunEvalSet.mockReturnValue({ mutate: vi.fn(), isPending: false });
+
+    renderTab();
+
+    expect(screen.getByText("Running…")).toBeInTheDocument();
+    // The other case's button must still read "Run" (not also "Running…"),
+    // though it IS disabled — a second concurrent run for the same agent
+    // would just be rejected server-side (E-14's one-in-flight-per-agent
+    // guard), so blocking the click here avoids a round-trip error toast.
+    expect(screen.getByText("Run")).toBeInTheDocument();
+    expect(screen.getByText("Run").closest("button")).toBeDisabled();
+  });
+});
+
 describe("EvalsTab — AC-47/UX-9 the run estimate is stated before the click", () => {
   it("shows the call-count + last-run-cost estimate next to the Run eval button", () => {
     const dashboard: EvalDashboard = {

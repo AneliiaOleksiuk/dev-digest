@@ -12,14 +12,21 @@ interface AgentVisual {
   color: string;
 }
 
-const DEFAULT_VISUAL: AgentVisual = { icon: "Cpu", color: "var(--text-muted)" };
+// Plain neutral border for any agent outside the map below — deliberately
+// the SAME shade the cards already used before this feature, so it reads as
+// "no particular color" rather than a washed-out accent.
+const DEFAULT_VISUAL: AgentVisual = { icon: "Cpu", color: "var(--border-strong)" };
 
 const AGENT_VISUALS: Record<string, AgentVisual> = {
   "Security Reviewer": { icon: "Shield", color: "var(--crit)" },
   "Performance Reviewer": { icon: "Zap", color: "var(--warn)" },
   "Junior Mentor": { icon: "Lightbulb", color: "var(--sugg)" },
   "Customer-Facing": { icon: "MessageSquare", color: "var(--ok)" },
-  Architecture: { icon: "Layers", color: "var(--info)" },
+  // No spare hue left in this design system's token set (do-not-touch) once
+  // red/orange/blue/green are taken — `--text-secondary` (a visibly lighter
+  // gray than the plain neutral border above) keeps Architecture legibly
+  // distinct without inventing a new color.
+  Architecture: { icon: "Layers", color: "var(--text-secondary)" },
 };
 
 export function agentVisual(agentName: string): AgentVisual {

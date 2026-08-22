@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
@@ -66,7 +66,20 @@ export async function reviewsForPull(
     .orderBy(desc(t.reviews.createdAt));
   if (reviews.length === 0) return [];
   const ids = reviews.map((r) => r.id);
-  const findings = await db.select().from(t.findings).where(inArray(t.findings.reviewId, ids));
+  // Deliberate ORDER BY: without one, Postgres's row order is unspecified and
+  // an UPDATE (accept/dismiss sets accepted_at/dismissed_at) can relocate a
+  // row's physical tuple, so the SAME query returns findings in a DIFFERENT
+  // order right after an accept — the list visibly reshuffles for no reason
+  // a reader can see. `id` has no semantic meaning, but ordering by it is
+  // stable regardless of writes; the client re-sorts by severity for display
+  // anyway (FindingsPanel/helpers.ts's `visibleFindings`), so this only fixes
+  // the within-severity tie-break from "whatever Postgres felt like" to
+  // "always the same".
+  const findings = await db
+    .select()
+    .from(t.findings)
+    .where(inArray(t.findings.reviewId, ids))
+    .orderBy(asc(t.findings.id));
   return reviews.map((review) => ({
     review,
     findings: findings.filter((f) => f.reviewId === review.id),

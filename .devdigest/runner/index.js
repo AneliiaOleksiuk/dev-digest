@@ -20568,6 +20568,19 @@ const CiFile = objectType({
     preview_omitted: booleanType().default(false),
 });
 /**
+ * Response of `POST /agents/:id/export-ci/preview` (SPEC-05 Recommendation
+ * 6). `ingest_secret_name` is server-derived from the layout Preview would
+ * resolve for this export (an existing installation's own persisted
+ * namespace, or a freshly-derived one for a not-yet-installed agent) —
+ * needed because the secrets panel renders BEFORE any `CiInstallation`
+ * exists, so the name can't come from that contract. Declared after `CiFile`
+ * (TDZ — a `const` used before its own declaration in this module throws).
+ */
+const CiExportPreview = objectType({
+    files: arrayType(CiFile),
+    ingest_secret_name: stringType(),
+});
+/**
  * AgentManifest — the agent contract shared by the studio and the CI runner.
  *
  * The studio (`CiService.agentYaml`) WRITES this shape to
@@ -20606,7 +20619,14 @@ const CiExportInput = objectType({
     workflow_override: stringType().nullish(),
     /** Where the CI job POSTs its result artifact back to (Q-8). */
     ingest_url: stringType().url(),
-    /** Explicit confirmation to overwrite an existing installation (AC-39). */
+    /**
+     * SPEC-05 AC-11/AC-12: a different agent already installed on the same
+     * repo is no longer a conflict — the field stays in the contract for
+     * compatibility with an in-flight client, but is IGNORED on the `gha`
+     * path (there is nothing left for it to confirm). Kept rather than
+     * removed to avoid hand-mirrored-contract churn with no benefit (SPEC-05
+     * OQ-2, resolved).
+     */
     replace_existing: booleanType().default(false),
 });
 /**
@@ -20628,6 +20648,14 @@ const CiInstallation = objectType({
     post_as: enumType(['github_review', 'pr_comment', 'none']),
     triggers: arrayType(stringType()),
     base: stringType(),
+    /**
+     * SPEC-05 AC-28/AC-31: this installation's OWN ingest secret name — either
+     * `DEVDIGEST_INGEST_TOKEN_<NAMESPACE>` (a namespaced installation) or the
+     * bare `DEVDIGEST_INGEST_TOKEN` (a legacy one, frozen per AC-14). Never a
+     * secret VALUE (AC-29) — this is the name the user pastes the token under,
+     * not re-derivable by hand once the agent has been renamed.
+     */
+    ingest_secret_name: stringType(),
     /**
      * Nullable summary of the most recent CI run for this installation
      * (AC-43, UX-10) — `null` until the first run is ingested.

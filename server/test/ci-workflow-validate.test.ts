@@ -132,12 +132,53 @@ describe('AC-24/Recommendation 5: a foreign ${{ secrets.X }} reference in ANY en
   });
 });
 
+describe('fix-loop iteration 1 — Major finding 1: $GITHUB_ENV bypasses the DEVDIGEST_DIR guard', () => {
+  it('a step BEFORE the review step writing DEVDIGEST_DIR into $GITHUB_ENV is refused (the exact reported bypass, against a LEGACY installation)', () => {
+    const wf = validWorkflowObject(LEGACY_LAYOUT);
+    wf.jobs.review.steps.unshift({
+      name: 'Sneaky env write',
+      run: 'echo "DEVDIGEST_DIR=.devdigest/victim-ns" >> $GITHUB_ENV',
+    });
+    const result = validateWorkflowOverride(toYaml(wf), LEGACY_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'github_env_write' });
+  });
+
+  it('a $GITHUB_ENV write on a namespaced installation is refused too (not legacy-specific)', () => {
+    const wf = validWorkflowObject(NS_LAYOUT);
+    wf.jobs.review.steps.unshift({
+      name: 'Sneaky env write',
+      run: 'echo "DEVDIGEST_DIR=.devdigest/some-other-agent" >> $GITHUB_ENV',
+    });
+    const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'github_env_write' });
+  });
+});
+
+describe('fix-loop iteration 1 — Major finding 2: uses: identity + with: secret-reference scan', () => {
+  it('a 40-hex-shaped but non-allowlisted action is refused as action_not_allowlisted (identity, not shape)', () => {
+    const wf = validWorkflowObject(NS_LAYOUT);
+    wf.jobs.review.steps[0].uses = 'attacker/exfil@' + '0'.repeat(40);
+    const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'action_not_allowlisted' });
+  });
+
+  it('a foreign secret reference inside a step\'s with: map is refused as foreign_secret_reference', () => {
+    const wf = validWorkflowObject(NS_LAYOUT);
+    wf.jobs.review.steps[1].with = {
+      ...wf.jobs.review.steps[1].with,
+      token: '${{ secrets.DEVDIGEST_INGEST_TOKEN_SOME_OTHER_AGENT }}',
+    };
+    const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'foreign_secret_reference' });
+  });
+});
+
 describe('baseline SPEC-04 invariants — zero prior test coverage, exercised here for both layouts', () => {
-  it('an unpinned action (no 40-hex sha) is refused', () => {
+  it('an unpinned action (no 40-hex sha) is refused — fix-loop iteration 1: the check is now identity-based against PINNED_ACTIONS, so this refuses as action_not_allowlisted rather than the old shape-only unpinned_action', () => {
     const wf = validWorkflowObject(NS_LAYOUT);
     wf.jobs.review.steps[0].uses = 'actions/checkout@v4';
     const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
-    expect(result).toEqual({ ok: false, violated: 'unpinned_action' });
+    expect(result).toEqual({ ok: false, violated: 'action_not_allowlisted' });
   });
 
   it('a forbidden trigger event (pull_request_target) is refused', () => {

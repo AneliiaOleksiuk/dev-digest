@@ -1799,3 +1799,47 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   a NEW agent exported to the same repo lands namespaced with zero path
   collision. All assertions passed; all test rows deleted afterward.
   `pnpm typecheck`/`arch:check` clean in both `server/` and `client/`.
+
+- **2026-08-23, SPEC-05 fix-loop iteration 1 (`modules/ci/workflow-validate.ts`,
+  `plan-verifier`'s two Major AC-24 findings):**
+  1. **A `run:`-body string check that only greps for a specific expression
+     (`${{ secrets.* }}`, `${{ github.event.* }}`) has a blind spot GitHub
+     Actions itself provides: `$GITHUB_ENV`.** Any step's `run:` can append
+     `KEY=value` lines to the file at `$GITHUB_ENV`, which the runner then
+     injects into every LATER step's environment — a side channel this
+     module's `env:`-map checks (workflow/job/step, inheritance-aware)
+     never watched, because it isn't `env:` at all. A step BEFORE the
+     trusted step can plant `DEVDIGEST_DIR=<foreign namespace>` this way and
+     the DEVDIGEST_DIR-mismatch guard on the trusted step never fires — the
+     value never appears in that step's own `env:` map, only in its
+     resolved process environment at runtime, which a static YAML check
+     can't see. Fixed by refusing the bare token `GITHUB_ENV` anywhere in
+     ANY step's `run:` body (not just a `DEVDIGEST_DIR=`-shaped write) —
+     since this module's own generated scripts never reference it, there is
+     no legitimate case to preserve, and banning the token (not a narrower
+     `>> $GITHUB_ENV` pattern) closes off indirection (`X=GITHUB_ENV; ...
+     >> "$X"`) a narrower regex would miss. General lesson: when a
+     generator's threat model is "nothing we control may write into a
+     shared mutable channel," audit for EVERY channel that mutates that
+     scope (`env:` inheritance, `$GITHUB_ENV`, `$GITHUB_PATH`, outputs
+     feeding a later `if:`), not just the one the spec named first.
+  2. **A "pinned action" check that validates SHAPE (`owner/repo@<40-hex>`)
+     is not a check on IDENTITY — `attacker/exfil@<any 40 hex you like>`
+     satisfies a shape regex perfectly.** The fix matches `uses:` against
+     `constants.ts`'s `PINNED_ACTIONS` allowlist by exact string equality
+     instead. Renamed the violated-invariant string too
+     (`unpinned_action` → `action_not_allowlisted`) since the check's
+     meaning genuinely changed (a value can have valid shape and still be
+     refused) — required updating one pre-existing test's expected string,
+     which is a legitimate accuracy fix given the underlying check changed,
+     not a weakening (the refusal is still exact, just under a name that
+     now means what it says).
+  3. **A same-shaped scan (`env:` for a foreign `${{ secrets.X }}`
+     reference) needs to be applied to EVERY sibling mapping an attacker
+     could put the same expression in, not just the one the original spec
+     named.** `with:` (a step's action-input map) is exactly as reachable
+     as `env:` for this purpose and had zero coverage — extended the
+     existing `foreign_secret_reference` scan to `with:` at every level
+     (`env:` is already checked at), reusing the SAME violated name since
+     it's structurally the identical scan on a sibling map, not a new
+     invariant.

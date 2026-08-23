@@ -8,7 +8,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, Button, ErrorState, Skeleton, Tabs } from "@devdigest/ui";
+import { Badge, Button, ErrorState, Icon, Skeleton } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
 import { useMultiAgentRun } from "@/lib/hooks/multi-agent";
@@ -64,30 +64,41 @@ export function MultiAgentResultsView({ runId, onBack }: { runId: string; onBack
         <Button kind="ghost" size="sm" icon="ChevronLeft" onClick={onBack}>
           {t("page.back")}
         </Button>
-        <div style={s.metaLine}>
-          <span>
-            {t("page.meta", {
-              count: run.agent_count,
-              duration: Math.round(run.total_duration_ms / 1000),
-              cost: formatCost(run.total_cost_usd),
+        <div style={s.headerRight}>
+          <div style={s.metaLine}>
+            <span>
+              {t("page.meta", {
+                count: run.agent_count,
+                duration: Math.round(run.total_duration_ms / 1000),
+                cost: formatCost(run.total_cost_usd),
+              })}
+            </span>
+            {run.total_cost_partial && (
+              <Badge color="var(--warn)" icon="AlertTriangle">
+                {t("page.metaPartial")}
+              </Badge>
+            )}
+          </div>
+          <div style={s.viewToggle} role="tablist">
+            {(["columns", "tabs"] as const).map((mode) => {
+              const ModeIcon = Icon[mode === "columns" ? "Layers" : "PanelRight"];
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === mode}
+                  style={s.viewToggleBtn(viewMode === mode)}
+                  onClick={() => setViewMode(mode)}
+                >
+                  <ModeIcon size={13} />
+                  {t(`page.view.${mode}`)}
+                </button>
+              );
             })}
-          </span>
-          {run.total_cost_partial && (
-            <Badge color="var(--warn)" icon="AlertTriangle">
-              {t("page.metaPartial")}
-            </Badge>
-          )}
+          </div>
         </div>
       </div>
-
-      <Tabs
-        value={viewMode}
-        onChange={(v) => setViewMode(v as ViewMode)}
-        tabs={[
-          { key: "columns", label: t("page.view.columns"), icon: "Layers" },
-          { key: "tabs", label: t("page.view.tabs"), icon: "PanelRight" },
-        ]}
-      />
 
       {viewMode === "columns" ? (
         <div style={s.columnsGrid}>

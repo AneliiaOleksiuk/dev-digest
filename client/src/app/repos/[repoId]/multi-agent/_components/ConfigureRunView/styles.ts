@@ -18,7 +18,11 @@ export const s = {
     flexShrink: 0,
   } as React.CSSProperties,
   stepTitle: { fontSize: 13, fontWeight: 700, letterSpacing: "0.03em", color: "var(--text-muted)", textTransform: "uppercase" } as React.CSSProperties,
-  hint: { fontSize: 13, color: "var(--text-muted)" } as React.CSSProperties,
+  placeholderBox: {
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    background: "var(--bg-elevated)",
+  } as React.CSSProperties,
   selectedPrRow: {
     display: "flex",
     alignItems: "center",

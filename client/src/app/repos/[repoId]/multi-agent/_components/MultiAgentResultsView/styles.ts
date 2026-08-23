@@ -62,9 +62,13 @@ export const s = {
     whiteSpace: "nowrap",
     border: 0,
   } as React.CSSProperties,
+  // Fixed 4-per-row, per the design screenshot — not `auto-fit`, which
+  // reflows to however many 320px+ cards fit the viewport. `minmax(0, 1fr)`
+  // (not a bare `1fr`) so a card's unbreakable content (a long `file:line`
+  // finding path) can't steal width from its siblings and collapse them.
   columnsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     gap: 16,
   } as React.CSSProperties,
 };

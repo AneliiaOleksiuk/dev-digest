@@ -140,6 +140,22 @@ _(to be filled in)_
   to be narrowly scoped, especially in a long session where earlier
   `git add` calls (yours or a prior session's) may still be pending.
 
+- **`curl localhost:3000`/`:3001` from inside a git worktree can silently hit
+  the wrong checkout (2026-08-23).** When multiple `pnpm dev` instances are
+  running (main checkout + one or more worktrees), each worktree's client/API
+  get auto-assigned the next free ports — e.g. main checkout on 3000/3001,
+  a worktree's client/API on 3010/3011 — but they share the same Postgres,
+  so `/repos`, `/agents`, etc. return identical-looking data on every port,
+  giving no signal you're on the wrong one. A UI fix tested against
+  `localhost:3000` rendered the *old* pre-fix markup with no error, because
+  that server was serving the main checkout, not this worktree's edited
+  files. **Fix:** before testing a worktree's UI change live, confirm the
+  actual port via `Get-CimInstance Win32_Process -Filter "name='node.exe'"`
+  (find the `next dev -p <port>` / `tsx watch src/server.ts` processes whose
+  command line contains this worktree's path) cross-referenced with
+  `Get-NetTCPConnection -State Listen`, and browse to that port — never
+  assume 3000/3001 in a worktree session.
+
 ## Session Notes
 
 - 2026-08-02: Built the Skills feature end to end (spec at

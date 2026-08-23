@@ -1245,3 +1245,188 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Verified: `tsc --noEmit` clean; full Vitest green (51 files / 284 tests,
   up from 51/280 — 4 new test cases across the three fixed helpers/
   components, no new test files). `smoke.test.tsx` still passes.
+
+- 2026-08-23: Multi-Agent Review, user-driven design-parity + scope pass
+  (three separate user-reported mismatches against mockup screenshots, all
+  in `repos/[repoId]/multi-agent/` and `pulls/[number]/_components/
+  RunReviewDropdown/`).
+  **(1) `ConfigureRunView` rendered the FULL agent checkbox list (all
+  pre-checked) even before a PR was picked** — the mockup gates "2 Agents to
+  run" behind an `EmptyState` placeholder ("Pick a pull request first") until
+  `prId` is set; the old code only guarded the "Select all" button's
+  visibility, never the list itself, and the seeding `useEffect` for
+  `defaultSelectedAgentIds` ran regardless of `prId` too (harmless — it just
+  seeds state, the list wasn't rendered to show it). Fixed by wrapping the
+  step-2 body in `prId ? agents.map(...) : <EmptyState .../>`; the redundant
+  "Select a PR to begin." hint UNDER the PR selector was also dropped since
+  the new placeholder body says the same thing (`runs.json` `page.noRun.*`
+  keys are now fully dead — left alone, not this session's cleanup scope).
+  **(2) A SECOND mockup screenshot (checkbox agent-picker inside the PR
+  page's `Run Review` dropdown) directly contradicted `specs/
+  SPEC-04-multi-agent-review.md`'s own recorded boundary** ("Not a
+  replacement for `RunReviewDropdown`. Single-agent and 'run all' stay
+  exactly as they are.", AC-8). Confirmed with the user this was an
+  intentional override, not a missed requirement — do NOT silently implement
+  a mockup that contradicts a written spec boundary without flagging the
+  conflict first. Amended the spec in place (new AC-8a) rather than leaving
+  it contradicted by the shipped code — a spec is a decision record; an
+  overridden decision needs a new dated note, not silent drift between doc
+  and code.
+  **The vendored `Dropdown` primitive (`src/vendor/ui/kit/Dropdown.tsx`,
+  do-not-touch) cannot host this pattern at all** — every `DropdownItem`
+  click calls `onClose()` unconditionally after `onClick`, and its body only
+  accepts a flat `DropdownItemDef[]`, not arbitrary children, so a checkbox
+  section that must survive N clicks before one final submit has no home
+  inside it. `RunReviewDropdown.tsx` now builds its OWN small popover
+  (own `open` state + its own mousedown-outside-listener effect, copied
+  verbatim from `Dropdown.tsx`'s technique since it can't be imported/
+  extended) with hand-written `ActionRow` rows replicating `DropdownItem`'s
+  exact visual spec (padding `8px 10px`, `borderRadius:6`, hover
+  `var(--bg-hover)`) to stay pixel-identical to the primitive it replaced.
+  This is now this codebase's second local reimplementation of a
+  vendor-primitive-shaped popover for a case the vendored version can't
+  cover — see the existing `components/popover/Popover.tsx` entry above
+  (hover-triggered vs. this one's click-triggered-with-a-form-inside);
+  worth promoting BOTH into a real shared non-vendor primitive
+  (`components/dropdown-panel/`?) if a third case shows up.
+  New picker section defaults to every ENABLED agent (same default as
+  `ConfigureRunView`), has its own "Clear", and its primary button starts a
+  batch via `useStartMultiAgentRun` + navigates straight to
+  `/repos/:repoId/multi-agent?run=:id` — same destination `PrDetailHeader`'s
+  separate "Multi-Agent Review" button already used, just skipping the
+  configure screen. Old items ("Run all enabled agents", per-agent
+  single-run rows, "Configure agents…") are untouched, rendered below a
+  divider.
+  **(3) Per-agent accent color only covered 4 named personas** (Security/
+  Performance/Junior Mentor/Customer-Facing) + a special-cased Architecture
+  gray; every other agent (including two identically-named "Smoke Test
+  Agent!!" seed rows) rendered on the plain default border, and any NEW
+  agent created later would too. `agent-visuals.ts`'s `agentVisual` signature
+  changed from `(agentName)` to `(agentId, agentName)` (three call sites
+  updated: `AgentPickerCard`, `AgentColumnCard`, `AgentTabsView`'s tab bar) —
+  needed `agentId` specifically because two agents can share a display name,
+  and hashing the name would force them to the same color. Unmapped agents
+  (Architecture included — it keeps its `Layers` icon via a separate
+  `ICON_OVERRIDES` map but no longer gets a reserved color) now get one of 4
+  new hues via a stable FNV-1a hash of their id mod palette length; the
+  do-not-touch vendored token set (`vendor/ui/styles.css`) has no spare hues
+  left (already documented in this file's own prior comment history), so the
+  4 new colors are new theme-aware CSS vars (`--agent-aqua/yellow/magenta/
+  violet`) added to `client/src/app/globals.css` (NOT vendor — that file is
+  the app's own stylesheet, already used for `@font-face`/keyframes, and is
+  the correct place to layer app-specific tokens on top of do-not-touch
+  design-system tokens).
+  **Used the `dataviz` skill's `validate_palette.js` for a NON-chart,
+  per-entity identity-color use case** (card border + icon tint, not a chart
+  series) — first use of that validator outside an actual chart in this
+  codebase. Ran it against this app's real surfaces (`--surface #141414
+  --mode dark`, `--surface #fafafa --mode light`, not the skill's own
+  default reference surfaces) with candidate hex sets. Mixing the app's
+  EXISTING severity hexes (`--crit`/`--warn`/`--sugg`/`--ok`) with the
+  `dataviz` reference palette's same-named slots (blue/orange/green/red) at
+  8-wide FAILED hard (lightness band + CVD + normal-vision floor all failed
+  under `--pairs all`) — the two palettes were never validated together and
+  don't mix safely. Settled on keeping the 4 existing severity hexes
+  untouched and adding a SEPARATE, smaller 4-hue subset (aqua/yellow/
+  magenta/violet, `--pairs adjacent` PASS in both themes; `--pairs all`
+  fails one deutan pair at ΔE 1.6, accepted per the skill's own stated
+  exception since every card already pairs color with an icon + the agent's
+  name — color is never the sole identifier here). Light mode also carries a
+  contrast WARN (3 of the 4 hues sub-3:1 on `#fafafa`) mitigated the same
+  way. Lesson for next time: when reusing `dataviz`'s reference palette
+  alongside a design system's own PRE-EXISTING, differently-valued semantic
+  hex colors, validate the ACTUAL combined set you intend to ship, never
+  assume the reference palette's own documented adjacent-pair pass transfers
+  to a mixed set with different hex values at the same slots.
+  Verified: `tsc --noEmit` clean; full client Vitest green (52 files / 293
+  tests, up from 51/284 — 2 new test files: `agent-visuals.test.ts`,
+  updated `RunReviewDropdown.test.tsx` + `ConfigureRunView.test.tsx`). No
+  live browser click-through this session (same no-browser-automation gap
+  noted elsewhere in this file for past sessions, though `agent-browser` was
+  reportedly installed in 2026-08-02 — not re-verified working here).
+
+- 2026-08-23 (same day, follow-up): **per-agent hash-mod color assignment
+  (above) produced a visible bug the very first time the roster exceeded 4
+  unmapped agents — 3 of 6 unmapped agents (Architecture + both seeded
+  "Smoke Test Agent!!" rows) landed on the SAME violet by chance**, reported
+  by the user from a live screenshot. Independent `hash(id) % 4` per agent
+  is only *expected* to spread evenly; for any given small set of ids it can
+  (and did) cluster — pigeonhole guarantees nothing about the actual split.
+  **Fixed by switching from independent hashing to ROUND-ROBIN over the
+  whole roster**: `agent-visuals.ts`'s public API changed from a per-agent
+  `agentVisual(id, name)` to `agentVisuals(agents[]): Map<id, AgentVisual>`
+  (call once per screen with its full agent list) + `agentVisualFrom(map,
+  id)` (safe lookup with a fallback, never throws on a miss). Internally:
+  named personas resolve first, then the REMAINING unmapped agents are
+  sorted by id (stable regardless of API fetch order) and assigned
+  `AUTO_PALETTE[index % 4]` by their position in that sorted list — this
+  guarantees no auto color is used more than `⌈n/4⌉` times for whatever
+  roster size is passed in, which independent hashing cannot guarantee at
+  any n. **This requires the full roster at the assignment call site, not
+  just the one agent being rendered** — threaded through as a new required
+  `visual: AgentVisual` prop on `AgentPickerCard` and `AgentColumnCard`
+  (computed once via `useMemo` in their respective parents,
+  `ConfigureRunView` and `MultiAgentResultsView`, from data those parents
+  already had — `agents` and `run.columns`), while `AgentTabsView` and
+  `RunReviewDropdown` compute the map internally since they already receive
+  the whole roster as their own prop. **General lesson: per-item
+  independent hashing into a small fixed palette is the wrong tool whenever
+  the caller can see the whole collection at once and low-cardinality
+  "spread evenly" is the actual requirement** — reach for a stable-sorted
+  round-robin/index assignment instead; hashing only becomes necessary when
+  you must color a single item with no visibility into its siblings (not the
+  case for any of Multi-Agent Review's rosters, all of which are small and
+  fully in hand at render time). Verified: `tsc --noEmit` clean; full client
+  Vitest green (52 files / 295 tests, up from 52/293 — `agent-visuals.test.ts`
+  rewritten against the new API including a fairness assertion: 6 unmapped
+  agents into 4 slots, no slot used more than twice).
+
+- 2026-08-23 (same day, second follow-up): **the round-robin fix (above)
+  eliminated the exact-duplicate bug but the underlying 4-hue AUTO_PALETTE
+  was ALSO independently broken — a user screenshot showed General
+  Reviewer/Test Quality Reviewer/API Contract Reviewer/Architecture each
+  visually reading as the SAME color as an unrelated NAMED persona**
+  (General ≈ Performance's orange, Test Quality ≈ Junior Mentor's blue, API
+  Contract/Architecture ≈ Customer-Facing's green) — a hue-collision bug,
+  not a distribution bug, so round-robin alone couldn't fix it. Root cause:
+  the 4 auto hues (aqua/yellow/magenta/violet) were lifted directly from
+  `dataviz`'s reference 8-hue categorical palette's "other 4" slots, which
+  are only validated as safe *relative to that palette's own* blue/orange/
+  green/red hex values — this app's `--crit`/`--warn`/`--sugg`/`--ok` are
+  DIFFERENT hex values at those same hue families, so the "safe" spacing
+  didn't transfer. **Root-caused with the actual validator, not eyeballing**:
+  ran `validate_palette.js` with THIS app's real reserved four
+  (`#ef4444,#f59e0b,#3b82f6,#10b981`) plus each auto-candidate, `--pairs
+  all`, against the real surfaces — confirmed aqua/yellow both hard-FAIL the
+  "normal-vision floor ≥15" gate against their nearest reserved neighbor
+  (not just the softer 6-8 CVD warn band the icon+label mitigation already
+  covers). Systematically hue-mapped this app's 4 reserved colors onto the
+  0-360° wheel (red≈0°, warn≈38°, ok≈160°, sugg≈217°) to find open gaps,
+  and learned the empirical lesson the hard way: **hue-angle distance on
+  paper does NOT predict OKLab ΔE distance** — a "yellow-green"/lime
+  candidate placed dead-center in the visually-spacious 122°-wide warn→ok
+  gap still hard-failed against BOTH neighbors (yellow-green is a known weak
+  spot in human hue discrimination), and a cyan candidate centered in the
+  57°-wide ok→sugg gap failed against sugg specifically. **Only the wide
+  143°-wide sugg→red arc had room for genuinely safe colors, and only for
+  TWO** (`#7c3aed` violet, `#b3159c` magenta/dark; `#6d28d9`/`#8a1177`
+  light) — every 3rd/4th candidate tried in that same arc (indigo, brighter
+  pink, deeper rose) collided with violet or magenta once packed in tighter.
+  **AUTO_PALETTE is now 2 entries, not 4** (`agent-visuals.ts`,
+  `globals.css`'s `--agent-violet`/`--agent-magenta` — `--agent-aqua`/
+  `--agent-yellow` deleted). To compensate for fewer colors, added a
+  SEPARATE `AUTO_ICONS` round-robin (8 icons — Cpu/Wrench/Search/
+  FlaskConical/Boxes/Target/Bug/Database, all previously-unused in this
+  file) at a DIFFERENT modulus than the 2-color palette, confirmed by the
+  user as the preferred tradeoff over "free up a reserved color" or "fewer
+  slots, more collisions" — two agents can share a color but not an icon
+  until the roster exceeds 8 unmapped agents. **General lesson: when
+  reusing ANY reference categorical palette (this app's own past attempt
+  included) alongside a design system's PRE-EXISTING, independently-chosen
+  hex values for the "taken" hue families, always validate the actual
+  combined 8-ish-color set with `--pairs all` against the real surfaces
+  before shipping — a reference palette's internal hue math offers zero
+  guarantee once even one of its slots is swapped for an unrelated hex.**
+  Verified: `tsc --noEmit` clean; full client Vitest green (52 files / 296
+  tests, up from 52/295 — one new assertion: 6 unmapped agents get 6
+  distinct icons even though only 2 distinct colors exist among them).

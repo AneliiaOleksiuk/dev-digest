@@ -16,7 +16,7 @@ import { Button, CircularScore, Icon, LiveLogStream, SeverityBadge, type LogLine
 import type { AgentColumn } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
 import { useRunEvents } from "@/lib/hooks/reviews";
-import { agentVisual } from "../../../../agent-visuals";
+import type { AgentVisual } from "../../../../agent-visuals";
 import { statusMetaFor } from "./helpers";
 import { s } from "./styles";
 
@@ -28,15 +28,16 @@ const INLINE_FINDINGS_LIMIT = 3;
 
 export function AgentColumnCard({
   column,
+  visual,
   onOpenTrace,
 }: {
   column: AgentColumn;
+  visual: AgentVisual;
   onOpenTrace: () => void;
 }) {
   const t = useTranslations("runs");
   const meta = statusMetaFor(column.status);
   const StatusIcon = Icon[meta.icon];
-  const visual = agentVisual(column.agent_name);
   const VisualIcon = Icon[visual.icon];
 
   // Stream ONLY while this column is actually running — a settled column's

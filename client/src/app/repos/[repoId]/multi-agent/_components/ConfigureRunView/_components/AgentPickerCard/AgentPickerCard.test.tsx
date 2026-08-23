@@ -3,9 +3,12 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { Agent } from "@devdigest/shared";
 import type { AgentCostEstimate } from "@/lib/hooks/multi-agent";
+import type { AgentVisual } from "../../../../agent-visuals";
 import messages from "../../../../../../../../../messages/en/runs.json";
 
 import { AgentPickerCard } from "./AgentPickerCard";
+
+const VISUAL: AgentVisual = { icon: "Shield", color: "var(--crit)" };
 
 afterEach(cleanup);
 
@@ -45,27 +48,27 @@ function stats(overrides: Partial<AgentCostEstimate> = {}): AgentCostEstimate {
 
 describe("AgentPickerCard (smoke)", () => {
   it("shows the agent's estimate + sample size when stats exist", () => {
-    renderWithIntl(<AgentPickerCard agent={AGENT} stats={stats()} checked={false} onToggle={vi.fn()} />);
+    renderWithIntl(<AgentPickerCard agent={AGENT} stats={stats()} visual={VISUAL} checked={false} onToggle={vi.fn()} />);
     expect(screen.getByText("Security Reviewer")).toBeInTheDocument();
     expect(screen.getByText(/8\.2s/)).toBeInTheDocument();
     expect(screen.getByText("from 12 past runs")).toBeInTheDocument();
   });
 
   it("shows 'no estimate yet' — never a fabricated number — with no stats", () => {
-    renderWithIntl(<AgentPickerCard agent={AGENT} stats={undefined} checked={false} onToggle={vi.fn()} />);
+    renderWithIntl(<AgentPickerCard agent={AGENT} stats={undefined} visual={VISUAL} checked={false} onToggle={vi.fn()} />);
     expect(screen.getByText("no estimate yet")).toBeInTheDocument();
   });
 
   it("shows a disabled marker for a disabled agent", () => {
     renderWithIntl(
-      <AgentPickerCard agent={{ ...AGENT, enabled: false }} stats={undefined} checked={false} onToggle={vi.fn()} />,
+      <AgentPickerCard agent={{ ...AGENT, enabled: false }} stats={undefined} visual={VISUAL} checked={false} onToggle={vi.fn()} />,
     );
     expect(screen.getByText(/disabled/)).toBeInTheDocument();
   });
 
   it("calls onToggle when the checkbox is clicked", () => {
     const onToggle = vi.fn();
-    renderWithIntl(<AgentPickerCard agent={AGENT} stats={undefined} checked={false} onToggle={onToggle} />);
+    renderWithIntl(<AgentPickerCard agent={AGENT} stats={undefined} visual={VISUAL} checked={false} onToggle={onToggle} />);
     fireEvent.click(screen.getByRole("checkbox"));
     expect(onToggle).toHaveBeenCalledWith(true);
   });

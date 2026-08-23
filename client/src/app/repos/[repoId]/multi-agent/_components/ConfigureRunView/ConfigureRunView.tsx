@@ -12,6 +12,7 @@ import { formatCost } from "@/helpers/format";
 import { usePulls } from "@/lib/hooks/core";
 import { useAgents } from "@/lib/hooks/agents";
 import { useAgentStats, useStartMultiAgentRun } from "@/lib/hooks/multi-agent";
+import { agentVisualFrom, agentVisuals } from "../../agent-visuals";
 import { AgentPickerCard } from "./_components/AgentPickerCard";
 import { computeSelectionEstimate, defaultSelectedAgentIds } from "./helpers";
 import { s } from "./styles";
@@ -45,6 +46,7 @@ export function ConfigureRunView({
 
   const selected = selectedIds ?? [];
   const statsById = new Map((stats ?? []).map((st) => [st.agent_id, st]));
+  const visuals = React.useMemo(() => agentVisuals(agents ?? []), [agents]);
   const estimate = computeSelectionEstimate(stats ?? [], selected);
   const selectedPr = (pulls ?? []).find((p) => p.id === prId) ?? null;
 
@@ -104,19 +106,16 @@ export function ConfigureRunView({
         ) : pullsLoading ? (
           <Skeleton height={40} />
         ) : (
-          <>
-            <SearchableSelect
-              value={prId ?? ""}
-              onChange={setPrId}
-              placeholder={t("page.selectPr")}
-              options={(pulls ?? []).map((p) => ({
-                value: p.id ?? "",
-                label: t("page.prItem", { number: p.number, title: p.title }),
-              }))}
-              mono={false}
-            />
-            <div style={s.hint}>{t("page.noRun.bodySelect")}</div>
-          </>
+          <SearchableSelect
+            value={prId ?? ""}
+            onChange={setPrId}
+            placeholder={t("page.selectPr")}
+            options={(pulls ?? []).map((p) => ({
+              value: p.id ?? "",
+              label: t("page.prItem", { number: p.number, title: p.title }),
+            }))}
+            mono={false}
+          />
         )}
       </div>
 
@@ -126,19 +125,32 @@ export function ConfigureRunView({
             <span style={s.stepBadge}>2</span>
             <div style={s.stepTitle}>{t("page.steps.agents")}</div>
           </div>
-          <Button kind="ghost" size="sm" onClick={() => setSelectedIds(agents.map((a) => a.id))}>
-            {t("page.steps.selectAll")}
-          </Button>
+          {prId && (
+            <Button kind="ghost" size="sm" onClick={() => setSelectedIds(agents.map((a) => a.id))}>
+              {t("page.steps.selectAll")}
+            </Button>
+          )}
         </div>
-        {agents.map((agent) => (
-          <AgentPickerCard
-            key={agent.id}
-            agent={agent}
-            stats={statsById.get(agent.id)}
-            checked={selected.includes(agent.id)}
-            onToggle={(checked) => toggleAgent(agent.id, checked)}
-          />
-        ))}
+        {prId ? (
+          agents.map((agent) => (
+            <AgentPickerCard
+              key={agent.id}
+              agent={agent}
+              stats={statsById.get(agent.id)}
+              visual={agentVisualFrom(visuals, agent.id)}
+              checked={selected.includes(agent.id)}
+              onToggle={(checked) => toggleAgent(agent.id, checked)}
+            />
+          ))
+        ) : (
+          <div style={s.placeholderBox}>
+            <EmptyState
+              icon="GitPullRequest"
+              title={t("page.pickPrFirst.title")}
+              body={t("page.pickPrFirst.body")}
+            />
+          </div>
+        )}
       </div>
 
       <div style={s.footer}>

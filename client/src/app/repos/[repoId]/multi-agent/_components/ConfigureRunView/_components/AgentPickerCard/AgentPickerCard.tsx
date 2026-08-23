@@ -11,23 +11,24 @@ import type { Agent } from "@devdigest/shared";
 import type { AgentCostEstimate } from "@/lib/hooks/multi-agent";
 import { formatCost } from "@/helpers/format";
 import { agentEstimateFor } from "../../helpers";
-import { agentVisual } from "../../../../agent-visuals";
+import type { AgentVisual } from "../../../../agent-visuals";
 import { s } from "./styles";
 
 export function AgentPickerCard({
   agent,
   stats,
+  visual,
   checked,
   onToggle,
 }: {
   agent: Agent;
   stats: AgentCostEstimate | undefined;
+  visual: AgentVisual;
   checked: boolean;
   onToggle: (checked: boolean) => void;
 }) {
   const t = useTranslations("runs");
   const estimate = agentEstimateFor(stats);
-  const visual = agentVisual(agent.name);
   const VisualIcon = Icon[visual.icon];
 
   return (

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { AgentColumn } from "@devdigest/shared";
+import type { AgentVisual } from "../../../../agent-visuals";
 import messages from "../../../../../../../../../messages/en/runs.json";
 
 vi.mock("@/lib/hooks/reviews", () => ({
@@ -11,6 +12,8 @@ vi.mock("@/lib/hooks/reviews", () => ({
 import { AgentColumnCard } from "./AgentColumnCard";
 
 afterEach(cleanup);
+
+const VISUAL: AgentVisual = { icon: "Shield", color: "var(--crit)" };
 
 function renderWithIntl(ui: React.ReactElement) {
   return render(
@@ -41,7 +44,7 @@ function column(overrides: Partial<AgentColumn> = {}): AgentColumn {
 
 describe("AgentColumnCard (smoke)", () => {
   it("shows a done column's score/findings/duration/cost", () => {
-    renderWithIntl(<AgentColumnCard column={column()} onOpenTrace={vi.fn()} />);
+    renderWithIntl(<AgentColumnCard column={column()} visual={VISUAL} onOpenTrace={vi.fn()} />);
     expect(screen.getByText("Security Reviewer")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
@@ -53,6 +56,7 @@ describe("AgentColumnCard (smoke)", () => {
     renderWithIntl(
       <AgentColumnCard
         column={column({ status: "failed", error: "Provider timed out after 3 retries.", score: null })}
+        visual={VISUAL}
         onOpenTrace={vi.fn()}
       />,
     );
@@ -64,6 +68,7 @@ describe("AgentColumnCard (smoke)", () => {
     renderWithIntl(
       <AgentColumnCard
         column={column({ status: "cancelled", error: "Cancelled: another agent hit a critical finding.", score: null })}
+        visual={VISUAL}
         onOpenTrace={vi.fn()}
       />,
     );
@@ -72,7 +77,9 @@ describe("AgentColumnCard (smoke)", () => {
   });
 
   it("status is never color-only — a text label always renders alongside the icon", () => {
-    renderWithIntl(<AgentColumnCard column={column({ status: "cancelled", error: null })} onOpenTrace={vi.fn()} />);
+    renderWithIntl(
+      <AgentColumnCard column={column({ status: "cancelled", error: null })} visual={VISUAL} onOpenTrace={vi.fn()} />,
+    );
     // The status chip AND the error box's fallback text both read "Cancelled"
     // with no persisted `error` — assert at least one text label rendered
     // rather than requiring exactly one, since this test only cares that a
@@ -82,13 +89,15 @@ describe("AgentColumnCard (smoke)", () => {
 
   it("calls onOpenTrace from the footer button", () => {
     const onOpenTrace = vi.fn();
-    renderWithIntl(<AgentColumnCard column={column()} onOpenTrace={onOpenTrace} />);
+    renderWithIntl(<AgentColumnCard column={column()} visual={VISUAL} onOpenTrace={onOpenTrace} />);
     fireEvent.click(screen.getByText("View trace"));
     expect(onOpenTrace).toHaveBeenCalled();
   });
 
   it("renders the live log while running, not the settled summary", () => {
-    renderWithIntl(<AgentColumnCard column={column({ status: "running", score: null, summary: null })} onOpenTrace={vi.fn()} />);
+    renderWithIntl(
+      <AgentColumnCard column={column({ status: "running", score: null, summary: null })} visual={VISUAL} onOpenTrace={vi.fn()} />,
+    );
     expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
     expect(screen.getByPlaceholderText("Filter log…")).toBeInTheDocument();
   });

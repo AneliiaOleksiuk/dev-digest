@@ -15,6 +15,7 @@ import { usePulls } from "@/lib/hooks/core";
 import { useMultiAgentRun } from "@/lib/hooks/multi-agent";
 import { usePrReviews } from "@/lib/hooks/reviews";
 import { RunTraceDrawer } from "@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer";
+import { agentVisualFrom, agentVisuals } from "../../agent-visuals";
 import { AgentColumnCard } from "./_components/AgentColumnCard";
 import { AgentTabsView } from "./_components/AgentTabsView";
 import { FindingGroupsSection } from "./_components/FindingGroupsSection";
@@ -43,6 +44,10 @@ export function MultiAgentResultsView({
 
   const allFindings: FindingRecord[] = React.useMemo(() => (reviews ?? []).flatMap((r) => r.findings), [reviews]);
   const findingsById = React.useMemo(() => new Map(allFindings.map((f) => [f.id, f])), [allFindings]);
+  const visuals = React.useMemo(
+    () => agentVisuals((run?.columns ?? []).map((c) => ({ id: c.agent_id, name: c.agent_name }))),
+    [run?.columns],
+  );
 
   if (isLoading) {
     return (
@@ -130,7 +135,12 @@ export function MultiAgentResultsView({
       {viewMode === "columns" ? (
         <div style={s.columnsGrid}>
           {run.columns.map((col) => (
-            <AgentColumnCard key={col.run_id} column={col} onOpenTrace={() => setOpenRunId(col.run_id)} />
+            <AgentColumnCard
+              key={col.run_id}
+              column={col}
+              visual={agentVisualFrom(visuals, col.agent_id)}
+              onOpenTrace={() => setOpenRunId(col.run_id)}
+            />
           ))}
         </div>
       ) : (

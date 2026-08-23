@@ -134,6 +134,10 @@
       "cta": "Run all agents"
     },
     "crumb": "Multi-Agent Review",
+    "pickPrFirst": {
+      "title": "Pick a pull request first",
+      "body": "Choose which PR to review above, then select the agents to run on it."
+    },
     "steps": {
       "pr": "Pull request",
       "agents": "Agents to run",

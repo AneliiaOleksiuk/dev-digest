@@ -90,7 +90,11 @@ deciding how much review to buy for this particular PR, and reading the result.
 - **No change to the grounding gate, prompt assembly, or findings schema
   semantics.** Grouping is derived, never a new persisted finding.
 - **Not a replacement for `RunReviewDropdown`.** Single-agent and "run all" stay
-  exactly as they are.
+  exactly as they are. **Amended (post-launch):** the dropdown also grew its own
+  "pick agents to run" checkbox section (added above the untouched single/all
+  items, not replacing them) so a subset can be launched without leaving the PR
+  page — see AC-8a below. The boundary still holds in spirit: no existing item
+  was removed or repurposed.
 
 ## User stories
 
@@ -141,6 +145,13 @@ deciding how much review to buy for this particular PR, and reading the result.
 - **AC-8** — The PR detail page shall offer an entry point into this screen with
   the current PR pre-selected, alongside — not replacing — the existing
   `RunReviewDropdown`.
+- **AC-8a** *(amendment)* — `RunReviewDropdown` shall also offer a "pick agents
+  to run" checkbox section (every workspace agent, defaulting to every enabled
+  one, a "Clear" action, and a live-count "Run multi-agent review (N)" button)
+  that starts a batch and navigates straight to its results screen — added
+  above, never replacing, the existing "Run all enabled agents" item and the
+  per-agent single-run items.
+  (`client/.../RunReviewDropdown/RunReviewDropdown.tsx`.)
 
 ### Batch execution
 

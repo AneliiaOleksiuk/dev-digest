@@ -43,6 +43,12 @@ function renderWithIntl(ui: React.ReactElement) {
 }
 
 describe("ConfigureRunView (smoke)", () => {
+  it("hides the agent list behind a placeholder until a PR is picked", () => {
+    renderWithIntl(<ConfigureRunView repoId="r1" onRunStarted={vi.fn()} />);
+    expect(screen.getByText("Pick a pull request first")).toBeInTheDocument();
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
   it("defaults to every ENABLED agent selected", () => {
     renderWithIntl(<ConfigureRunView repoId="r1" onRunStarted={vi.fn()} />);
     expect(screen.getByText("1 agent selected")).toBeInTheDocument();
@@ -54,7 +60,7 @@ describe("ConfigureRunView (smoke)", () => {
   });
 
   it("toggling an agent updates the selected count", () => {
-    renderWithIntl(<ConfigureRunView repoId="r1" onRunStarted={vi.fn()} />);
+    renderWithIntl(<ConfigureRunView repoId="r1" initialPrId="pr-1" onRunStarted={vi.fn()} />);
     const checkboxes = screen.getAllByRole("checkbox");
     fireEvent.click(checkboxes[1]!); // enable the disabled agent too
     expect(screen.getByText("2 agents selected")).toBeInTheDocument();

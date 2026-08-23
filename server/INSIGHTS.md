@@ -1748,3 +1748,32 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Errors & Fixes entry above, which THIS check surfaced). Both throwaway
   files deleted before this session's Implementation Report; test-writer
   owns the real, committed integration coverage next.
+
+- **Two independently-built features can both register the SAME route with
+  no compile-time warning — Fastify only catches it at boot (2026-08-23,
+  merging `emdash/l07-multi-agents-xeu40` into `main`).** SPEC-04's own
+  minimal `eval-case.ts` (`modules/reviews`) and L06-Evals' `modules/eval`
+  both shipped `POST /findings/:id/eval-case` — text merge is silent about
+  this class of conflict (different files, no line overlap), it only
+  surfaces as `FastifyError: Method 'POST' already declared for route ...`
+  when the merged app actually boots, which a pure `tsc --noEmit` pass does
+  NOT catch (both route registrations typecheck fine in isolation). Always
+  boot the merged app (or run a route-registration smoke test) after
+  resolving a merge that touches `routes.ts` in more than one module, not
+  just typecheck + unit tests. Resolved by keeping `modules/eval`'s
+  `createFromFinding` (the fuller-featured implementation — derives the
+  eval expectation from the finding's own accept/dismiss verdict, refuses
+  422 on an undecided finding, owns the case by `agent`, not `finding`) and
+  deleting SPEC-04's `eval-case.ts` + its now-dead
+  `insertEvalCase`/`findEvalCaseByOwner` repository methods entirely, along
+  with the obsolete AC-42/AC-44 test scenarios in
+  `test/findings-learn.it.test.ts` that asserted the deleted
+  implementation's behavior (a cross-workspace finding now 422s via
+  `modules/eval`'s "not decided yet" check before it ever reaches an
+  ownership check with a 422-shaped body-only finding, not the 404 the old
+  code returned). The `eval_cases.owner_kind = 'finding'` enum member and
+  its scoped partial unique index (`eval_cases_ws_owner_uq`) were left in
+  the schema even though nothing writes that value anymore post-merge —
+  removing them would have meant another migration under time pressure for
+  zero behavioral gain; a harmless unused enum literal is a smaller risk
+  than more schema surgery mid-merge.

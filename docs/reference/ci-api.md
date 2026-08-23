@@ -6,6 +6,15 @@ shipped** (Bearer token + hash-keyed lookup, not the originally-specified
 installation-id header) — see
 [`docs/features/export-to-ci.md`](../features/export-to-ci.md).
 
+**Extended by SPEC-05** (multi-agent CI per repository) — this document
+reflects the shipped contract shapes; see the feature doc's
+["Multi-agent CI"](../features/export-to-ci.md#multi-agent-ci--one-namespace-workflow-and-secret-per-agent-spec-05)
+section for the design, and
+[ADR 0008](../adr/0008-legacy-ci-installations-frozen-forever.md) /
+[ADR 0009](../adr/0009-per-agent-workflow-file-not-matrix.md) for the two
+architectural decisions behind it. **No new route was added** — every
+change below lands on the existing Preview/Install/Zip/read routes.
+
 ## HTTP
 
 Routes live in `server/src/modules/ci/routes.ts`. Every route **except**
@@ -17,9 +26,9 @@ installation instead (see its row below).
 
 | Method | Path | Behaviour |
 |---|---|---|
-| `POST` | `/agents/:id/export-ci/preview` | Generates the file set with **zero side effects** — no GitHub call, no token minted, no `ci_installations` row. Body: `CiExportInput`. `target` must be `'gha'` (rejected otherwise); `repo` must parse as a strict `owner/name` ref. The runner-bundle entry is a size placeholder (`preview_omitted: true`), never the real bytes. |
-| `POST` | `/agents/:id/export-ci` | Install **and** "Update CI config" (same route, same body shape — an existing `(agent, repo)` installation is updated in place and keeps its existing token). Regenerates the whole file set server-side (the only client-supplied content is `workflow_override`); re-validates a submitted override server-side before committing; mints a token only when creating a new installation; commits to `devdigest/ci` and opens/reuses a PR; persists the installation last. Rate-limited `{ max: 10, timeWindow: '1 minute' }` (`EXPORT_RATE_LIMIT`). Returns `CiExport`, with `ingest_token` non-null only on a genuine create. |
-| `POST` | `/agents/:id/export-ci/zip` | Identical generation + override re-validation, returns `application/zip` (JSZip) of the file set including the real bundle bytes. **Zero GitHub writes, no installation created, no token minted** — an "install it yourself" escape hatch; CI Runs won't record anything from a repo installed this way until it's later installed through the PR path. Same rate limit as Install. |
+| `POST` | `/agents/:id/export-ci/preview` | Generates the file set with **zero side effects** — no GitHub call, no token minted, no `ci_installations` row. Body: `CiExportInput`. `target` must be `'gha'` (rejected otherwise); `repo` must parse as a strict `owner/name` ref. The runner-bundle entry is a size placeholder (`preview_omitted: true`), never the real bytes. Returns `CiExportPreview` (SPEC-05) — `{ files, ingest_secret_name }`, resolving the **same** layout (namespace + manifest path) Install would, via `CiService.resolveLayout`, so what Preview shows can never drift from what Install commits. |
+| `POST` | `/agents/:id/export-ci` | Install **and** "Update CI config" (same route, same body shape — an existing `(agent, repo)` installation is updated in place and keeps its existing token). Regenerates the whole file set server-side (the only client-supplied content is `workflow_override`); re-validates a submitted override server-side before committing; mints a token only when creating a new installation; commits to `devdigest/ci` and opens/reuses a PR; persists the installation last. **SPEC-05:** resolves this installation's namespace via `resolveLayout` (reusing an existing row's own persisted namespace verbatim, or deriving a fresh one among the repo's other installations); a different agent already installed on the same repo is **no longer a conflict** — it proceeds as an ordinary install, producing a second row with its own namespace and token; a fail-closed guard refuses the export (before any GitHub call) if any generated path would land inside another installation's own namespace/workflow file. Rate-limited `{ max: 10, timeWindow: '1 minute' }` (`EXPORT_RATE_LIMIT`). Returns `CiExport`, with `ingest_token` non-null only on a genuine create. |
+| `POST` | `/agents/:id/export-ci/zip` | Identical generation + override re-validation, returns `application/zip` (JSZip) of the file set including the real bundle bytes. **Zero GitHub writes, no installation created, no token minted** — an "install it yourself" escape hatch; CI Runs won't record anything from a repo installed this way until it's later installed through the PR path. Resolves the same candidate layout Preview/Install would for a not-yet-installed agent — see the feature doc's Known limitations for why that candidate namespace can go stale. Same rate limit as Install. |
 
 ### Ingest — the one result-accepting route (Phase C, WI14)
 
@@ -65,6 +74,15 @@ Source: `server/src/vendor/shared/contracts/eval-ci.ts` (hand-mirrored to
 | `editable` | `boolean`, default `true` | Only the workflow file is ever `true` in a real response. |
 | `preview_omitted` | `boolean`, default `false` | `true` only for the runner-bundle entry on Preview — `contents` is a size placeholder there; the real bytes are supplied server-side at Install/zip, never sent to or received from the client. |
 
+## `CiExportPreview` (SPEC-05)
+
+Response of `POST /agents/:id/export-ci/preview`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `files` | `CiFile[]` | Same shape Preview always returned. |
+| `ingest_secret_name` | `string` | This export's ingest secret name (`DEVDIGEST_INGEST_TOKEN_<NAMESPACE>` or the bare legacy name), server-derived from the **same** layout resolution Install would use for this `(agent, repo)` — needed because the wizard's "Secrets expected" panel renders **before** any `CiInstallation` exists, so the name can't come from that contract yet. Declared after `CiFile` in `eval-ci.ts` (a `const` referenced before its own declaration throws at module-eval time — see root `INSIGHTS.md`, 2026-08-23). |
+
 ## `AgentManifest`
 
 The one schema both the studio (write) and `agent-runner` (read) validate
@@ -94,7 +112,7 @@ Request body for `POST /agents/:id/export-ci{,/preview,/zip}`:
 | `base` | `string`, default `'main'` | |
 | `workflow_override` | `string \| null \| undefined` | The **only** generated file the client may submit an edited version of. Re-validated server-side (`workflow-validate.ts`) before commit. |
 | `ingest_url` | `string` (URL) | Where the CI job POSTs its result — literal-baked into the generated workflow's reporting step. |
-| `replace_existing` | `boolean`, default `false` | Explicit confirmation to replace a different agent's installation on the same repo. |
+| `replace_existing` | `boolean`, default `false` | **Server-ignored on the `gha` path (SPEC-05 AC-12).** Originally an explicit confirmation to replace a different agent's installation on the same repo — that conflict no longer exists (a different agent installing to the same repo is now an ordinary install, see the `POST /agents/:id/export-ci` row above), so there is nothing left for this field to confirm. Kept in the shared contract rather than removed, to avoid churn across both hand-mirrored `eval-ci.ts` copies for a field an in-flight client might still send; the client itself has stopped sending it. |
 
 ## `CiInstallation`
 
@@ -105,6 +123,7 @@ Response shape (never carries a token or a hash):
 | `id` / `agent_id` / `repo` / `target_type` / `installed_at` | | |
 | `workflow_version` / `agent_version` | `int` | Recorded at install time — a later agent edit shows up as drift (CI tab compares `agent_version` here to the agent's live `version`). |
 | `ingest_url` / `post_as` / `triggers` / `base` | | Echo of the installation's own configured options, so "Update CI config" can re-run with them. |
+| `ingest_secret_name` | `string` | **SPEC-05.** This installation's own ingest secret name — `DEVDIGEST_INGEST_TOKEN_<NAMESPACE>` for a namespaced installation, the bare `DEVDIGEST_INGEST_TOKEN` for a legacy one. A name, never a value (secret values never appear in any contract) — rendered in the one-time token dialog and on the CI tab so a user pasting a token knows the exact name to paste it under, since it is not re-derivable by hand once the agent has been renamed. |
 | `last_run` | `{ ran_at, status, findings_count } \| null` | `null` until the first run is ingested. |
 
 ## `CiExport`
@@ -174,11 +193,25 @@ querystring; the other four narrow an already-fetched, time-windowed set.
   `post_as`, `triggers` (jsonb), `base_branch`, `manifest_path` (a stable,
   persisted path — set once and reused on every re-export, never re-derived
   from the agent's current name, so a renamed agent never leaves two
-  manifest files in the target tree), `updated_at`. Unique index on
-  `(agent_id, repo)` (AC-38's "update, don't duplicate", enforced by the
-  database). No `workspace_id` column — every query that needs tenancy joins
-  through `agents.workspace_id`, except the ingest path's own lookup by
-  `token_hash`, which is the tenancy derivation for that one path.
+  manifest files in the target tree), `namespace` (**SPEC-05** — nullable
+  `text`, no default, no unique index; `NULL` means legacy, by construction:
+  every row that existed when this column was added is `NULL`, never
+  migrated onto a namespace by any later export — see
+  [ADR 0008](../adr/0008-legacy-ci-installations-frozen-forever.md). A
+  non-null value is resolved once at first install and reused verbatim
+  forever, exactly like `manifest_path`. Deliberately not unique: uniqueness
+  is per `(workspace, repo)`, enforced in `service.ts` over the
+  workspace-scoped read — a global `unique(repo, namespace)` index would let
+  one workspace's export collide with a same-named repo in a different
+  workspace), `updated_at`. Unique index on `(agent_id, repo)` (AC-38's
+  "update, don't duplicate", enforced by the database). No `workspace_id`
+  column — every query that needs tenancy joins through
+  `agents.workspace_id`, except the ingest path's own lookup by
+  `token_hash`, which is the tenancy derivation for that one path. On an
+  update, the Drizzle adapter's `onConflictDoUpdate` `set` clause omits
+  both `token_hash` and `namespace` — like the token hash, the namespace
+  must be structurally incapable of being rewritten by a re-export, not
+  merely never sent one by the current code.
 - **`ci_runs`** — deliberately **not written**. Left in place as dead
   scaffolding; `agent_runs` with `source = 'ci'` is the single CI run store.
   A doc comment above the table in `ci.ts` records this so a future reader
@@ -207,7 +240,7 @@ generator invariant and the re-validator both read from:
 | `PINNED_ACTIONS` | `checkout@11bd719...` (v4.2.2), `setup-node@49933ea...` (v4.4.0) | Resolved via `git ls-remote --tags` on 2026-08-23; refreshing means re-running that command, never guessing a SHA. |
 | `NODE_VERSION` | `'22'` | Matches the runner's own documented floor. |
 | `CI_BRANCH` | `'devdigest/ci'` | Install's target branch — never the base branch. |
-| `WORKFLOW_VERSION` | `1` | Bumped by hand whenever `workflow.ts` changes its output shape. |
+| `WORKFLOW_VERSION` | `2` (was `1`) | Bumped by hand whenever `workflow.ts` changes its output shape — bumped for SPEC-05's namespaced `name:`/`DEVDIGEST_DIR`/ingest-secret emission. A legacy re-export emits byte-identical YAML but records `2` too; harmless, since the CI tab's drift banner compares `agent_version`, never this field. |
 | `INGEST_TOKEN_BYTES` | `32` (256 bits) | CSPRNG token size. |
 | `EXPORT_RATE_LIMIT` | `{ max: 10, timeWindow: '1 minute' }` | `POST /agents/:id/export-ci{,/zip}` — matches `modules/reviews/routes.ts`'s existing GitHub-writing routes. |
 | `INGEST_RATE_LIMIT` | `{ max: 60, timeWindow: '1 minute' }` | `POST /ci/ingest`. |

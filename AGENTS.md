@@ -109,12 +109,20 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
   HTTP + contract lookup.
 - [docs/features/export-to-ci.md](docs/features/export-to-ci.md) — Export to
   CI (generate → install → workflow run → ingest), the shipped Bearer-token +
-  hash-keyed-lookup ingest auth, and known limitations.
+  hash-keyed-lookup ingest auth, and known limitations — extended by SPEC-05
+  for multiple agents per repository (namespace, per-agent workflow file,
+  per-agent ingest secret).
 - [docs/reference/ci-api.md](docs/reference/ci-api.md) — Export to CI HTTP +
   contract lookup.
 - [docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md](docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md)
   — why CI ingest authenticates via a Bearer token hashed into a lookup key,
   not a separate installation-id header + constant-time compare.
+- [docs/adr/0008-legacy-ci-installations-frozen-forever.md](docs/adr/0008-legacy-ci-installations-frozen-forever.md)
+  — why a CI installation's layout is decided once at first install and never
+  migrated, even for installations that predate namespacing.
+- [docs/adr/0009-per-agent-workflow-file-not-matrix.md](docs/adr/0009-per-agent-workflow-file-not-matrix.md)
+  — why each agent gets its own GitHub Actions workflow file instead of one
+  shared matrix job.
 - [evals/README.md](evals/README.md) — self-check harness (skills/agents/workflow
   evals), routing table above, backends, stats tools.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.

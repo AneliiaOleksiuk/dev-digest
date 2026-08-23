@@ -14,6 +14,9 @@ vi.mock("@/lib/hooks/multi-agent", () => ({
 vi.mock("@/lib/hooks/reviews", () => ({
   usePrReviews: () => ({ data: [] }),
 }));
+vi.mock("@/lib/hooks/core", () => ({
+  usePulls: () => ({ data: [{ id: "pr-1", number: 42, title: "Add rate limiting" }] }),
+}));
 vi.mock("@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer", () => ({
   RunTraceDrawer: ({ runId, onClose }: { runId: string; onClose: () => void }) => (
     <div>
@@ -80,7 +83,7 @@ function run(overrides: Partial<MultiAgentRun> = {}): MultiAgentRun {
 describe("MultiAgentResultsView (smoke)", () => {
   it("defaults to the Columns layout and renders one card per column", () => {
     runData = run();
-    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} />);
+    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} repoId="repo-1" />);
     expect(screen.getByText("column: Security")).toBeInTheDocument();
     expect(screen.getByText("column: Style")).toBeInTheDocument();
     expect(screen.queryByText("tabs view")).not.toBeInTheDocument();
@@ -88,7 +91,7 @@ describe("MultiAgentResultsView (smoke)", () => {
 
   it("switches to the Tabs layout without touching the shared groups/disagreement sections", () => {
     runData = run();
-    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} />);
+    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} repoId="repo-1" />);
     fireEvent.click(screen.getByText("tabs"));
     expect(screen.getByText("tabs view")).toBeInTheDocument();
     expect(screen.getByText("groups section")).toBeInTheDocument();
@@ -97,7 +100,7 @@ describe("MultiAgentResultsView (smoke)", () => {
 
   it("mounts exactly ONE trace drawer, driven by ONE shared openRunId set from a column's trace trigger", () => {
     runData = run();
-    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} />);
+    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} repoId="repo-1" />);
     expect(screen.queryByText(/trace drawer for/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("trace for run-1"));
     expect(screen.getAllByText(/trace drawer for/)).toHaveLength(1);
@@ -108,13 +111,13 @@ describe("MultiAgentResultsView (smoke)", () => {
 
   it("badges a partial total cost (OQ-1) instead of silently under-counting it", () => {
     runData = run({ total_cost_partial: true });
-    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} />);
+    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} repoId="repo-1" />);
     expect(screen.getByText("partial")).toBeInTheDocument();
   });
 
   it("shows an error state with retry when the batch fails to load", () => {
     isErrorFlag = true;
-    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} />);
+    renderWithIntl(<MultiAgentResultsView runId="batch-1" onBack={vi.fn()} repoId="repo-1" />);
     expect(screen.getByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Retry"));
     expect(refetch).toHaveBeenCalled();

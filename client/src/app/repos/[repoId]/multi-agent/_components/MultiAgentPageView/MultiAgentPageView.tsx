@@ -54,18 +54,24 @@ export function MultiAgentPageView() {
   return (
     <AppShell crumb={crumb}>
       <div style={s.page}>
-        <div style={s.header}>
-          <h1 style={s.h1}>{t("page.title")}</h1>
-          <div style={s.subtitle}>{t("page.subtitle")}</div>
-        </div>
         {runId ? (
-          <MultiAgentResultsView runId={runId} onBack={() => setParams({ run: null })} />
-        ) : (
-          <ConfigureRunView
+          <MultiAgentResultsView
+            runId={runId}
             repoId={repoId}
-            initialPrId={prId}
-            onRunStarted={(newRunId) => setParams({ run: newRunId })}
+            onBack={() => setParams({ run: null })}
           />
+        ) : (
+          <>
+            <div style={s.header}>
+              <h1 style={s.h1}>{t("page.title")}</h1>
+              <div style={s.subtitle}>{t("page.subtitle")}</div>
+            </div>
+            <ConfigureRunView
+              repoId={repoId}
+              initialPrId={prId}
+              onRunStarted={(newRunId) => setParams({ run: newRunId })}
+            />
+          </>
         )}
       </div>
     </AppShell>

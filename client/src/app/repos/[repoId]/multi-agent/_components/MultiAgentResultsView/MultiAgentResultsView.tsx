@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl";
 import { Badge, Button, ErrorState, Icon, Skeleton } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
+import { usePulls } from "@/lib/hooks/core";
 import { useMultiAgentRun } from "@/lib/hooks/multi-agent";
 import { usePrReviews } from "@/lib/hooks/reviews";
 import { RunTraceDrawer } from "@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer";
@@ -23,10 +24,20 @@ import { s } from "./styles";
 
 type ViewMode = "columns" | "tabs";
 
-export function MultiAgentResultsView({ runId, onBack }: { runId: string; onBack: () => void }) {
+export function MultiAgentResultsView({
+  runId,
+  repoId,
+  onBack,
+}: {
+  runId: string;
+  repoId: string;
+  onBack: () => void;
+}) {
   const t = useTranslations("runs");
   const { data: run, isLoading, isError, refetch } = useMultiAgentRun(runId);
   const { data: reviews } = usePrReviews(run?.pr_id ?? null);
+  const { data: pulls } = usePulls(repoId);
+  const pr = run ? (pulls ?? []).find((p) => p.id === run.pr_id) : null;
   const [viewMode, setViewMode] = React.useState<ViewMode>("columns");
   const [openRunId, setOpenRunId] = React.useState<string | null>(null);
 
@@ -61,42 +72,58 @@ export function MultiAgentResultsView({ runId, onBack }: { runId: string; onBack
       </div>
 
       <div style={s.headerRow}>
-        <Button kind="ghost" size="sm" icon="ChevronLeft" onClick={onBack}>
-          {t("page.back")}
-        </Button>
-        <div style={s.headerRight}>
-          <div style={s.metaLine}>
-            <span>
-              {t("page.meta", {
-                count: run.agent_count,
-                duration: Math.round(run.total_duration_ms / 1000),
-                cost: formatCost(run.total_cost_usd),
-              })}
+        <div style={s.headerLeft}>
+          <Button kind="ghost" size="sm" icon="Settings" onClick={onBack}>
+            {t("page.back")}
+          </Button>
+          <span style={s.titleLine}>
+            {t("page.title")}
+            <span style={s.titleMeta}>
+              {t("page.selectedAgents", { count: run.agent_count })}
             </span>
-            {run.total_cost_partial && (
-              <Badge color="var(--warn)" icon="AlertTriangle">
-                {t("page.metaPartial")}
-              </Badge>
-            )}
-          </div>
-          <div style={s.viewToggle} role="tablist">
-            {(["columns", "tabs"] as const).map((mode) => {
-              const ModeIcon = Icon[mode === "columns" ? "Layers" : "PanelRight"];
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  role="tab"
-                  aria-selected={viewMode === mode}
-                  style={s.viewToggleBtn(viewMode === mode)}
-                  onClick={() => setViewMode(mode)}
-                >
-                  <ModeIcon size={13} />
-                  {t(`page.view.${mode}`)}
-                </button>
-              );
+          </span>
+        </div>
+        <div style={s.viewToggle} role="tablist">
+          {(["columns", "tabs"] as const).map((mode) => {
+            const ModeIcon = Icon[mode === "columns" ? "Layers" : "PanelRight"];
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === mode}
+                style={s.viewToggleBtn(viewMode === mode)}
+                onClick={() => setViewMode(mode)}
+              >
+                <ModeIcon size={13} />
+                {t(`page.view.${mode}`)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={s.prRow}>
+        <div style={s.prTitle}>
+          {pr && (
+            <>
+              <span className="mono">#{pr.number}</span> {pr.title}
+            </>
+          )}
+        </div>
+        <div style={s.metaLine}>
+          <span>
+            {t("page.meta", {
+              count: run.agent_count,
+              duration: Math.round(run.total_duration_ms / 1000),
+              cost: formatCost(run.total_cost_usd),
             })}
-          </div>
+          </span>
+          {run.total_cost_partial && (
+            <Badge color="var(--warn)" icon="AlertTriangle">
+              {t("page.metaPartial")}
+            </Badge>
+          )}
         </div>
       </div>
 

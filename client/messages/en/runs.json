@@ -120,6 +120,7 @@
     },
     "runAll": "Run all agents",
     "running": "Running…",
+    "selectedAgents": "{count, plural, one {# selected agent} other {# selected agents}} · parallel",
     "meta": "{count} agents · fan-out via p-queue · {duration}s total · {cost}",
     "noAgents": {
       "title": "Enable agents to run reviews",

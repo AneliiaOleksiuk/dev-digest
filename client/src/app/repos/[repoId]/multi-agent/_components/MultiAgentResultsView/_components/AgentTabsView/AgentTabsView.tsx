@@ -7,8 +7,9 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Button, Tabs } from "@devdigest/ui";
+import { Button, Icon } from "@devdigest/ui";
 import type { AgentColumn, ReviewRecord } from "@devdigest/shared";
+import { agentVisual } from "../../../../agent-visuals";
 import { TabFindingRow } from "./_components/TabFindingRow";
 import { s } from "./styles";
 
@@ -32,11 +33,27 @@ export function AgentTabsView({
 
   return (
     <div style={s.root}>
-      <Tabs
-        value={active.run_id}
-        onChange={setActiveRunId}
-        tabs={columns.map((c) => ({ key: c.run_id, label: c.agent_name, icon: "Cpu" as const }))}
-      />
+      <div style={s.tabBar} role="tablist">
+        {columns.map((c) => {
+          const visual = agentVisual(c.agent_name);
+          const TabIcon = Icon[visual.icon];
+          const isActive = c.run_id === active.run_id;
+          return (
+            <button
+              key={c.run_id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              style={s.tabBtn(isActive, visual.color)}
+              onClick={() => setActiveRunId(c.run_id)}
+            >
+              <TabIcon size={14} style={{ color: isActive ? visual.color : "var(--text-muted)" }} />
+              {c.agent_name}
+              {c.score != null && <span style={s.tabScore(visual.color)}>{c.score}</span>}
+            </button>
+          );
+        })}
+      </div>
       <div style={s.header}>
         <div style={s.agentMeta}>
           <span className="mono">{active.model}</span>

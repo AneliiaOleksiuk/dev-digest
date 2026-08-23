@@ -10,7 +10,18 @@ export const s = {
     maxWidth: 1080,
     margin: "0 auto",
   } as React.CSSProperties,
-  headerRight: { display: "flex", alignItems: "center", gap: 16 } as React.CSSProperties,
+  headerLeft: { display: "flex", alignItems: "center", gap: 14 } as React.CSSProperties,
+  titleLine: { fontSize: 15, fontWeight: 700, color: "var(--text-primary)" } as React.CSSProperties,
+  titleMeta: { fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 8 } as React.CSSProperties,
+  prRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    maxWidth: 1080,
+    margin: "0 auto",
+  } as React.CSSProperties,
+  prTitle: { fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" } as React.CSSProperties,
   metaLine: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-muted)" } as React.CSSProperties,
   // Compact segmented control for Columns/Tabs — two layouts over the same
   // batch, not a navigational tab set, so it gets its own small pill rather

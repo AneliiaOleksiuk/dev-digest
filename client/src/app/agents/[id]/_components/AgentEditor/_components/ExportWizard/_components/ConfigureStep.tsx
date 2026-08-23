@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Badge, Checkbox, FormField, TextInput } from "@devdigest/ui";
+import { Badge, FormField, Icon, TextInput } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import type { CiExportInputBody } from "@/lib/types";
 import { isLocalhostUrl } from "../helpers";
@@ -43,23 +43,33 @@ export function ConfigureStep({
   onIngestUrlChange: (v: string) => void;
 }) {
   const t = useTranslations("ci");
-  const tAgents = useTranslations("agents");
   const localhost = isLocalhostUrl(ingestUrl);
 
   return (
     <div style={s.stepWrap}>
       <FormField label={t("exportWizard.triggersLabel")}>
         <div style={s.triggerList}>
-          {TRIGGER_KEYS.map((key) => (
-            <div key={key} style={s.triggerRow}>
-              <Checkbox
-                checked={triggers.includes(key)}
-                onChange={() => onToggleTrigger(key)}
-                label={t(`exportWizard.triggers.${key}`)}
-              />
-              <span style={s.triggerCost}>{t(`exportWizard.triggers.${key}Cost`)}</span>
-            </div>
-          ))}
+          <div style={s.triggerPillRow}>
+            {TRIGGER_KEYS.map((key) => {
+              const active = triggers.includes(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onToggleTrigger(key)}
+                  style={{ ...s.triggerPill, ...(active ? s.triggerPillActive : {}) }}
+                >
+                  {active && <Icon.Check size={13} />}
+                  {t(`exportWizard.triggers.${key}`)}
+                </button>
+              );
+            })}
+          </div>
+          <div style={s.triggerCostList}>
+            {TRIGGER_KEYS.filter((key) => triggers.includes(key)).map((key) => (
+              <span key={key} style={s.triggerCost}>{t(`exportWizard.triggers.${key}Cost`)}</span>
+            ))}
+          </div>
         </div>
       </FormField>
 
@@ -100,6 +110,7 @@ export function ConfigureStep({
           <span style={s.secretStatus}>{t("exportWizard.secretsPanel.ingestTokenStatus")}</span>
         </div>
         <p style={s.note}>{t("exportWizard.secretsPanel.disclaimer")}</p>
+        <p style={s.note}>{t("exportWizard.blockMergeDesc")}</p>
       </div>
 
       {agent.provider !== "openrouter" && (
@@ -107,16 +118,6 @@ export function ConfigureStep({
           {t("exportWizard.providerNotice", { provider: agent.provider, model: agent.model })}
         </p>
       )}
-
-      <div style={s.blockMergeCard}>
-        <div style={s.blockMergeTitle}>{t("exportWizard.blockMergeTitle")}</div>
-        <p style={s.note}>{t("exportWizard.blockMergeDesc")}</p>
-        <p style={s.note}>
-          {t("exportWizard.failOnReadOnly", { value: tAgents(`config.ciFailOnOptions.${agent.ci_fail_on}`) })}
-          {" — "}
-          {t("exportWizard.failOnReadOnlyHint")}
-        </p>
-      </div>
     </div>
   );
 }

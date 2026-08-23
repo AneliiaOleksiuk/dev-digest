@@ -78,8 +78,27 @@ export const s = {
   } satisfies CSSProperties,
 
   // ---- Configure step ------------------------------------------------------
-  triggerList: { display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
-  triggerRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } satisfies CSSProperties,
+  triggerList: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
+  triggerPillRow: { display: "flex", flexWrap: "wrap", gap: 8 } satisfies CSSProperties,
+  triggerPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid var(--border-strong)",
+    background: "transparent",
+    color: "var(--text-secondary)",
+    fontSize: 13,
+    cursor: "pointer",
+    font: "inherit",
+  } satisfies CSSProperties,
+  triggerPillActive: {
+    border: "1px solid var(--accent)",
+    background: "var(--accent-bg)",
+    color: "var(--accent)",
+  } satisfies CSSProperties,
+  triggerCostList: { display: "flex", flexDirection: "column", gap: 2 } satisfies CSSProperties,
   triggerCost: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
   radioList: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
   radioRow: {
@@ -103,16 +122,6 @@ export const s = {
   secretRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 } satisfies CSSProperties,
   secretName: { fontSize: 13, fontFamily: "var(--font-mono, monospace)" } satisfies CSSProperties,
   secretStatus: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
-  blockMergeCard: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-    padding: 14,
-    borderRadius: 8,
-    borderLeft: "3px solid var(--border-strong)",
-    background: "var(--bg-elevated)",
-  } satisfies CSSProperties,
-  blockMergeTitle: { fontSize: 13, fontWeight: 600 } satisfies CSSProperties,
 
   // ---- Install step ------------------------------------------------------
   setupLink: { fontSize: 13, color: "var(--accent)" } satisfies CSSProperties,

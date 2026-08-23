@@ -4,8 +4,8 @@ import type { CSSProperties } from "react";
 export const s = {
   wrap: { display: "flex", flexDirection: "column", gap: 20, maxWidth: 820 } satisfies CSSProperties,
   header: { display: "flex", alignItems: "center", gap: 10 } satisfies CSSProperties,
-  title: { fontSize: 16, fontWeight: 700, flex: 1 } satisfies CSSProperties,
-  subtitle: { fontSize: 13, color: "var(--text-secondary)", margin: "-8px 0 0" } satisfies CSSProperties,
+  title: { fontSize: 16, fontWeight: 700, flex: 1, margin: 0 } satisfies CSSProperties,
+  subtitle: { fontSize: 13, color: "var(--text-secondary)", margin: "2px 0 0" } satisfies CSSProperties,
   section: { display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
   sectionTitle: { fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" } satisfies CSSProperties,
   failOnRow: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } satisfies CSSProperties,

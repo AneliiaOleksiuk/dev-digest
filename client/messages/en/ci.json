@@ -93,9 +93,6 @@
       "prComment": "PR comment",
       "none": "None (exit code only)"
     },
-    "failOnReadOnly": "Fail CI on: {value}",
-    "failOnReadOnlyHint": "Set on the agent's Config or CI tab, not here.",
-    "blockMergeTitle": "Block merge on findings",
     "blockMergeDesc": "DevDigest turns the check red on a matching finding, via the agent's Fail CI on setting. Making red actually block a merge is a required status check in the target repo's branch protection — configured by the repo owner, in GitHub, by hand. No GitHub App is involved either way.",
     "ingestUrlLabel": "Ingest URL",
     "ingestUrlHint": "Where the CI job POSTs its result back to this studio.",

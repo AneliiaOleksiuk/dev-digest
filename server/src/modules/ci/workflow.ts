@@ -140,6 +140,7 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
           {
             name: 'Report result to DevDigest',
             if: 'always()',
+            'continue-on-error': true,
             env: {
               INGEST_URL: input.ingestUrl,
               INGEST_TOKEN: '${{ secrets.DEVDIGEST_INGEST_TOKEN }}',
@@ -159,6 +160,13 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
           },
           {
             name: 'Gate on review outcome',
+            // Explicit always() (not the default success()): the reporting
+            // step above is `continue-on-error: true` so its own failure
+            // (e.g. an unreachable ingest URL — the normal case for a
+            // local-first studio) must never cause this step to be skipped.
+            // The job's pass/fail must come from `steps.review.outcome`
+            // alone, never from whether the ingest POST succeeded.
+            if: 'always()',
             env: { REVIEW_OUTCOME: '${{ steps.review.outcome }}' },
             run: gateScript,
           },

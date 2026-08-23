@@ -2,13 +2,15 @@ import type React from "react";
 
 export const s = {
   root: { display: "flex", flexDirection: "column", gap: 20 } as React.CSSProperties,
+  // Full-bleed, edge-to-edge (unlike ConfigureRunView's centered 720px form)
+  // — matches the design screenshot, where "Configure run" sits at the true
+  // left edge and the Columns/Tabs toggle at the true right edge, not
+  // confined to a centered column.
   headerRow: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    maxWidth: 1080,
-    margin: "0 auto",
   } as React.CSSProperties,
   headerLeft: { display: "flex", alignItems: "center", gap: 14 } as React.CSSProperties,
   titleLine: { fontSize: 15, fontWeight: 700, color: "var(--text-primary)" } as React.CSSProperties,
@@ -18,8 +20,6 @@ export const s = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    maxWidth: 1080,
-    margin: "0 auto",
   } as React.CSSProperties,
   prTitle: { fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" } as React.CSSProperties,
   metaLine: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-muted)" } as React.CSSProperties,

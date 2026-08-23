@@ -64,4 +64,40 @@ describe('routes (no DB)', () => {
     expect(res.json().error.code).toBe('validation_error');
     await app.close();
   });
+
+  // Brief module (SPEC-03, WI8 DoD: "routes appear in routes-smoke.test.ts's
+  // surface"). Same no-DB pattern as the invalid-body case above: an
+  // out-of-shape `:id` (not a uuid, per `IdParams`) trips the route's zod
+  // params schema BEFORE the handler runs, so this proves each route is
+  // actually registered on the app (a genuinely unregistered path would fall
+  // through to Fastify's own not-found handler, not this validation_error
+  // envelope) without touching Postgres. Full behavior (200/404/409/429) is
+  // covered in brief.it.test.ts.
+  it('GET /pulls/:id/brief is registered', async () => {
+    const app = await buildApp({ config });
+    const res = await app.inject({ method: 'GET', url: '/pulls/not-a-uuid/brief' });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('validation_error');
+    await app.close();
+  });
+
+  it('POST /pulls/:id/brief/generate is registered', async () => {
+    const app = await buildApp({ config });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pulls/not-a-uuid/brief/generate',
+      payload: { head_sha: 'abc123' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('validation_error');
+    await app.close();
+  });
+
+  it('GET /pulls/:id/brief/timeline is registered', async () => {
+    const app = await buildApp({ config });
+    const res = await app.inject({ method: 'GET', url: '/pulls/not-a-uuid/brief/timeline' });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('validation_error');
+    await app.close();
+  });
 });

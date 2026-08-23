@@ -113,4 +113,78 @@ describe('RepoIntelService.resyncRepo', () => {
     expect(result.status).toBe('degraded');
     expect(result.reason).toMatch(/^sync_failed:/);
   });
+
+  // test-writer addition — AC-51/AC-52/Rec-5 (SPEC-01 amendment, WI5):
+  // a dirty clone is a DISTINCT degraded reason from `sync_failed:` (never
+  // folded into the network/fetch-failure bucket), and the reason is
+  // persisted through `touchIndexState` so it becomes observable at
+  // `GET /repos/:id/index-state` outside the job-swallowed RESYNC handler.
+  // `MockGitClient`'s `dirtyPaths` option (WI5) is exactly what makes this
+  // testable without a real git fixture — the real-git regression for
+  // AC-38/AC-53 lives in `test/project-context-git-integrity.test.ts` (R-7).
+  describe('AC-51/AC-52 — dirty-clone refusal (MockGitClient.dirtyPaths)', () => {
+    it('degrades with a "dirty_clone:" reason — NEVER "sync_failed:" — when the clone has uncommitted changes', async () => {
+      const git = new MockGitClient({ dirtyPaths: ['docs/edited.md', 'docs/created.md'] });
+      const { service } = makeService({
+        basics: { id: 'r1', owner: 'acme', name: 'app', defaultBranch: 'main', clonePath: '/mock/clone' },
+        state: stateAt('sha-1'),
+        git,
+      });
+
+      const result = await service.resyncRepo('r1');
+
+      expect(result.status).toBe('degraded');
+      expect(result.reason).toMatch(/^dirty_clone:/);
+      expect(result.reason).not.toMatch(/^sync_failed:/);
+      // The refusal happened BEFORE any fetch/reset — no sync recorded.
+      expect(git.syncs).toHaveLength(0);
+    });
+
+    it('names the affected paths in the reason, bounded to MAX_DIRTY_PATHS_SHOWN (AC-52)', async () => {
+      const manyPaths = Array.from({ length: 15 }, (_, i) => `docs/f${i}.md`);
+      const git = new MockGitClient({ dirtyPaths: manyPaths });
+      const { service } = makeService({
+        basics: { id: 'r1', owner: 'acme', name: 'app', defaultBranch: 'main', clonePath: '/mock/clone' },
+        state: stateAt('sha-1'),
+        git,
+      });
+
+      const result = await service.resyncRepo('r1');
+
+      expect(result.reason).toContain('docs/f0.md');
+      expect(result.reason).not.toContain('docs/f10.md'); // 11th path — past the bound
+      const shown = result.reason!.slice('dirty_clone:'.length).split(', ');
+      expect(shown.length).toBeLessThanOrEqual(10);
+    });
+
+    it('persists the dirty reason through touchIndexState so a job-swallowed refusal is still observable (Rec-5)', async () => {
+      const git = new MockGitClient({ dirtyPaths: ['docs/edited.md'] });
+      let persisted: Record<string, unknown> | undefined;
+      const repo = {
+        getRepoBasics: async () => ({
+          id: 'r1',
+          owner: 'acme',
+          name: 'app',
+          defaultBranch: 'main',
+          clonePath: '/mock/clone',
+        }),
+        tryGetIndexState: async () => stateAt('sha-1'),
+        touchIndexState: async (_repoId: string, stats?: Record<string, unknown>) => {
+          persisted = stats;
+        },
+      } as unknown as RepoIntelRepository;
+      const container = {
+        git,
+        db: {},
+        depgraph: { buildEdges: async () => [] },
+        tokenizer: { count: (text: string) => Math.ceil(text.length / 4) },
+      } as unknown as Container;
+      const service = new RepoIntelService(container);
+      (service as unknown as { repo: RepoIntelRepository }).repo = repo;
+
+      await service.resyncRepo('r1');
+
+      expect(persisted?.reason).toMatch(/^dirty_clone:docs\/edited\.md$/);
+    });
+  });
 });

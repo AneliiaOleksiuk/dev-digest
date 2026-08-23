@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "devdigest": {
+      "command": "npx",
+      "args": ["tsx", "mcp/src/index.ts"]
+    }
+  }
+}

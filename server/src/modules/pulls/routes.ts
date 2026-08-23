@@ -7,7 +7,7 @@ import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import { deriveReviewStatus, rollupSeverities, type SeverityCounts } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -111,27 +111,73 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // Latest-review SCORE (+ COST of the run + FINDINGS severity breakdown)
+    // per PR for the list's score ring / cost column / findings badge.
+    // Computed on read from reviews (no FK denorm); the list is small, so one
+    // IN-query + JS grouping is cheap.
     const prIds = rows.map((r) => r.id);
-    const latestReviewByPr = new Map<string, { score: number | null }>();
+    const latestReviewByPr = new Map<
+      string,
+      { reviewId: string; score: number | null; runId: string | null }
+    >();
     if (prIds.length > 0) {
       const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score })
+        .select({
+          prId: t.reviews.prId,
+          id: t.reviews.id,
+          score: t.reviews.score,
+          runId: t.reviews.runId,
+        })
         .from(t.reviews)
         .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
         .orderBy(desc(t.reviews.createdAt));
       // Rows are newest-first → first seen per PR is the latest review.
       for (const rv of reviewRows) {
-        if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { score: rv.score });
+        if (!latestReviewByPr.has(rv.prId)) {
+          latestReviewByPr.set(rv.prId, { reviewId: rv.id, score: rv.score, runId: rv.runId });
+        }
+      }
+    }
+
+    // Cost lives on agent_runs, not reviews — one more IN-query keyed by the
+    // run ids just collected, same cheap-list-size assumption as above.
+    const costByRunId = new Map<string, number | null>();
+    const runIds = [...latestReviewByPr.values()]
+      .map((v) => v.runId)
+      .filter((id): id is string => id != null);
+    if (runIds.length > 0) {
+      const costRows = await container.db
+        .select({ id: t.agentRuns.id, costUsd: t.agentRuns.costUsd })
+        .from(t.agentRuns)
+        .where(inArray(t.agentRuns.id, runIds));
+      for (const cr of costRows) costByRunId.set(cr.id, cr.costUsd);
+    }
+
+    // Findings severity breakdown of the SAME latest review (not summed
+    // across every agent/run on the PR — mirrors the score/cost semantics
+    // above). One more IN-query + JS rollup, keyed by review id.
+    const severityByReviewId = new Map<string, SeverityCounts>();
+    const reviewIds = [...latestReviewByPr.values()].map((v) => v.reviewId);
+    if (reviewIds.length > 0) {
+      const findingRows = await container.db
+        .select({ reviewId: t.findings.reviewId, severity: t.findings.severity })
+        .from(t.findings)
+        .where(inArray(t.findings.reviewId, reviewIds));
+      const rowsByReviewId = new Map<string, { severity: string }[]>();
+      for (const fr of findingRows) {
+        const group = rowsByReviewId.get(fr.reviewId);
+        if (group) group.push(fr);
+        else rowsByReviewId.set(fr.reviewId, [fr]);
+      }
+      for (const reviewId of reviewIds) {
+        severityByReviewId.set(reviewId, rollupSeverities(rowsByReviewId.get(reviewId) ?? []));
       }
     }
 
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
+      const severity = review ? severityByReviewId.get(review.reviewId) : undefined;
       return {
         id: r.id,
         number: r.number,
@@ -153,6 +199,10 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: review?.runId ? costByRunId.get(review.runId) ?? null : null,
+        critical_count: severity ? severity.critical : null,
+        warning_count: severity ? severity.warning : null,
+        suggestion_count: severity ? severity.suggestion : null,
       };
     });
   });

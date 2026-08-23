@@ -1,0 +1,236 @@
+# Harness evals — skills (.claude/skills/*), agents (.claude/agents/*), and workflow-level
+# behavior (CLAUDE.md / AGENTS.md + on-disk config). See evals/README.md for the full model.
+#
+# `quality` is the only BLOCKING check (static SKILL.md gate — no model, no network, cheap and
+# deterministic). The model-judged tiers (skills/agents/workflow-tier) are report-only: they run
+# with `continue-on-error` and each matrix leg ends with `pnpm eval:report`, which publishes a
+# pass/fail + baseline-comparison table to the job summary (diffed against the committed
+# `evals/baselines/*.json` snapshots — see evals/README.md's "eval:report" section). LLM-judge
+# flakiness can't block a merge this way; promote a tier to blocking once its baselines have
+# proven stable across enough runs.
+#
+# `detect` maps changed files to the suites that must run (evals/scripts/ci-detect.mjs) — a
+# changed skill/agent with no written evals is reported as SKIP, never run and never fails.
+name: harness-evals
+
+on:
+  pull_request:
+    paths:
+      - '.claude/skills/**'
+      - '.claude/agents/**'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'evals/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI budget: tighter than the local default (8) — bounds token spend per matrix leg.
+  EVAL_MAX_TURNS: 6
+
+jobs:
+  quality:
+    name: eval:quality (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: evals
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm eval:quality
+
+  detect:
+    name: detect changed artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      skills: ${{ steps.detect.outputs.skills }}
+      agents: ${{ steps.detect.outputs.agents }}
+      run_workflow: ${{ steps.detect.outputs.run_workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git diff against base.sha needs real history — the default shallow
+          # (fetch-depth: 1) clone doesn't contain that commit and fails "bad object".
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: run change detector
+        id: detect
+        run: |
+          CHANGED_FILES="$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})"
+          export CHANGED_FILES
+          node evals/scripts/ci-detect.mjs
+
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "### Eval change detection"
+            echo "- Skills to run: \`${{ steps.detect.outputs.skills }}\`"
+            echo "- Agents to run: \`${{ steps.detect.outputs.agents }}\`"
+            echo "- Workflow tier: \`${{ steps.detect.outputs.run_workflow }}\`"
+            if [ -n "${{ steps.detect.outputs.skipped_skills }}" ]; then
+              echo "- ⚠️ SKIP skills (no evals written): \`${{ steps.detect.outputs.skipped_skills }}\`"
+            fi
+            if [ -n "${{ steps.detect.outputs.skipped_agents }}" ]; then
+              echo "- ⚠️ SKIP agents (no evals written): \`${{ steps.detect.outputs.skipped_agents }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  skills:
+    name: skill evals (report)
+    needs: [detect, quality]
+    # Fork PRs never get OPENROUTER_API_KEY (GitHub withholds repo secrets from pull_request
+    # runs whose head repo isn't this one) — skip explicitly instead of failing on an empty key.
+    if: needs.detect.outputs.skills != '[]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        skill: ${{ fromJson(needs.detect.outputs.skills) }}
+    defaults:
+      run:
+        working-directory: evals
+    env:
+      EVAL_BACKEND: openrouter
+      EVAL_MODEL: deepseek/deepseek-chat
+      EVAL_JUDGE_MODEL: deepseek/deepseek-chat
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # Trailing slash: vitest's positional filter is a substring match, and "dependency-checker"
+      # would also match a hypothetical "dependency-checker-extended" sibling directory without it
+      # (this exact collision already happened between agents/architecture-reviewer and
+      # agents/architecture-reviewer-lite below).
+      - run: pnpm vitest run "skills/${{ matrix.skill }}/"
+      - name: report vs baseline
+        if: always()
+        run: pnpm eval:report "skills/${{ matrix.skill }}" >> "$GITHUB_STEP_SUMMARY"
+
+  agents:
+    name: agent evals (report)
+    needs: [detect, quality]
+    # Fork PRs never get OPENROUTER_API_KEY — skip explicitly instead of failing on an empty key.
+    if: needs.detect.outputs.agents != '[]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        agent: ${{ fromJson(needs.detect.outputs.agents) }}
+    defaults:
+      run:
+        working-directory: evals
+    env:
+      EVAL_BACKEND: openrouter
+      OPENROUTER_BASE_URL: http://localhost:4000
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      EVAL_MODEL: google/gemini-2.5-flash
+      EVAL_JUDGE_MODEL: google/gemini-2.5-flash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: docker compose -f proxy/docker-compose.yml up -d
+      - run: pnpm proxy:wait
+      # Trailing slash: vitest's positional filter is a substring match, so without it "agents/
+      # architecture-reviewer" also matches "agents/architecture-reviewer-lite" and runs (and
+      # grades) both in the same matrix leg -- confirmed happening in an earlier run.
+      - run: pnpm vitest run "agents/${{ matrix.agent }}/"
+      - if: failure()
+        run: docker compose -f proxy/docker-compose.yml logs --tail 100
+      - name: report vs baseline
+        if: always()
+        run: pnpm eval:report "agents/${{ matrix.agent }}" >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        run: docker compose -f proxy/docker-compose.yml down
+
+  workflow-tier:
+    name: workflow evals (report)
+    needs: [detect, quality]
+    # Fork PRs never get OPENROUTER_API_KEY — skip explicitly instead of failing on an empty key.
+    if: needs.detect.outputs.run_workflow == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: evals
+    env:
+      EVAL_BACKEND: openrouter
+      OPENROUTER_BASE_URL: http://localhost:4000
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      EVAL_MODEL: google/gemini-2.5-flash
+      EVAL_JUDGE_MODEL: google/gemini-2.5-flash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: evals/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: docker compose -f proxy/docker-compose.yml up -d
+      - run: pnpm proxy:wait
+      - run: pnpm eval:workflow
+      - if: failure()
+        run: docker compose -f proxy/docker-compose.yml logs --tail 100
+      - name: report vs baseline
+        if: always()
+        run: pnpm eval:report "workflow" >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        run: docker compose -f proxy/docker-compose.yml down

@@ -31,6 +31,10 @@ export interface BuildTraceInput {
   rawOutput: string;
   memoryPulled: MemoryPulled[];
   specsRead: string[];
+  /** Injected project-context documents (path/tokens/chars), one per
+   *  document (AC-26). Defaults to [] for run paths that don't build a
+   *  project-context set (e.g. built-in detectors, multi-agent runs). */
+  projectContextDocs?: { path: string; tokens: number; chars: number }[];
   log: RunLogLine[];
 }
 
@@ -50,6 +54,7 @@ export function buildRunTrace(input: BuildTraceInput): RunTrace {
     raw_output: input.rawOutput,
     memory_pulled: input.memoryPulled,
     specs_read: input.specsRead,
+    project_context_docs: input.projectContextDocs ?? [],
     log: input.log,
   };
   // Validate so a malformed trace fails loudly at write-time, not read-time.

@@ -216,6 +216,11 @@ export class RepoIntelRepository {
       // when the indexer itself stamped status='degraded'|'failed' (e.g. the
       // graph fell over). 'partial' is still a working index — no degraded flag.
       const isDegraded = row.status === 'degraded' || row.status === 'failed';
+      // `walkClone` (`pipeline/walk.ts`) stamps `stats.bounded` with the COUNT
+      // of files dropped past `MAX_INDEXED_FILES`, spread verbatim into this
+      // same `stats` blob by `full.ts`/`incremental.ts` — 0 (or absent) means
+      // the walk was never truncated.
+      const isBounded = typeof stats.bounded === 'number' && stats.bounded > 0;
       return {
         repoId,
         status: row.status as IndexStatus,
@@ -230,6 +235,7 @@ export class RepoIntelRepository {
         degradedReason: isDegraded
           ? ((stats.degradedReason as DegradedReason | undefined) ?? 'index_failed')
           : undefined,
+        bounded: isBounded ? true : undefined,
       };
     } catch {
       // Table missing / schema drift / connection blip — degrade silently. The
@@ -528,6 +534,41 @@ export class RepoIntelRepository {
           inArray(t.references.toSymbol, names),
         ),
       );
+  }
+
+  /**
+   * Name-matched callers when `decl_file` was never resolved (no/empty
+   * `file_edges`). Used as a blast fallback so direct call sites still
+   * surface. Caller must exclude the declaring file(s) of each symbol.
+   * `rank` is 0 when the from_path has no `file_rank` row.
+   */
+  async getNameMatchedCallers(
+    repoId: string,
+    names: string[],
+  ): Promise<ResolvedCallerRow[]> {
+    if (names.length === 0) return [];
+    const rows = await this.db
+      .select({
+        fromPath: t.references.fromPath,
+        toSymbol: t.references.toSymbol,
+        line: t.references.line,
+        rank: t.fileRank.rank,
+      })
+      .from(t.references)
+      .leftJoin(
+        t.fileRank,
+        and(
+          eq(t.fileRank.repoId, t.references.repoId),
+          eq(t.fileRank.filePath, t.references.fromPath),
+        ),
+      )
+      .where(and(eq(t.references.repoId, repoId), inArray(t.references.toSymbol, names)));
+    return rows.map((r) => ({
+      fromPath: r.fromPath,
+      toSymbol: r.toSymbol,
+      line: r.line,
+      rank: r.rank ?? 0,
+    }));
   }
 
   /** Per-file facts (endpoints/crons) for the given files. */

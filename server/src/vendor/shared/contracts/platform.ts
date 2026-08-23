@@ -52,8 +52,8 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     id: 'review_intent',
     label: 'PR Review · Intent',
     description: 'Derives a PR’s intent and scope before review.',
-    defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    defaultProvider: 'openrouter',
+    defaultModel: 'deepseek/deepseek-v4-flash',
   },
   {
     id: 'risk_brief',
@@ -170,6 +170,14 @@ export const PrMeta = z.object({
   updated_at: z.string().nullish(),
   // Latest-review score (list endpoint only; null/absent until reviewed).
   score: z.number().int().nullish(),
+  // Cost (USD) of the run that produced the latest review above (same run,
+  // list endpoint only; null/absent until reviewed).
+  cost_usd: z.number().nullish(),
+  // Findings severity breakdown of the same latest review above (not summed
+  // across every agent/run on the PR); null/absent until reviewed.
+  critical_count: z.number().int().nullish(),
+  warning_count: z.number().int().nullish(),
+  suggestion_count: z.number().int().nullish(),
 });
 export type PrMeta = z.infer<typeof PrMeta>;
 
@@ -239,13 +247,116 @@ export const PrCommentInput = z.object({
 export type PrCommentInput = z.infer<typeof PrCommentInput>;
 
 // ---- Project Context ----
-export const SpecFile = z.object({
+/** One discovered `.md` document under a repo's configured search roots. */
+export const ContextDocument = z.object({
+  /** Repo-relative path. */
   path: z.string(),
-  content: z.string().nullish(),
-  size: z.number().int().nullish(),
-  updated_at: z.string().nullish(),
+  /** Which configured search root it was found under (e.g. "specs", "docs"). */
+  source_folder: z.string(),
+  /** Document type/kind label (currently always the extension, e.g. "md"). */
+  type: z.string(),
+  /** Estimated token count of the document's full text (AC-2). */
+  tokens: z.number().int(),
+  bytes: z.number().int(),
+  /** Number of agents (direct + inherited via enabled skills) that would
+   *  inject this document (AC-8). */
+  used_by_agents: z.number().int(),
+  /** True for an attached-but-absent file (E-2) — only set on attachment
+   *  reads, not on the discovery listing. */
+  missing: z.boolean(),
 });
-export type SpecFile = z.infer<typeof SpecFile>;
+export type ContextDocument = z.infer<typeof ContextDocument>;
+
+/** GET /repos/:repoId/context response. */
+export const ContextListing = z.object({
+  documents: z.array(ContextDocument),
+  total_tokens: z.number().int(),
+  total_files: z.number().int(),
+  /** Non-null carries the no-clone degraded case (AC-3/E-1). */
+  degraded_reason: z.string().nullable(),
+  /** Configured search-root folder names (`AppConfig.projectContextRoots`) —
+   *  the new-document dialog's root picker has no other way to learn them
+   *  (Rec-4); inferring from `source_folder` fails on a repo with zero
+   *  discovered documents (E-14). `.default([])` so older fixtures parse. */
+  roots: z.array(z.string()).default([]),
+});
+export type ContextListing = z.infer<typeof ContextListing>;
+
+/** One document reference in an attachment set — path + persisted order. */
+export const ContextAttachment = z.object({
+  path: z.string(),
+  order: z.number().int(),
+});
+export type ContextAttachment = z.infer<typeof ContextAttachment>;
+
+/** Attachments this surface holds against a repo other than the active one. */
+export const OtherRepoAttachment = z.object({
+  repo_id: z.string(),
+  path: z.string(),
+  order: z.number().int(),
+});
+export type OtherRepoAttachment = z.infer<typeof OtherRepoAttachment>;
+
+/** GET /skills/:id/context, GET /agents/:id/context response. */
+export const ContextAttachmentSet = z.object({
+  repo_id: z.string(),
+  documents: z.array(ContextAttachment),
+  total_tokens: z.number().int(),
+  /** Attachments this surface holds against OTHER repos (E-8 / WI11).
+   *  Not injected for runs on `repo_id`. `.default([])` so older fixtures parse. */
+  other_repo_documents: z.array(OtherRepoAttachment).default([]),
+});
+export type ContextAttachmentSet = z.infer<typeof ContextAttachmentSet>;
+
+/** Body for POST /skills/:id/context, POST /agents/:id/context — replaces
+ *  the whole attached set for that surface, ordered by array index. */
+export const SetContextBody = z.object({
+  repo_id: z.string(),
+  paths: z.array(z.string()),
+});
+export type SetContextBody = z.infer<typeof SetContextBody>;
+
+// ---- Project Context — in-app authoring (SPEC-01 amendment, AC-29–AC-53) ----
+/** GET /repos/:repoId/context/document response — widened from the original
+ *  preview-only `{ path, content }` shape with a content-hash staleness
+ *  token (Rec-1): sha256 hex of the file's bytes, required back on save so a
+ *  concurrent out-of-band edit is rejected instead of silently overwritten
+ *  (AC-37). An mtime was considered and rejected — the dev environment is
+ *  win32, where a same-tick out-of-band write can share an mtime. */
+export const ContextDocumentContent = z.object({
+  path: z.string(),
+  content: z.string(),
+  revision: z.string(),
+});
+export type ContextDocumentContent = z.infer<typeof ContextDocumentContent>;
+
+/** Body for PUT /repos/:repoId/context/document (save an existing document).
+ *  `revision` must match the current on-disk content hash (AC-37) or the
+ *  save is rejected with `ConflictError` (409) and nothing is written. */
+export const SaveContextDocumentBody = z.object({
+  path: z.string(),
+  content: z.string(),
+  revision: z.string(),
+});
+export type SaveContextDocumentBody = z.infer<typeof SaveContextDocumentBody>;
+
+/** Body for POST /repos/:repoId/context/document (create a new document).
+ *  No staleness token — creation is an atomic exclusive write (AC-44), not a
+ *  read-modify-write. */
+export const CreateContextDocumentBody = z.object({
+  path: z.string(),
+  content: z.string(),
+});
+export type CreateContextDocumentBody = z.infer<typeof CreateContextDocumentBody>;
+
+/** Response for both the save and create write paths — the document's fresh
+ *  metadata (AC-40) plus the new revision so the client can keep editing
+ *  without an extra round trip. */
+export const ContextWriteResult = z.object({
+  document: ContextDocument,
+  revision: z.string(),
+});
+export type ContextWriteResult = z.infer<typeof ContextWriteResult>;
 
 export const IndexStatus = z.object({
   status: z.enum(['idle', 'cloning', 'parsing', 'embedding', 'done', 'error']),

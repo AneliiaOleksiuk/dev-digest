@@ -11,6 +11,7 @@ import type {
   GitCommit,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './diff-parser.js';
+import { DirtyCloneError } from './errors.js';
 
 /**
  * Depth fetched by `sync()`. Deeper than the shallow clone (CLONE_DEPTH=1) so the
@@ -77,11 +78,23 @@ export class SimpleGitClient implements GitClient {
   async sync(repo: RepoRef, branch: string): Promise<{ head: string }> {
     // Resync the read-only mirror to upstream. A bare `fetch` only moves
     // `origin/<branch>`, so we `reset --hard` to advance local HEAD + worktree —
-    // safe here because we never commit to or run code from the clone.
+    // safe UNLESS the clone has uncommitted changes (e.g. an in-app document
+    // edit/creation, SPEC-01 amendment), in which case `reset --hard` would
+    // silently discard them. Precondition (AC-50): check the clone's status —
+    // `git status --porcelain --untracked-files=all` (untracked included,
+    // since a created document is untracked, not modified) — BEFORE any
+    // fetch/reset, and refuse with `DirtyCloneError` when it's non-empty. A
+    // clean clone gets byte-identical behaviour to before (AC-53): same
+    // fetch, same reset, same returned head, no additional network call.
+    const g = this.git(repo);
+    const statusOutput = await g.raw(['status', '--porcelain', '--untracked-files=all']);
+    const dirtyPaths = parsePorcelainPaths(statusOutput);
+    if (dirtyPaths.length > 0) {
+      throw new DirtyCloneError(dirtyPaths);
+    }
     // Fetch a bounded depth (> the shallow CLONE_DEPTH) so the prior indexed sha
     // is usually reachable for an incremental diff; the indexer falls back to a
     // full reindex when it isn't.
-    const g = this.git(repo);
     await g.fetch(['origin', branch, '--depth', String(RESYNC_FETCH_DEPTH)]);
     await g.reset(['--hard', `origin/${branch}`]);
     return { head: (await g.revparse(['HEAD'])).trim() };
@@ -129,6 +142,25 @@ export class SimpleGitClient implements GitClient {
   async readFile(repo: RepoRef, path: string): Promise<string> {
     return readFile(join(this.clonePathFor(repo), path), 'utf8');
   }
+}
+
+/**
+ * `git status --porcelain` lines are `XY PATH` (two status chars, a space,
+ * then the path — quoted if it contains unusual characters; a rename is
+ * `XY OLD -> NEW`, and only the new path is kept). Never used as input to
+ * another filesystem/shell call — display text only (Untrusted-inputs
+ * table), which is why this doesn't bother unquoting: the raw porcelain
+ * token is fine to show a user as-is.
+ */
+function parsePorcelainPaths(raw: string): string[] {
+  return raw
+    .split('\n')
+    .map((line) => line.slice(3).trim())
+    .filter((path) => path.length > 0)
+    .map((path) => {
+      const renameIdx = path.indexOf(' -> ');
+      return renameIdx === -1 ? path : path.slice(renameIdx + 4);
+    });
 }
 
 function parseBlamePorcelain(raw: string): BlameLine[] {

@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
 import type { PrMeta } from "@/lib/types";
+import { formatCost } from "@/helpers/format";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { relativeTime, sizeOf } from "../../helpers";
 import { s } from "../../styles";
+import { FindingsPreview } from "./_components/FindingsPreview";
 
 export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const t = useTranslations("prReview");
@@ -16,6 +18,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const [h, setH] = React.useState(false);
   const st = STATUS_META[pr.status] ?? STATUS_META.needs_review!;
   const { size, lines } = sizeOf(pr);
+  const { critical_count, warning_count, suggestion_count } = pr;
   const reviewed = pr.score != null; // null score ⇒ PR has never been reviewed
   return (
     <div
@@ -53,10 +56,20 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
           <span style={s.muted}>—</span>
         )}
       </div>
+      <div style={s.findingsCell}>
+        {critical_count || warning_count || suggestion_count ? (
+          <FindingsPreview pullRequest={pr} repoId={repoId} />
+        ) : (
+          <span style={s.muted}>—</span>
+        )}
+      </div>
       <div>
         <Badge dot color={st.c} bg="transparent">
           {t(`list.status.${st.labelKey}`)}
         </Badge>
+      </div>
+      <div className="mono" style={s.costCell}>
+        {formatCost(pr.cost_usd)}
       </div>
       <div style={s.updatedCell}>{relativeTime(pr.updated_at)}</div>
     </div>

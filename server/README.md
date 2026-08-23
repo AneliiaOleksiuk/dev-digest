@@ -70,6 +70,7 @@ flowchart TB
   end
   subgraph Review["Review & runs"]
     reviews["reviews<br/>/pulls/:id/review · /reviews · /findings/:id/(accept|dismiss)<br/>/runs/:id/(events|trace)"]
+    blast["blast (L04)<br/>/pulls/:id/blast<br/>+ prior PRs touching the changed files"]
   end
   subgraph Agents["Agents"]
     agents["agents<br/>/agents · /agents/:id"]

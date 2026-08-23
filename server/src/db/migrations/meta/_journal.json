@@ -71,6 +71,83 @@
       "when": 1781464392464,
       "tag": "0009_complex_runaways",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785331364313,
+      "tag": "0010_striped_cobalt_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785683056303,
+      "tag": "0011_sticky_scourge",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785683075889,
+      "tag": "0012_lowly_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785695829232,
+      "tag": "0013_daily_ronan",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786047001225,
+      "tag": "0014_mute_triton",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786091596284,
+      "tag": "0015_jazzy_dark_phoenix",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786609405211,
+      "tag": "0016_colossal_professor_monster",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786655266705,
+      "tag": "0017_sweet_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786713940933,
+      "tag": "0018_real_iceman",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787253006782,
+      "tag": "0019_unique_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787254295737,
+      "tag": "0020_early_korvac",
+      "breakpoints": true
     }
   ]
 }

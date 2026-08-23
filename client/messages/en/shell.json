@@ -21,7 +21,7 @@
     "skills": "Skills",
     "agents": "Agents",
     "conventions": "Conventions",
-    "eval": "Eval Dashboard",
+    "evals": "Eval Dashboard",
     "memory": "Memory",
     "multi-agent": "Multi-Agent Review",
     "agent-performance": "Agent Performance",
@@ -40,6 +40,9 @@
     "reply": "Reply",
     "viewOnGitHub": "View on GitHub",
     "postedToGitHub": "Posts to GitHub immediately",
-    "outdatedTitle": "{count} comment(s) on older revisions"
+    "outdatedTitle": "{count} comment(s) on older revisions",
+    "jumpToFinding": "Jump to this finding →",
+    "filterBySeverity": "Show {severity} findings",
+    "lineFindingsLabel": "View findings on this line"
   }
 }

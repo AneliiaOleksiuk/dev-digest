@@ -39,7 +39,7 @@ describe("FindingCard (smoke, both themes)", () => {
     it(`renders severity + file:line + rationale in ${theme}`, () => {
       renderWithIntl(
         <div data-theme={theme}>
-          <FindingCard f={FINDING} defaultExpanded onAction={() => {}} />
+          <FindingCard finding={FINDING} defaultExpanded onAction={() => {}} />
         </div>,
       );
       expect(screen.getByText("Hardcoded Stripe secret key")).toBeInTheDocument();
@@ -51,10 +51,49 @@ describe("FindingCard (smoke, both themes)", () => {
 
   it("fires accept/dismiss actions", () => {
     const onAction = vi.fn();
-    renderWithIntl(<FindingCard f={FINDING} defaultExpanded onAction={onAction} />);
+    renderWithIntl(<FindingCard finding={FINDING} defaultExpanded onAction={onAction} />);
     fireEvent.click(screen.getByText("Accept"));
     expect(onAction).toHaveBeenCalledWith("accept");
     fireEvent.click(screen.getByText("Dismiss"));
     expect(onAction).toHaveBeenCalledWith("dismiss");
+  });
+});
+
+/**
+ * L06 AC-4/UX-1 — "Turn into eval case" is offered ONLY once a decision
+ * (accept or dismiss) exists to derive the expectation kind from
+ * (docs/plans/eval-pipeline.md WI11 DoD: "component tests over all three
+ * finding states (pending / accepted / dismissed) show the action only in
+ * the last two"). Oracle derived from the plan/spec before reading
+ * FindingCard.tsx — `accepted_at`/`dismissed_at` are the two booleans the
+ * card already derives (spec AC-4).
+ */
+describe("FindingCard — Turn into eval case (L06 AC-4/UX-1)", () => {
+  const PENDING: FindingRecord = { ...FINDING, accepted_at: null, dismissed_at: null };
+  const ACCEPTED: FindingRecord = { ...FINDING, accepted_at: "2026-08-20T00:00:00.000Z", dismissed_at: null };
+  const DISMISSED: FindingRecord = { ...FINDING, accepted_at: null, dismissed_at: "2026-08-20T00:00:00.000Z" };
+
+  it("is NOT offered on a pending finding (neither accepted nor dismissed)", () => {
+    renderWithIntl(<FindingCard finding={PENDING} defaultExpanded onAction={() => {}} onCreateEvalCase={() => {}} />);
+    expect(screen.queryByText("Turn into eval case")).not.toBeInTheDocument();
+  });
+
+  it("IS offered on an accepted finding", () => {
+    renderWithIntl(<FindingCard finding={ACCEPTED} defaultExpanded onAction={() => {}} onCreateEvalCase={() => {}} />);
+    expect(screen.getByText("Turn into eval case")).toBeInTheDocument();
+  });
+
+  it("IS offered on a dismissed finding", () => {
+    renderWithIntl(<FindingCard finding={DISMISSED} defaultExpanded onAction={() => {}} onCreateEvalCase={() => {}} />);
+    expect(screen.getByText("Turn into eval case")).toBeInTheDocument();
+  });
+
+  it("clicking it invokes onCreateEvalCase", () => {
+    const onCreateEvalCase = vi.fn();
+    renderWithIntl(
+      <FindingCard finding={ACCEPTED} defaultExpanded onAction={() => {}} onCreateEvalCase={onCreateEvalCase} />,
+    );
+    fireEvent.click(screen.getByText("Turn into eval case"));
+    expect(onCreateEvalCase).toHaveBeenCalledTimes(1);
   });
 });

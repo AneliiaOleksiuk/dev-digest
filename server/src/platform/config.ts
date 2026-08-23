@@ -26,9 +26,18 @@ const EnvSchema = z.object({
   // Note: even when on, sections only populate once the repo is indexed; an
   // unindexed repo degrades gracefully. Per-agent override: agents.repo_intel.
   REPO_INTEL_ENABLED: z.string().optional(),
+  // Verbose structured prompt-assembly logging (section names/sources/char
+  // counts, model, correlation id — NEVER content). Off by default; forced
+  // off in production regardless of this value (see loadConfig below), so it
+  // can only ever be turned on for local dev.
+  PROMPT_LOG_VERBOSE: z.string().optional(),
   API_PORT: z.coerce.number().int().default(3001),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
+  // Project Context (SPEC-01): comma-separated search-root folder names,
+  // walked recursively for `.md` documents. A server config value per D-3 —
+  // not a per-repo UI setting.
+  PROJECT_CONTEXT_ROOTS: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   // `.env` (and .env.example) ship `LOG_LEVEL=` empty; an empty string is not a
   // valid enum member, so coerce '' → undefined to fall through to the default.
@@ -59,6 +68,16 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /**
+   * Verbose structured prompt-assembly logging (reviewer-core's per-section
+   * char counts + source labels, never content). Local-dev-only by
+   * construction: forced `false` whenever `nodeEnv === 'production'`, so a
+   * stray `PROMPT_LOG_VERBOSE=true` in a deployed env can never enable it.
+   */
+  promptLogVerbose: boolean;
+  /** Search-root folder names walked recursively for `.md` project-context
+   *  documents (default: specs, docs, insights — D-3). */
+  projectContextRoots: string[];
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -77,5 +96,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    promptLogVerbose: parsed.PROMPT_LOG_VERBOSE === 'true' && parsed.NODE_ENV !== 'production',
+    projectContextRoots: (parsed.PROJECT_CONTEXT_ROOTS ?? 'specs,docs,insights')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

@@ -65,9 +65,14 @@ export class AgentsService {
     return row ? toAgentDto(row) : undefined;
   }
 
-  /** Delete an agent (and its versions/skill-links, via cascade). */
+  /** Delete an agent (and its versions/skill-links, via cascade). Also
+   *  explicitly deletes its project-context attachment rows — `surfaceId`
+   *  there carries no FK (R-D, docs/plans/spec-01-project-context.md), so a
+   *  cascade can't do this for us. */
   async delete(workspaceId: string, id: string): Promise<boolean> {
-    return this.repo.deleteById(workspaceId, id);
+    const ok = await this.repo.deleteById(workspaceId, id);
+    if (ok) await this.container.contextRepo.deleteForSurface(workspaceId, 'agent', id);
+    return ok;
   }
 
   async create(workspaceId: string, input: CreateAgentInput, userId?: string): Promise<Agent> {
@@ -139,6 +144,29 @@ export class AgentsService {
   async skillLinks(agentId: string): Promise<AgentSkillLink[]> {
     const links = await this.repo.linkedSkills(agentId);
     return links.map((l) => ({ agent_id: agentId, skill_id: l.skill.id, order: l.order }));
+  }
+
+  /**
+   * WI7 (eval batch runner) — the shape `skillLinks` above can't provide
+   * (ids + order only). Additive, read-only, no behaviour change to any
+   * existing agents route: exists so `modules/eval` never imports
+   * `AgentsRepository` directly (onion-architecture "Cross-module reads"
+   * rule) — `modules/reviews/run-executor.ts:231` reaching into
+   * `container.agentsRepo.linkedSkills` directly is the pre-existing pattern
+   * this method exists specifically to avoid copying for the eval module.
+   */
+  async linkedSkillsForRun(agentId: string): Promise<
+    { skill_id: string; name: string; body: string; enabled: boolean; version: number; order: number }[]
+  > {
+    const links = await this.repo.linkedSkills(agentId);
+    return links.map((l) => ({
+      skill_id: l.skill.id,
+      name: l.skill.name,
+      body: l.skill.body,
+      enabled: l.skill.enabled,
+      version: l.skill.version,
+      order: l.order,
+    }));
   }
 
   /**

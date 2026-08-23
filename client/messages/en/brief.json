@@ -1,4 +1,5 @@
 {
+  "title": "PR Brief",
   "block": {
     "intent": "Intent",
     "blast": "Blast radius",
@@ -10,10 +11,78 @@
   "overlap": "{count} overlap",
   "unavailable": "Brief not available yet.",
   "unavailableHint": "Run a review or open the PR to compute it.",
+  "viewBlast": "View blast radius",
   "why": {
     "title": "git-why",
     "blame": "blame",
     "noHistory": "No history available for this line.",
     "noCommits": "No commits found for this line."
+  },
+  "card": {
+    "describesCommit": "Describes commit {sha}",
+    "riskLevel": {
+      "high": "High risk",
+      "medium": "Medium risk",
+      "low": "Low risk"
+    },
+    "whatTitle": "What",
+    "whyTitle": "Why",
+    "risksTitle": "Risks",
+    "emptyTitle": "No brief yet",
+    "emptyBody": "Generate a composed what/why/risk judgement for this PR from its intent, blast radius, and diff stats.",
+    "staleTitle": "Brief is stale",
+    "staleBody": "The newest brief describes commit {sha} — the PR has moved since then.",
+    "corruptTitle": "Couldn't read the stored brief",
+    "corruptBody": "The stored brief could not be read (corrupted or from an older format) — regenerate to fix this.",
+    "budgetExceededTitle": "Inputs exceed the budget",
+    "budgetExceededBody": "The composed inputs alone exceed the 8,000-token budget. No call was made and nothing was charged.",
+    "failedTitle": "Generation failed",
+    "failedBody": "The last generation attempt failed. Any previously stored brief for this commit is unchanged.",
+    "retry": "Retry",
+    "viewingHistorical": "Viewing an earlier brief — describes commit {sha}, not the current head.",
+    "backToCurrent": "Back to current"
+  },
+  "focus": {
+    "title": "Review focus",
+    "empty": "No specific review focus flagged.",
+    "unavailable": "This file isn't in the currently loaded diff — the PR may have moved past this brief's commit."
+  },
+  "generate": {
+    "cta": "Generate",
+    "regenerateCta": "Regenerate",
+    "spendsOne": "Spends one call on {model}",
+    "spendsOneGeneric": "Spends one model call",
+    "lastCost": "Last generation cost {cost}"
+  },
+  "timeline": {
+    "title": "Why Timeline",
+    "toggle": "Why Timeline ({count})",
+    "disclosure": "{briefCount, plural, one {# brief} other {# briefs}} generated across {commitCount, plural, one {# commit} other {# commits}}",
+    "riskChanged": "risk changed",
+    "current": "current",
+    "empty": "No briefs generated yet."
+  },
+  "inputs": {
+    "title": "Inputs",
+    "intent": {
+      "used": "Derived intent used",
+      "missing": "No derived intent",
+      "stale": "Derived intent was stale"
+    },
+    "blast": {
+      "full": "Blast radius: full index",
+      "partial": "Blast radius: partial index",
+      "degraded": "Blast radius: degraded"
+    },
+    "changedFiles": "{count} changed files",
+    "specFilesUsed": "{count} spec files used",
+    "specFilesUnresolved": "{count} spec files unresolved",
+    "linkedIssue": {
+      "used": "Linked issue used",
+      "unresolved": "Linked issue could not be retrieved",
+      "not_referenced": "No linked issue"
+    },
+    "droppedInputs": "{count} input(s) dropped to fit the budget",
+    "droppedCitations": "{count} citation(s) dropped as ungrounded"
   }
 }

@@ -1,0 +1,76 @@
+# mcp suite — the local-only MCP server (@devdigest/mcp, stdio) PLUS the
+# pre-push CLI (`src/cli.ts` + `src/cli/*`) in the same package.
+# The 5 MCP tools are a thin HTTP façade over the local API; no DB, no LLM,
+# no GitHub. The CLI is a separate, additive entry point that imports
+# `@devdigest/reviewer-core` in-process (a documented exception — see
+# mcp/AGENTS.md) and reads ~/.devdigest/secrets.json, but its tests are still
+# hermetic (fetch/git/LLM are all stubbed via DI — no network, no real repo).
+# Uses npm (package-lock.json), matching reviewer-core/ and e2e/.
+#
+# server/src/vendor/shared/** is in the path filter because mcp/ aliases
+# @devdigest/shared to it at type-check time (type-only imports only, except
+# inside cli/* — see mcp/AGENTS.md). reviewer-core/** is in the path filter
+# because the CLI aliases @devdigest/reviewer-core to its RAW source at
+# type-check time too.
+name: mcp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mcp/**'
+      - 'server/src/vendor/shared/**'
+      - 'reviewer-core/**'
+      - '.github/workflows/mcp.yml'
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - 'server/src/vendor/shared/**'
+      - 'reviewer-core/**'
+      - '.github/workflows/mcp.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - run: npm ci
+
+      # The CLI (src/cli.ts + src/cli/*) type-checks reviewer-core's RAW
+      # source: tsconfig aliases @devdigest/reviewer-core → ../reviewer-core/
+      # src. That source imports `openai`/`zod`, so without reviewer-core's
+      # deps installed, tsc fails with TS2307 → cascading unknown→T errors.
+      # reviewer-core uses npm (see reviewer-core.yml). Copied rationale from
+      # .github/workflows/server-unit.yml, which needs the same install for
+      # the same reason.
+      - name: Install reviewer-core deps
+        working-directory: reviewer-core
+        run: npm ci
+
+      # Tools + CLI typecheck both need a raised heap: MCP SDK registerTool
+      # generics + path-mapped shared/reviewer-core otherwise OOM (~4GB, exit
+      # 134). package.json typecheck already passes --max-old-space-size=6144;
+      # keep NODE_OPTIONS as a belt-and-suspenders for the workflow.
+      - run: npm run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - run: npm test

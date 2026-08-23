@@ -11,12 +11,17 @@
  * never emits JS — its `build` is a type-check.
  */
 
+// Unified-diff parsing — shared by the server's git adapter and the pre-push
+// CLI (mcp/src/cli.ts), so there is exactly one parser implementation.
+export { parseUnifiedDiff } from './diff/parse.js';
+
 // Prompt assembly + prompt-injection hardening.
 export {
   assemblePrompt,
   wrapUntrusted,
   type PromptParts,
   type AssembledPrompt,
+  type PromptSectionMeta,
 } from './prompt.js';
 
 // Citation grounding — the mandatory mechanical gate for diff findings.

@@ -21,7 +21,13 @@ import { usePrReviews, useCancelRun, usePrActiveRuns, usePrRuns, useDeleteRun } 
 import { useActiveRepo, useRepoNotFound } from "../../../../../lib/repo-context";
 import { ApiError } from "../../../../../lib/api";
 import { githubPrUrl } from "../../../../../lib/github-urls";
+import type { FocusDiffLineOptions, FocusFindingsOptions } from "../../../../../lib/types";
 import type { FindingRecord } from "@devdigest/shared";
+
+// WI11 (L04 follow-ups): the 3 tabs left once the Blast tab is deleted —
+// static, so hoisted out of the component body rather than recreated per
+// render.
+const KNOWN_TABS = new Set(["overview", "findings", "diff"]);
 
 export default function PRDetailPage() {
   const params = useParams<{ repoId: string; number: string }>();
@@ -57,15 +63,49 @@ export default function PRDetailPage() {
     if (prId) qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
   };
 
-  const tab = search.get("tab") ?? "overview";
+  // Normalize unknown tab keys to "overview" — a one-line, side-effect-free
+  // read guard, chosen over a dead param (blank content area, no branch
+  // matches) and over a `router.replace` redirect (a navigation side effect
+  // on mount for a URL almost nobody holds). Sends every stale `?tab=blast`
+  // bookmark to the tab that now *contains* the blast tree (Overview), and
+  // fixes typo'd `?tab=` values as a bonus.
+  const rawTab = search.get("tab") ?? "overview";
+  const tab = KNOWN_TABS.has(rawTab) ? rawTab : "overview";
   const traceRunId = search.get("trace");
-  const setParam = (key: string, val: string | null) => {
+  // Findings deep-link: which run/severity/finding the Findings tab should
+  // focus, driven entirely by the URL so it's shareable/reload-safe (set from
+  // the PR list hover preview, the Timeline, or a Review-runs header badge).
+  const focusRunId = search.get("run");
+  const focusSeverity = search.get("severity");
+  const focusFindingId = search.get("finding");
+  // Review-focus deep-link (SPEC-03 AC-30/UX-6): `?file=&line=` alongside the
+  // findings-focus params above, so a PrBriefCard review-focus click is
+  // shareable/reload-safe the same way `run`/`severity`/`finding` already are.
+  const focusFile = search.get("file");
+  const focusLineRaw = search.get("line");
+  const focusLine = focusLineRaw != null && !Number.isNaN(Number(focusLineRaw)) ? Number(focusLineRaw) : null;
+  const setParams = (patch: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
-    if (val == null) sp.delete(key);
-    else sp.set(key, val);
+    for (const [key, val] of Object.entries(patch)) {
+      if (val == null) sp.delete(key);
+      else sp.set(key, val);
+    }
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
+  const setParam = (key: string, val: string | null) => setParams({ [key]: val });
   const setTab = (t: string) => setParam("tab", t);
+  const focusFindings = (opts: FocusFindingsOptions) =>
+    setParams({
+      tab: "findings",
+      run: opts.runId ?? null,
+      severity: opts.severity ?? null,
+      finding: opts.findingId ?? null,
+    });
+  const clearFocus = () => focusFindings({});
+  // AC-30/UX-6 — lands on the Files-changed tab, expand-then-scroll to the
+  // exact line, via URL params so the link survives reload/is shareable.
+  const focusDiffLine = (opts: FocusDiffLineOptions) =>
+    setParams({ tab: "diff", file: opts.path, line: String(opts.line) });
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -134,7 +174,17 @@ export default function PRDetailPage() {
       />
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} />}
+        {tab === "overview" && prId && (
+          <OverviewTab
+            prId={prId}
+            headSha={pr.head_sha}
+            repoFullName={repoFullName}
+            repoId={repoId}
+            blastReady
+            changedFilePaths={pr.files.map((f) => f.path)}
+            onFocusDiffLine={focusDiffLine}
+          />
+        )}
 
         {tab === "findings" && (
           <FindingsTab
@@ -148,6 +198,9 @@ export default function PRDetailPage() {
             repoFullName={repoFullName}
             headSha={pr.head_sha}
             cancelMutation={cancel}
+            focus={{ runId: focusRunId, severity: focusSeverity, findingId: focusFindingId }}
+            onFocusFindings={focusFindings}
+            onClearFocus={clearFocus}
             onOpenTrace={(id) => setParam("trace", id)}
             onDelete={(id) => {
               if (window.confirm("Delete this run from history? (its logs are removed too)"))
@@ -167,6 +220,9 @@ export default function PRDetailPage() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            findings={allFindings}
+            onFocusFindings={focusFindings}
+            diffFocus={focusFile && focusLine != null ? { path: focusFile, line: focusLine } : null}
           />
         )}
       </div>

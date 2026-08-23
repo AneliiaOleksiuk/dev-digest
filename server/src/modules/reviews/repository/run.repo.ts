@@ -1,7 +1,8 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
+import { rollupSeverities } from '../../pulls/status.js';
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -48,23 +49,55 @@ export async function listRunsForPull(
     .leftJoin(t.agents, eq(t.agents.id, t.agentRuns.agentId))
     .where(and(eq(t.agentRuns.workspaceId, workspaceId), eq(t.agentRuns.prId, prId)))
     .orderBy(desc(t.agentRuns.ranAt));
-  return rows.map(({ run, agentName }) => ({
-    run_id: run.id,
-    agent_id: run.agentId,
-    agent_name: agentName ?? null,
-    provider: run.provider,
-    model: run.model,
-    status: run.status,
-    error: run.error,
-    duration_ms: run.durationMs,
-    tokens_in: run.tokensIn,
-    tokens_out: run.tokensOut,
-    findings_count: run.findingsCount,
-    grounding: run.grounding,
-    ran_at: run.ranAt ? run.ranAt.toISOString() : null,
-    score: run.score,
-    blockers: run.blockers,
-  }));
+
+  // Per-run FINDINGS severity breakdown — one more IN-query joining findings
+  // to the review each run produced, grouped by run id (mirrors the PR-list
+  // rollup in modules/pulls/routes.ts). Not filtered by dismissedAt, so the
+  // totals stay consistent with the frozen findings_count/score above.
+  const runIds = rows.map(({ run }) => run.id);
+  const severityByRunId = new Map<string, ReturnType<typeof rollupSeverities>>();
+  if (runIds.length > 0) {
+    const findingRows = await db
+      .select({ runId: t.reviews.runId, severity: t.findings.severity })
+      .from(t.findings)
+      .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+      .where(and(inArray(t.reviews.runId, runIds), eq(t.reviews.kind, 'review')));
+    const rowsByRunId = new Map<string, { severity: string }[]>();
+    for (const fr of findingRows) {
+      if (!fr.runId) continue;
+      const group = rowsByRunId.get(fr.runId);
+      if (group) group.push(fr);
+      else rowsByRunId.set(fr.runId, [fr]);
+    }
+    for (const runId of runIds) {
+      severityByRunId.set(runId, rollupSeverities(rowsByRunId.get(runId) ?? []));
+    }
+  }
+
+  return rows.map(({ run, agentName }) => {
+    const severity = severityByRunId.get(run.id);
+    return {
+      run_id: run.id,
+      agent_id: run.agentId,
+      agent_name: agentName ?? null,
+      provider: run.provider,
+      model: run.model,
+      status: run.status,
+      error: run.error,
+      duration_ms: run.durationMs,
+      tokens_in: run.tokensIn,
+      tokens_out: run.tokensOut,
+      cost_usd: run.costUsd,
+      findings_count: run.findingsCount,
+      grounding: run.grounding,
+      ran_at: run.ranAt ? run.ranAt.toISOString() : null,
+      score: run.score,
+      blockers: run.blockers,
+      critical_count: severity ? severity.critical : null,
+      warning_count: severity ? severity.warning : null,
+      suggestion_count: severity ? severity.suggestion : null,
+    };
+  });
 }
 
 /**
@@ -146,6 +179,7 @@ export async function completeAgentRun(
     durationMs: number;
     tokensIn: number;
     tokensOut: number;
+    costUsd: number | null;
     findingsCount: number;
     grounding: string;
     /** Review score (0-100); null on failed/cancelled runs. */
@@ -163,6 +197,7 @@ export async function completeAgentRun(
       durationMs: values.durationMs,
       tokensIn: values.tokensIn,
       tokensOut: values.tokensOut,
+      costUsd: values.costUsd,
       findingsCount: values.findingsCount,
       grounding: values.grounding,
       score: values.score ?? null,

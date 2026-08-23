@@ -8,6 +8,7 @@ import { Badge } from "@devdigest/ui";
 import type { RunTrace, FindingRecord } from "@devdigest/shared";
 import { PROMPT_COLORS } from "../../constants";
 import { formatSeconds, formatTokens } from "../../helpers";
+import { formatCost } from "@/helpers/format";
 import { s } from "../../styles";
 import { TraceSection } from "../TraceSection";
 import { ToolCallRow } from "../ToolCallRow";
@@ -48,6 +49,25 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
               )}
             </div>
           </Row>
+          {/* AC-26/AC-27 — distinct from "Specs read" above (ADR-0003: never
+              merge the two). Fed by `trace.project_context_docs`, one entry
+              per document actually injected into this run's prompt, with its
+              individual size — not the aggregate `prompt_assembly.specs`
+              char count. `.default([])` on the contract means an old trace
+              renders this as an empty "none" row, never throws. */}
+          <Row label={t("trace.config.projectContextDocs")}>
+            <div style={s.specsWrap}>
+              {trace.project_context_docs.length === 0 ? (
+                <span style={s.specsNone}>{t("trace.config.none")}</span>
+              ) : (
+                trace.project_context_docs.map((doc, i) => (
+                  <span key={i} className="mono" style={s.spec}>
+                    {doc.path} ({t("trace.config.docSize", { tokens: doc.tokens, chars: doc.chars })})
+                  </span>
+                ))
+              )}
+            </div>
+          </Row>
         </div>
       </TraceSection>
 
@@ -63,6 +83,7 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
         <div style={s.statsRow}>
           <Stat label={t("trace.stat.duration")} val={formatSeconds(stats.duration_ms)} />
           <Stat label={t("trace.stat.tokens")} val={formatTokens(stats.tokens_in, stats.tokens_out)} />
+          <Stat label={t("trace.stat.cost")} val={formatCost(stats.cost_usd)} />
           <Stat label={t("trace.stat.findings")} val={stats.findings} />
         </div>
       </TraceSection>
@@ -85,6 +106,9 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
         )}
         {trace.prompt_assembly.callers != null && (
           <PromptBlock label={t("trace.prompt.callers")} text={trace.prompt_assembly.callers} color={PROMPT_COLORS.callers} />
+        )}
+        {trace.prompt_assembly.intent != null && (
+          <PromptBlock label={t("trace.prompt.intent")} text={trace.prompt_assembly.intent} color={PROMPT_COLORS.intent} />
         )}
         <PromptBlock label={t("trace.prompt.user")} text={trace.prompt_assembly.user} color={PROMPT_COLORS.user} />
       </TraceSection>

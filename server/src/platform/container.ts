@@ -25,6 +25,26 @@ import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
+import type { SkillsRepository } from '../modules/skills/repository.js';
+import { DrizzleSkillsRepository } from '../modules/skills/repository.drizzle.js';
+import type { SkillUrlFetcher } from '../modules/skills/url-fetcher.js';
+import { HttpSkillUrlFetcher } from '../modules/skills/url-fetcher.http.js';
+import type { ConventionsRepository } from '../modules/conventions/repository.js';
+import { DrizzleConventionsRepository } from '../modules/conventions/repository.drizzle.js';
+import type { SmartDiffRepository } from '../modules/smart-diff/repository.js';
+import { DrizzleSmartDiffRepository } from '../modules/smart-diff/repository.drizzle.js';
+import type { BlastRepository } from '../modules/blast/repository.js';
+import { DrizzleBlastRepository } from '../modules/blast/repository.drizzle.js';
+import type { ContextRepository } from '../modules/project-context/repository.js';
+import { DrizzleContextRepository } from '../modules/project-context/repository.drizzle.js';
+import type { OnboardingRepository } from '../modules/onboarding/repository.js';
+import { DrizzleOnboardingRepository } from '../modules/onboarding/repository.drizzle.js';
+import type { BriefRepository } from '../modules/brief/repository.js';
+import { DrizzleBriefRepository } from '../modules/brief/repository.drizzle.js';
+import type { BriefSources } from '../modules/brief/sources.js';
+import { NodeBriefSources } from '../modules/brief/sources.node.js';
+import type { EvalRepository } from '../modules/eval/repository.js';
+import { DrizzleEvalRepository } from '../modules/eval/repository.drizzle.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -51,6 +71,11 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  contextRepo?: ContextRepository;
+  onboardingRepo?: OnboardingRepository;
+  briefRepo?: BriefRepository;
+  briefSources?: BriefSources;
+  evalRepo?: EvalRepository;
 }
 
 export class Container {
@@ -72,6 +97,16 @@ export class Container {
   // `container.agentsRepo` instead of reaching into another module's folder.
   private _agentsRepo?: AgentsRepository;
   private _reviewRepo?: ReviewRepository;
+  private _skillsRepo?: SkillsRepository;
+  private _skillUrlFetcher?: SkillUrlFetcher;
+  private _conventionsRepo?: ConventionsRepository;
+  private _smartDiffRepo?: SmartDiffRepository;
+  private _blastRepo?: BlastRepository;
+  private _contextRepo?: ContextRepository;
+  private _onboardingRepo?: OnboardingRepository;
+  private _briefRepo?: BriefRepository;
+  private _briefSources?: BriefSources;
+  private _evalRepo?: EvalRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -94,6 +129,51 @@ export class Container {
 
   get agentsRepo(): AgentsRepository {
     return (this._agentsRepo ??= new AgentsRepository(this.db));
+  }
+
+  get skillsRepo(): SkillsRepository {
+    return (this._skillsRepo ??= new DrizzleSkillsRepository(this.db));
+  }
+
+  get skillUrlFetcher(): SkillUrlFetcher {
+    return (this._skillUrlFetcher ??= new HttpSkillUrlFetcher());
+  }
+
+  get conventionsRepo(): ConventionsRepository {
+    return (this._conventionsRepo ??= new DrizzleConventionsRepository(this.db));
+  }
+
+  get smartDiffRepo(): SmartDiffRepository {
+    return (this._smartDiffRepo ??= new DrizzleSmartDiffRepository(this.db));
+  }
+
+  get blastRepo(): BlastRepository {
+    return (this._blastRepo ??= new DrizzleBlastRepository(this.db));
+  }
+
+  get contextRepo(): ContextRepository {
+    if (this.overrides.contextRepo) return this.overrides.contextRepo;
+    return (this._contextRepo ??= new DrizzleContextRepository(this.db));
+  }
+
+  get onboardingRepo(): OnboardingRepository {
+    if (this.overrides.onboardingRepo) return this.overrides.onboardingRepo;
+    return (this._onboardingRepo ??= new DrizzleOnboardingRepository(this.db));
+  }
+
+  get briefRepo(): BriefRepository {
+    if (this.overrides.briefRepo) return this.overrides.briefRepo;
+    return (this._briefRepo ??= new DrizzleBriefRepository(this.db));
+  }
+
+  get briefSources(): BriefSources {
+    if (this.overrides.briefSources) return this.overrides.briefSources;
+    return (this._briefSources ??= new NodeBriefSources(this));
+  }
+
+  get evalRepo(): EvalRepository {
+    if (this.overrides.evalRepo) return this.overrides.evalRepo;
+    return (this._evalRepo ??= new DrizzleEvalRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {

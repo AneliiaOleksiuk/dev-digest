@@ -1,14 +1,13 @@
 import type { CSSProperties } from "react";
 
 export const s = {
-  descriptionBox: {
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    background: "var(--bg-elevated)",
-    padding: 18,
-    fontSize: 14,
-    color: "var(--text-secondary)",
-    whiteSpace: "pre-wrap",
-    lineHeight: 1.55,
+  // Intent | Blast side-by-side on desktop; stacks under ~380px (design mock).
+  intentBlastRow: {
+    display: "grid",
+    // min(..., 100%) lets columns shrink below 380px so long mono paths
+    // don't force the Blast card wider than the viewport.
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(380px, 100%), 1fr))",
+    gap: 20,
+    alignItems: "start",
   } satisfies CSSProperties,
 } as const;

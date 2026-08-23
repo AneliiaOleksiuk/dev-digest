@@ -15,6 +15,7 @@ aliases, not published modules):
 | `client/`        | `@devdigest/web`            | Next.js 15 web app (the studio)                       | 3000 |
 | `reviewer-core/` | `@devdigest/reviewer-core`  | Pure review engine: diff → prompt → LLM → findings    | —    |
 | `e2e/`           | `@devdigest/e2e`            | Deterministic browser e2e (agent-browser)             | —    |
+| `mcp/`           | `@devdigest/mcp`            | stdio MCP server (review tools) + pre-push CLI (`devdigest review`) | —    |
 | `server/src/vendor/shared` | `@devdigest/shared` | Zod contracts shared across every package             | —    |
 
 `repo-intel` (the codebase indexer that powers the **Indexed** badge and feeds
@@ -33,6 +34,9 @@ flowchart LR
     WEB -->|"REST /repos /pulls /agents /runs …"| API
     API --> PG
   end
+
+  MCP["mcp/ · stdio server"] -->|"REST"| API
+  CLI["mcp/ · devdigest CLI<br/>(pre-push, no server needed)"] -->|"in-process"| ENGINE
 
   CLONE["git clone (add repo)"] --> INDEX["repo-intel<br/>index symbols + import graph<br/>→ repo map"]
   API --> CLONE
@@ -131,6 +135,10 @@ cd ../client && pnpm install && pnpm dev               # web on :3000
 `server/`: `dev` · `build` · `db:migrate` · `db:seed` · `db:generate` · `test` · `typecheck`
 (unit/integration split: `pnpm exec vitest run --exclude '**/*.it.test.ts'` / `pnpm exec vitest run .it.test`)
 `client/`: `dev` · `build` · `start` · `test` · `typecheck`
+
+Lesson self-check: `./scripts/verify-l03.sh` proves L03 (Intent layer · Smart
+Diff, see the table above) still compiles and its tests still pass — see
+[`TESTING.md`](TESTING.md#running-locally) for what it runs.
 
 ## Testing & CI
 

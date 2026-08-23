@@ -1,0 +1,73 @@
+{
+  "skill_name": "dependency-checker",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "full-audit-report",
+      "prompt": "Зроби повний аудит залежностей проекту — розмір, застарілі пакети, вразливості — і збережи звіт",
+      "expected_output": "A structured dependency report (executive summary, per-package inventory, internal dependency diagram, size ranking, version consistency, outdated deps, security advisories, drift flags, prioritized recommendations) covering all 6 packages, written to chat and to docs/reports/dependency-report-<date>.md",
+      "files": [],
+      "expectations": [
+        "The response covers all 6 packages: client, server, reviewer-core, mcp, e2e, evals",
+        "The response includes a mermaid diagram of internal package dependencies",
+        "The response reports installed size (bytes/MB) for at least one package, not just a vague estimate",
+        "The response flags that mcp and e2e use npm (package-lock.json) even though AGENTS.md's text claims only reviewer-core is on npm",
+        "The response identifies @devdigest/shared and/or @devdigest/ui as hand-mirrored src/vendor copies (not live imports) and calls out the drift risk",
+        "The response ends with a prioritized, numbered list of recommendations",
+        "A dependency report file was written under docs/reports/ in the real repo"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "dependency-diagram-drift",
+      "prompt": "Намалюй схему залежностей між нашими пакетами client/server/mcp/reviewer-core і поясни, де в нас справжні залежності, а де просто скопійований код",
+      "expected_output": "A mermaid diagram distinguishing live tsconfig path-alias imports (solid edges) from hand-mirrored src/vendor copies like @devdigest/shared and @devdigest/ui (dashed edges, explicitly called out as drift-prone), plus a plain-language explanation",
+      "files": [],
+      "expectations": [
+        "The response includes a mermaid diagram",
+        "The diagram or its explanation visually or textually distinguishes live tsconfig path-alias imports from hand-mirrored vendor copies",
+        "The response explicitly names @devdigest/shared and/or @devdigest/ui as copied code, not a live import",
+        "The response explains that the mirrored copies have no sync script and can silently drift apart",
+        "The response correctly shows both server and mcp depending on reviewer-core via a tsconfig path alias"
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "new-dependency-decision",
+      "prompt": "Я хочу додати lodash в server — перевір спочатку, чи ми вже маємо щось схоже і наскільки це роздує розмір node_modules",
+      "expected_output": "A check of server's existing dependencies for lodash/underscore-like utilities, an estimate or measurement of how much lodash would add to server's installed size, and a recommendation",
+      "files": [],
+      "expectations": [
+        "The response checks server's existing dependencies for a lodash-like utility library before recommending anything",
+        "The response gives a concrete size figure (bytes/KB/MB) for lodash's footprint, not just a vague 'it's small' claim",
+        "The response gives an explicit recommendation (add it / don't / use an alternative)",
+        "The response scopes the check to the server package specifically, not client or another package"
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "pr-diff-duplicate-github-client",
+      "prompt": "У гілці для нового модуля `pr-labels` (синхронізація GitHub-лейблів для PR) я додав у `server/package.json` такі нові рядки в `dependencies` (решта файлу без змін):\n\n```diff\n   \"dependencies\": {\n     \"@anthropic-ai/sdk\": \"^0.33.1\",\n     \"@ast-grep/napi\": \"0.43.0\",\n+    \"@octokit/rest\": \"^21.0.2\",\n     \"@fastify/autoload\": \"^6.0.3\",\n     \"@fastify/cors\": \"^10.0.2\",\n     \"@fastify/helmet\": \"^13.0.2\",\n     \"@fastify/rate-limit\": \"^11.0.0\",\n     \"@vscode/ripgrep\": \"^1.15.9\",\n     \"dependency-cruiser\": \"^17.4.3\",\n     \"dotenv\": \"^16.4.7\",\n     \"drizzle-orm\": \"^0.38.3\",\n     \"fastify\": \"^5.2.0\",\n     \"fastify-sse-v2\": \"^4.2.1\",\n     \"fastify-type-provider-zod\": \"^4.0.2\",\n     \"graphology\": \"^0.26.0\",\n     \"graphology-metrics\": \"^2.4.0\",\n     \"js-tiktoken\": \"^1.0.21\",\n+    \"moment\": \"^2.30.1\",\n+    \"node-fetch\": \"^3.3.2\",\n     \"octokit\": \"^4.0.3\",\n     \"openai\": \"^4.77.0\",\n     \"p-queue\": \"^8.0.1\",\n     \"postgres\": \"^3.4.5\",\n     \"simple-git\": \"^3.27.0\",\n     \"zod\": \"^3.24.1\"\n   },\n```\n\n`pr-labels/service.ts` uses `@octokit/rest`'s `Octokit` class directly for the GitHub calls, `node-fetch` to post a webhook ping, and `moment` to format the label-sync timestamp for a log line. Перевір цей diff перед мержем — чи є тут дублювання або зайве роздуття.",
+      "expected_output": "A review that (1) flags @octokit/rest as a duplicate of the octokit package already in server's dependencies (octokit already re-exports the Octokit REST client), citing the existing pinned version, (2) flags node-fetch as unnecessary given the repo's Node >=22 requirement (AGENTS.md) which already provides native fetch, (3) explicitly checks all 6 packages' package.json files (not just server) for an existing date-formatting library before concluding moment adds no duplicate, (4) gives an explicit per-package keep/reject verdict for all three additions rather than one blanket comment",
+      "files": [],
+      "expectations": [
+        "The response identifies that server/package.json already depends on `octokit` (citing its actual pinned version, ^4.0.3) and explains that octokit already bundles/re-exports the same REST client that @octokit/rest provides, making @octokit/rest a duplicate rather than a new capability",
+        "The response flags `node-fetch` as unnecessary by citing this repo's own documented Node >=22 requirement (AGENTS.md's 'Stack: Node >=22'), which already provides a native global fetch, not just a generic 'you might not need this' comment",
+        "The response explicitly checks all 6 packages (client, server, reviewer-core, mcp, e2e, evals), not just server, for an existing date-formatting dependency (moment/dayjs/date-fns/luxon) before concluding moment doesn't duplicate anything -- naming the packages checked, not just asserting 'nothing similar exists'",
+        "The response gives an explicit per-package keep/reject verdict for all three additions (not one combined verdict for the whole diff) -- at minimum rejecting @octokit/rest and node-fetch by name"
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "pr-diff-clean-no-issue-negative-control",
+      "prompt": "У гілці для нового модуля `request-ids` (генерація унікальних ідентифікаторів запитів у mcp-сервері) я додав у `mcp/package.json` один новий рядок в `dependencies` (решта файлу без змін):\n\n```diff\n   \"dependencies\": {\n     \"@modelcontextprotocol/sdk\": \"^1.30.0\",\n+    \"ulid\": \"^2.3.0\",\n     \"zod\": \"^3.24.1\"\n   },\n```\n\nЦе єдина зміна в package.json для цього PR. Перевір, чи все ок з цим додаванням перед тим, як мержити.",
+      "expected_output": "A review that correctly finds no real problem: confirms mcp has no existing ULID/UUID-generation dependency being duplicated, reports ulid's real (small) installed size, and gives an approve/no-blocking-issue verdict instead of inventing a duplicate or bloat concern",
+      "files": [],
+      "expectations": [
+        "The response does not claim mcp already has an existing ID-generation dependency (UUID/ULID/nanoid-like) that `ulid` duplicates -- mcp's actual dependencies are only @modelcontextprotocol/sdk and zod, so there is nothing to flag as a duplicate here",
+        "The response reports a real, small installed-size figure for `ulid` (on the order of single-digit-to-tens of KB) rather than mischaracterizing it as a bloat or heavy-dependency concern",
+        "The response's overall verdict is an approval or 'no blocking issue' (not a rejection or a fabricated duplication/bloat warning), since this diff has no actual problem to catch"
+      ]
+    }
+  ]
+}

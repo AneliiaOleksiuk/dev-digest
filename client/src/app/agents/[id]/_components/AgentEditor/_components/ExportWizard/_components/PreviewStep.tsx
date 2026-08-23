@@ -4,7 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Textarea } from "@devdigest/ui";
 import type { CiFile } from "@/lib/types";
-import { MEMORY_PATH, WORKFLOW_PATH } from "../helpers";
+import { isMemoryFile, isWorkflowFile } from "../helpers";
 import { s } from "../styles";
 
 /**
@@ -65,7 +65,7 @@ export function PreviewStep({
           <div style={s.fileContent}>
             {!selected ? (
               <p style={s.hintText}>{t("exportWizard.selectFilePrompt")}</p>
-            ) : selected.path === WORKFLOW_PATH ? (
+            ) : isWorkflowFile(selected) ? (
               <>
                 <Textarea value={selected.contents} onChange={onEditWorkflow} rows={18} mono />
                 <p style={s.note}>{t("exportWizard.workflowEditHint")}</p>
@@ -73,7 +73,7 @@ export function PreviewStep({
             ) : (
               <>
                 {selected.preview_omitted && <p style={s.note}>{t("exportWizard.runnerFileNote")}</p>}
-                {selected.path === MEMORY_PATH && <p style={s.note}>{t("exportWizard.memoryFileNote")}</p>}
+                {isMemoryFile(selected) && <p style={s.note}>{t("exportWizard.memoryFileNote")}</p>}
                 <pre style={s.pre}>{selected.contents}</pre>
               </>
             )}

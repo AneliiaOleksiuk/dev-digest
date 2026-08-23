@@ -10,7 +10,7 @@ import { ConfigureStep } from "./_components/ConfigureStep";
 import { InstallStep } from "./_components/InstallStep";
 import { PreviewStep } from "./_components/PreviewStep";
 import { TargetStep } from "./_components/TargetStep";
-import { buildExportInput, defaultIngestUrl, downloadBlob, isValidRepoRef, WORKFLOW_PATH, type WizardState } from "./helpers";
+import { buildExportInput, defaultIngestUrl, downloadBlob, isValidRepoRef, isWorkflowFile, type WizardState } from "./helpers";
 import { s } from "./styles";
 
 const STEP_KEYS = ["target", "preview", "configure", "install"] as const;
@@ -53,6 +53,7 @@ export function ExportWizard({
   const [ingestUrl, setIngestUrl] = React.useState(initial?.ingest_url ?? defaultIngestUrl());
   const [workflowOverride, setWorkflowOverride] = React.useState<string | null>(null);
   const [files, setFiles] = React.useState<CiFile[] | null>(null);
+  const [ingestSecretName, setIngestSecretName] = React.useState<string | null>(null);
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
   const [tokenAcknowledged, setTokenAcknowledged] = React.useState(false);
 
@@ -67,7 +68,6 @@ export function ExportWizard({
     postAs,
     ingestUrl,
     workflowOverride,
-    replaceExisting: false,
   });
 
   /** The one function that ever calls the Preview mutation — always an
@@ -83,7 +83,8 @@ export function ExportWizard({
       {
         onSuccess: (data) => {
           setFiles(data.files);
-          setSelectedPath((prev) => prev ?? WORKFLOW_PATH);
+          setIngestSecretName(data.ingest_secret_name);
+          setSelectedPath((prev) => prev ?? data.files.find(isWorkflowFile)?.path ?? null);
         },
       },
     );
@@ -107,11 +108,11 @@ export function ExportWizard({
 
   const editWorkflow = (text: string) => {
     setWorkflowOverride(text);
-    setFiles((prev) => (prev ? prev.map((f) => (f.path === WORKFLOW_PATH ? { ...f, contents: text } : f)) : prev));
+    setFiles((prev) => (prev ? prev.map((f) => (isWorkflowFile(f) ? { ...f, contents: text } : f)) : prev));
   };
 
-  const doInstall = (replaceExisting = false) => {
-    const input = buildExportInput({ ...currentState(), replaceExisting });
+  const doInstall = () => {
+    const input = buildExportInput(currentState());
     install.mutate(
       { agentId: agent.id, input },
       { onSuccess: () => setTokenAcknowledged(false) },
@@ -186,6 +187,7 @@ export function ExportWizard({
             onPostAsChange={changePostAs}
             ingestUrl={ingestUrl}
             onIngestUrlChange={setIngestUrl}
+            ingestSecretName={ingestSecretName}
           />
         )}
         {step === 3 && (

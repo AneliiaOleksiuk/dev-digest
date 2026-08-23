@@ -2,7 +2,6 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { AgentManifest } from '@devdigest/shared';
 import type { Agent } from '@devdigest/shared';
 import { AppError } from '../../platform/errors.js';
-import { SKILLS_SUBDIR } from './constants.js';
 
 /**
  * `manifest.ts` — field mapping, YAML emission, self-validation for the one
@@ -89,9 +88,16 @@ export function assertManifestRoundTrips(yamlText: string, manifest: AgentManife
 }
 
 /** The skill body verbatim, unchanged — the runner reads
- *  `.devdigest/skills/<slug>.md` files as plain markdown, not YAML/JSON. */
-export function emitSkillFile(skill: OrderedEnabledSkill): { path: string; contents: string } {
-  return { path: `${SKILLS_SUBDIR}/${skill.slug}.md`, contents: skill.body };
+ *  `<skillsDir>/<slug>.md` files as plain markdown, not YAML/JSON.
+ *  `skillsDir` is the CALLER's already-resolved skills directory (SPEC-05:
+ *  `constants.ts`'s `skillsSubdirFor(namespace)` — namespaced or legacy) —
+ *  this file no longer imports `SKILLS_SUBDIR` directly, so the resolved
+ *  layout is threaded down rather than re-derived here. */
+export function emitSkillFile(
+  skill: OrderedEnabledSkill,
+  skillsDir: string,
+): { path: string; contents: string } {
+  return { path: `${skillsDir}/${skill.slug}.md`, contents: skill.body };
 }
 
 /** `.devdigest/memory.jsonl` (AC-16, D-5, E-27) — nothing in this repo reads

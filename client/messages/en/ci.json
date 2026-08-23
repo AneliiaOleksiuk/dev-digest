@@ -1,7 +1,7 @@
 {
   "runs": {
     "emptyTitle": "No CI runs yet",
-    "emptyBody": "Runs show up here once a CI job can actually reach this studio — the target repo needs OPENROUTER_API_KEY, GITHUB_TOKEN and DEVDIGEST_INGEST_TOKEN set as Actions secrets, and this studio's ingest URL must be reachable from GitHub's runners. A repo missing any of those reviews every PR and reports nothing.",
+    "emptyBody": "Runs show up here once a CI job can actually reach this studio — the target repo needs OPENROUTER_API_KEY, GITHUB_TOKEN and this agent's own ingest secret (shown on its CI tab) set as Actions secrets, and this studio's ingest URL must be reachable from GitHub's runners. A repo missing any of those reviews every PR and reports nothing.",
     "title": "CI Runs",
     "subtitle": "Agent reviews executed inside CI · not local runs",
     "autoRefresh": "auto-refresh on",
@@ -104,7 +104,7 @@
       "openrouterStatus": "You add this",
       "githubTokenName": "GITHUB_TOKEN",
       "githubTokenStatus": "Auto-provided by GitHub Actions",
-      "ingestTokenName": "DEVDIGEST_INGEST_TOKEN",
+      "ingestTokenName": "{secretName}",
       "ingestTokenStatus": "DevDigest generates this at Install — you paste it in"
     },
     "providerNotice": "This agent's studio provider is {provider}, but the CI runner always calls OpenRouter — the model string \"{model}\" will be sent to OpenRouter verbatim.",
@@ -119,15 +119,13 @@
     "zipDownloading": "Preparing zip…",
     "zipDownloaded": "Downloaded devdigest-ci.zip",
     "setupDocsLink": "Setup documentation",
-    "conflictTitle": "A different agent is already installed here",
-    "conflictConfirm": "Replace existing installation",
     "installFailed": "Install failed",
     "prReady": "Pull request ready",
     "viewPr": "View pull request",
     "close": "Close",
     "tokenBlock": {
       "title": "DevDigest ingest token",
-      "warning": "Shown once — copy it now and paste it into the repo's Actions secrets as DEVDIGEST_INGEST_TOKEN. It cannot be shown again after this dialog closes.",
+      "warning": "Shown once — copy it now and paste it into the repo's Actions secrets as {secretName}. It cannot be shown again after this dialog closes.",
       "copy": "Copy",
       "copied": "Copied",
       "close": "I've copied it — Close"
@@ -142,6 +140,7 @@
     "noRepo": "Connect a repository first",
     "empty": "Not deployed to CI yet. Use “Publish to CI” to open a PR that adds the workflow + agent config.",
     "installed": "installed {date}",
+    "ingestSecretLabel": "Ingest secret: {secretName}",
     "emptyTitle": "Not deployed to CI yet",
     "emptyBody": "Export this agent to run automatically on pull requests via GitHub Actions.",
     "addToCi": "+ Add to CI",

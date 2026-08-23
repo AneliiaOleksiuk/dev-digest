@@ -38,25 +38,6 @@ export class DrizzleCiRepository implements CiRepository {
     return installations.map((i) => ({ ...i, lastRun: lastRuns.get(i.id) ?? null }));
   }
 
-  async findInstallationByAgentAndRepo(
-    workspaceId: string,
-    agentId: string,
-    repo: string,
-  ): Promise<CiInstallationRow | undefined> {
-    const [row] = await this.db
-      .select({ installation: t.ciInstallations })
-      .from(t.ciInstallations)
-      .innerJoin(t.agents, eq(t.ciInstallations.agentId, t.agents.id))
-      .where(
-        and(
-          eq(t.agents.workspaceId, workspaceId),
-          eq(t.ciInstallations.agentId, agentId),
-          eq(t.ciInstallations.repo, repo),
-        ),
-      );
-    return row ? toInstallationRow(row.installation) : undefined;
-  }
-
   async findInstallationsByRepo(workspaceId: string, repo: string): Promise<CiInstallationRow[]> {
     const rows = await this.db
       .select({ installation: t.ciInstallations })
@@ -84,6 +65,7 @@ export class DrizzleCiRepository implements CiRepository {
         triggers: input.triggers,
         baseBranch: input.baseBranch,
         manifestPath: input.manifestPath,
+        namespace: input.namespace,
         tokenHash: input.tokenHash,
       })
       .onConflictDoUpdate({
@@ -103,7 +85,9 @@ export class DrizzleCiRepository implements CiRepository {
           // requirement for this column.
           manifestPath: input.manifestPath,
           updatedAt: new Date(),
-          // tokenHash intentionally absent — see doc comment above.
+          // tokenHash AND namespace intentionally absent — see
+          // `UpsertInstallationInput.namespace`'s doc comment (repository.ts):
+          // both must be structurally incapable of being rewritten on update.
         },
       })
       .returning();
@@ -291,6 +275,7 @@ function toInstallationRow(row: CiInstallationSelectRow): CiInstallationRow {
     triggers: row.triggers,
     baseBranch: row.baseBranch,
     manifestPath: row.manifestPath,
+    namespace: row.namespace,
     updatedAt: row.updatedAt,
   };
 }

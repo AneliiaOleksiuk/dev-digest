@@ -747,22 +747,38 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   strictly stronger correctness check than unit tests alone for anything
   touching `repository.drizzle.ts`.
 
+- **CORRECTED 2026-08-23 (SPEC-05 session) — the entry below, as originally
+  written during SPEC-04 Phase C, describes a `constantTimeEqual`
+  compare-then-fetch mechanism that a LATER same-day fix-loop iteration
+  (`fix(ci): fix-loop iteration 1 — ingest handshake…`) already replaced
+  before this repo's history moves on to SPEC-05. `modules/ci/service.ts`
+  contains no `constantTimeEqual` and no `timingSafeEqual` call at all as of
+  SPEC-05 — `POST /ci/ingest` now authenticates via a HASH-KEYED DB LOOKUP
+  (`findInstallationByTokenHash`, `WHERE token_hash = $1`): the lookup
+  itself is the authentication (a hash match proves possession of the
+  token), so there is no explicit buffer-vs-buffer comparison to guard with
+  `timingSafeEqual` in the first place — see `service.ts`'s `ingest()`
+  method docstring for the full reasoning (an indexed-column equality check
+  has no attacker-observable early-exit signal to time, unlike a
+  byte-by-byte comparison). The `RangeError`-on-length-mismatch gotcha below
+  is still true of `node:crypto`'s `timingSafeEqual` in general — keep it in
+  mind for any FUTURE call site that does compare two buffers directly — but
+  it no longer describes this module's actual ingest-auth code path. Left
+  the original entry in place, struck through in spirit rather than deleted,
+  so a reader mid-history (e.g. reading Phase C's own commit) isn't
+  confused; do not restore its `modules/ci/service.ts`-specific framing.
 - **`node:crypto`'s `timingSafeEqual` THROWS `RangeError` on a length
-  mismatch instead of returning `false` — always rule out length first
-  (2026-08-23, SPEC-04 Phase C, WI14, `modules/ci/service.ts`'s
-  `constantTimeEqual`).** The naive "constant-time compare" implementation
+  mismatch instead of returning `false` — always rule out length first.**
+  (General `node:crypto` gotcha; the `modules/ci/service.ts`-specific framing
+  this entry originally carried is stale — see the correction immediately
+  above.) The naive "constant-time compare" implementation
   (`a.length === b.length && timingSafeEqual(a, b)`, short-circuit `&&`) is
-  actually fine here specifically because BOTH sides are fixed-length sha256
-  digests in the normal case (32 bytes each) — the length check only ever
-  differs on a corrupt/truncated stored hash, an astronomically rare and
-  non-adversarially-controllable case, so the theoretical timing leak from
-  the short-circuit is not exploitable for this call site. Don't reuse this
-  exact shape for a comparison where an attacker CAN control both operands'
-  length (e.g. comparing two attacker-influenced strings) without
-  re-deriving whether the short-circuit is still safe there. Verified live:
-  a wrong-length or wrong-value presented token both correctly 401 with no
-  throw, no stack trace, and a response body containing neither the token
-  nor the hash.
+  only as safe as the attacker's ability to control an operand's length —
+  fine when both sides are fixed-length digests from a source the attacker
+  doesn't control, NOT fine when an attacker can control either operand's
+  length. Don't reuse this shape for a comparison where an attacker CAN
+  control both operands' length without re-deriving whether the
+  short-circuit is still safe there.
 - **`ci_installations.token_hash` is stored as a lowercase HEX string (via
   `createHash('sha256').update(token,'utf8').digest('hex')`), not the raw
   32-byte digest** (2026-08-23, SPEC-04 Phase C) — the ingest path re-hashes
@@ -1726,3 +1742,60 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   finding 2's fresh-install → replace-conflict → re-export sequence) —
   all test data deleted afterward. No test authorship this session either
   (same explicit user instruction as the original SPEC-04 pass).
+
+- **2026-08-23 (SPEC-05 — multi-agent CI per repo, `docs/plans/spec-05-multi-agent-ci-per-repo.md`).**
+  Implementer pass over `modules/ci/**` + both vendored `eval-ci.ts` copies +
+  a nullable `ci_installations.namespace` migration. Three things worth
+  keeping in mind next time this module (or any multi-worktree session) is
+  touched:
+  1. **When cleaning up a background dev server you started against a
+     shared multi-worktree Postgres, RE-RUN `netstat -ano` immediately
+     before `taskkill` — never reuse a PID value captured earlier in the
+     session.** This session's own item-4 gotcha above (2026-08-23, SPEC-04
+     Phase C) already warns to check the port's actual PID before CURLING
+     it; the same discipline is needed before KILLING one too, and this
+     session didn't apply it symmetrically — it `taskkill /F`'d a PID
+     captured from an EARLIER `netstat` call (believing it was the test
+     server just started on this worktree's `API_PORT`), which by then
+     was actually a DIFFERENT worktree's (`D:\htdocs\devDigest`) `tsx watch`
+     server on port 3001, unrelated to this task. The correct instance
+     (this worktree's, on its own `API_PORT`) was still running under a
+     DIFFERENT PID at that point. Always re-check immediately before a
+     destructive action on a PID, not just before a read.
+  2. **`disambiguate()`'s suffix counting and a "pick an unused slug from a
+     taken set" derivation LOOK like the same problem but aren't —
+     `disambiguate` counts occurrences WITHIN one list it's handed, so
+     `disambiguate([...taken, candidate])` reuses the count of `candidate`'s
+     occurrences in that COMBINED list, which can collide with a suffix
+     ALREADY present in `taken` (e.g. `taken = ['sec', 'sec-2']`, candidate
+     `'sec'` → `disambiguate` yields `'sec-2'` again, since it only sees one
+     prior `'sec'` in the list it was given).** `deriveNamespace`
+     (`helpers.ts`) instead increments a numeric suffix and tests EACH
+     candidate against the taken SET directly (`while (taken.has(...)) n++`)
+     — same `-2`/`-3` suffix SHAPE, different algorithm. Don't reach for
+     "just call the existing disambiguate helper with the taken list
+     prepended" as a shortcut for a taken-SET-membership problem; skim the
+     existing helper's actual counting semantics first.
+  3. **A directory-containment check for a security guard (`path` under
+     `dir`) must compare `path === dir || path.startsWith(dir + '/')`, never
+     a bare `path.startsWith(dir)` or `.includes(dir)`.** Without the
+     trailing-separator boundary, a directory literally named
+     `.devdigest/agents` would appear to "contain" a sibling that merely
+     shares the prefix TEXT (a hypothetical `.devdigest/agents-legacy/...`),
+     which is a different directory entirely. This was the AC-8
+     path-collision guard in `modules/ci/service.ts`'s `isPathInsideDir` —
+     worth the explicit boundary check even though no current namespace
+     value happens to trigger the bug, since namespaces are user-influenced
+     (derived from an agent's display name) and the guard exists precisely
+     to be safe against adversarial-shaped inputs.
+  Manual sanity check (no test authorship — `test-writer` owns that
+  separately): two throwaway tsx scripts against the real dev Postgres, both
+  deleted after use — one exercising `CiService.install()` twice for two
+  DIFFERENT agents on ONE repo (asserting distinct namespaces, no deletion,
+  namespace/token stability across a re-export, and AC-24's refusal of a
+  workflow override aimed at the other installation's namespace), the other
+  hand-inserting a legacy (`namespace: null`) row and confirming it stays
+  byte-identical to the unnamespaced SPEC-04 layout across a re-export while
+  a NEW agent exported to the same repo lands namespaced with zero path
+  collision. All assertions passed; all test rows deleted afterward.
+  `pnpm typecheck`/`arch:check` clean in both `server/` and `client/`.

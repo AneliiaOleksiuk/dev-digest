@@ -1,12 +1,15 @@
 import { Document } from 'yaml';
 import {
   ALLOWED_TRIGGERS,
+  devdigestDirFor,
   FORK_GUARD_EXPR,
+  ingestSecretNameFor,
   NODE_VERSION,
   PERMISSIONS_NO_POST,
   PERMISSIONS_POST,
   PINNED_ACTIONS,
   RUN_COMMAND,
+  workflowNameFor,
 } from './constants.js';
 
 /**
@@ -33,6 +36,18 @@ export interface BuildWorkflowInput {
   postAs: PostAs;
   /** The literal ingest URL baked into the reporting step (Q-8). */
   ingestUrl: string;
+  /**
+   * SPEC-05: this installation's resolved namespace, `null` for legacy
+   * (AC-14). Drives three emitted values, each via `constants.ts`'s
+   * derivations so `workflow-validate.ts` can check a hand-edited override
+   * against the SAME source (Recommendation 2): the top-level `name:`
+   * (`workflowNameFor`, AC-21 — `null` emits no `name:` key at all, AC-16),
+   * the review step's `DEVDIGEST_DIR` env value (`devdigestDirFor`, AC-19 —
+   * `null` emits no `DEVDIGEST_DIR` key at all, leaving the runner's own
+   * `<cwd>/.devdigest` default in force), and the reporting step's ingest
+   * secret reference (`ingestSecretNameFor`, AC-22).
+   */
+  namespace: string | null;
 }
 
 /** Attach `# <version>` as a REAL trailing YAML comment on a mapping value,
@@ -55,12 +70,21 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
   const types = ALLOWED_TRIGGERS.filter((t) => input.triggers.includes(t));
   const permissions = input.postAs === 'none' ? PERMISSIONS_NO_POST : PERMISSIONS_POST;
 
+  const devdigestDir = devdigestDirFor(input.namespace);
+  const ingestSecretName = ingestSecretNameFor(input.namespace);
+  const workflowName = workflowNameFor(input.namespace);
+
   const reviewEnv: Record<string, string> = {
     OPENROUTER_API_KEY: '${{ secrets.OPENROUTER_API_KEY }}',
     GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
     GITHUB_REPOSITORY: '${{ github.repository }}',
     PR_NUMBER: '${{ github.event.pull_request.number }}',
     DEVDIGEST_POST_AS: input.postAs,
+    // AC-19: emitted ONLY for a namespaced installation, on the review step
+    // ONLY — never at workflow or job level (`env:` inherits downward,
+    // which is exactly what `workflow-validate.ts`'s re-validator refuses on
+    // an override).
+    ...(devdigestDir ? { DEVDIGEST_DIR: devdigestDir } : {}),
   };
 
   // Fix (finding 3): `status` is derived from the ARTIFACT's own content,
@@ -114,6 +138,12 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
   ].join('\n');
 
   const workflowObject = {
+    // AC-21/AC-16: `name:` present ONLY for a namespaced installation,
+    // derived from the namespace (never the agent's raw display name) —
+    // omitted entirely for legacy so its check-run identity stays
+    // byte-identical to SPEC-04's, since a changed workflow name would
+    // silently invalidate an already-configured required status check.
+    ...(workflowName ? { name: workflowName } : {}),
     on: { pull_request: { types } },
     permissions,
     jobs: {
@@ -143,7 +173,11 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
             'continue-on-error': true,
             env: {
               INGEST_URL: input.ingestUrl,
-              INGEST_TOKEN: '${{ secrets.DEVDIGEST_INGEST_TOKEN }}',
+              // AC-22: this installation's OWN secret — namespaced
+              // installations each reference a distinct
+              // `DEVDIGEST_INGEST_TOKEN_<NAMESPACE>`; legacy keeps the bare
+              // `DEVDIGEST_INGEST_TOKEN` (AC-14).
+              INGEST_TOKEN: `\${{ secrets.${ingestSecretName} }}`,
               REPO: '${{ github.repository }}',
               HEAD_SHA: '${{ github.event.pull_request.head.sha }}',
               PR_NUMBER: '${{ github.event.pull_request.number }}',

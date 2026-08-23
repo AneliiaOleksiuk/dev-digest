@@ -4,7 +4,7 @@ import { CiExportInput, CiRunFilters } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
-import { EXPORT_RATE_LIMIT, INGEST_RATE_LIMIT, MAX_INGEST_BODY_BYTES } from './constants.js';
+import { EXPORT_RATE_LIMIT, ingestSecretNameFor, INGEST_RATE_LIMIT, MAX_INGEST_BODY_BYTES } from './constants.js';
 import { parseRepoRef } from './helpers.js';
 import { CiService } from './service.js';
 
@@ -81,16 +81,28 @@ export default async function ciRoutes(appBase: FastifyInstance) {
         throw new ValidationError('repo must be in the exact form "owner/name".');
       }
 
-      const files = await service.generateFiles(workspaceId, req.params.id, req.body);
+      // SPEC-05 Recommendation 6: resolve the SAME layout Install would (an
+      // existing installation's own persisted namespace, or a freshly
+      // derived candidate for a not-yet-installed agent) so Preview's files
+      // and secret name can never drift from what Install actually commits.
+      const { layout } = await service.resolveLayout(workspaceId, req.params.id, req.body.repo);
+      const files = await service.generateFiles(workspaceId, req.params.id, req.body, layout);
 
-      // AC-74, A09 — repository, agent id, file count, outcome. NEVER file
-      // contents, the system prompt, skill bodies or the request body.
+      // AC-74, A09 — repository, agent id, namespace, file count, outcome.
+      // NEVER file contents, the system prompt, skill bodies or the request
+      // body.
       req.log.info(
-        { repo: req.body.repo, agentId: req.params.id, fileCount: files.length, outcome: 'preview' },
+        {
+          repo: req.body.repo,
+          agentId: req.params.id,
+          namespace: layout.namespace,
+          fileCount: files.length,
+          outcome: 'preview',
+        },
         'ci export preview generated',
       );
 
-      return { files };
+      return { files, ingest_secret_name: ingestSecretNameFor(layout.namespace) };
     },
   );
 

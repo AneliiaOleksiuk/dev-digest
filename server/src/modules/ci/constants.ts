@@ -18,6 +18,69 @@ export const SKILLS_SUBDIR = `${DEVDIGEST_DIR}/skills`;
 export const RUNNER_PATH = `${DEVDIGEST_DIR}/runner/index.js`;
 export const MEMORY_PATH = `${DEVDIGEST_DIR}/memory.jsonl`;
 export const WORKFLOW_PATH = '.github/workflows/devdigest-review.yml';
+export const INGEST_SECRET_NAME_LEGACY = 'DEVDIGEST_INGEST_TOKEN';
+
+// ---- namespaced-path derivations (SPEC-05) ----------------------------------
+//
+// Every namespaced path this module ever emits or checks is produced by ONE
+// of the functions below, never a `.devdigest/`/`.github/workflows/` literal
+// written out anywhere else (Recommendation 2's "single source of truth",
+// extended). `namespace: string | null` — `null` means "legacy" (AC-14) and
+// every function below returns the EXISTING SPEC-04 literal unchanged in
+// that case; a non-null namespace (already `slugify`'s hardened output —
+// `helpers.ts`'s `deriveNamespace`) resolves the SPEC-05 layout. One-way
+// import direction: this file may not import `helpers.ts` (namespace
+// DERIVATION — name to slug — lives there; path SHAPE lives here), and
+// `helpers.ts` may not import these (enforced by review, not tooling).
+//
+// `RUNNER_PATH` and `RUN_COMMAND` are DELIBERATELY NOT parameterised here
+// (AC-6, AC-20) — the runner bundle stays one shared file per repository
+// regardless of how many namespaced installations read it.
+
+export function agentsSubdirFor(namespace: string | null): string {
+  return namespace ? `${DEVDIGEST_DIR}/${namespace}/agents` : AGENTS_SUBDIR;
+}
+
+export function skillsSubdirFor(namespace: string | null): string {
+  return namespace ? `${DEVDIGEST_DIR}/${namespace}/skills` : SKILLS_SUBDIR;
+}
+
+export function memoryPathFor(namespace: string | null): string {
+  return namespace ? `${DEVDIGEST_DIR}/${namespace}/memory.jsonl` : MEMORY_PATH;
+}
+
+export function workflowPathFor(namespace: string | null): string {
+  return namespace ? `.github/workflows/devdigest-review-${namespace}.yml` : WORKFLOW_PATH;
+}
+
+/** The runner's `DEVDIGEST_DIR` env value (AC-19) — `null` for legacy, which
+ *  means "emit no `DEVDIGEST_DIR` key at all", leaving the runner's own
+ *  `<cwd>/.devdigest` default in force (`agent-runner/src/index.ts:31`). */
+export function devdigestDirFor(namespace: string | null): string | null {
+  return namespace ? `${DEVDIGEST_DIR}/${namespace}` : null;
+}
+
+/** `DEVDIGEST_INGEST_TOKEN_<NAMESPACE>` (AC-25, AC-22) — uppercased,
+ *  `-` → `_`. Because `slugify` emits only `[a-z0-9-]`, no `_` can survive
+ *  into a namespace, so this mapping cannot collide two distinct namespaces
+ *  onto one secret name. The `DEVDIGEST_INGEST_TOKEN_` prefix guarantees
+ *  GitHub's Actions-secret naming rules (alphanumerics/underscores only, not
+ *  digit-leading, not `GITHUB_`-prefixed) regardless of the namespace. */
+export function ingestSecretNameFor(namespace: string | null): string {
+  return namespace
+    ? `DEVDIGEST_INGEST_TOKEN_${namespace.toUpperCase().replace(/-/g, '_')}`
+    : INGEST_SECRET_NAME_LEGACY;
+}
+
+/** The namespaced workflow's top-level `name:` (AC-21) — `null` for legacy,
+ *  which means "emit no `name:` key at all" (AC-16 — a changed workflow name
+ *  changes the check name and can silently invalidate a required status
+ *  check already configured in the target repo's branch protection). Drawn
+ *  from the SAME filename-safe charset as the namespace itself (the slug
+ *  charset), never the agent's raw display name. */
+export function workflowNameFor(namespace: string | null): string | null {
+  return namespace ? `devdigest-review-${namespace}` : null;
+}
 
 // ---- the review invocation (AC-25, D-2, D-14) -------------------------------
 
@@ -99,8 +162,13 @@ export const NODE_VERSION = '22';
 export const CI_BRANCH = 'devdigest/ci';
 
 /** Bumped BY HAND whenever `workflow.ts` changes what it emits (AC-18) — lets
- *  an installation row record which generator version produced its workflow. */
-export const WORKFLOW_VERSION = 1;
+ *  an installation row record which generator version produced its workflow.
+ *  Bumped to 2 for SPEC-05: a namespaced installation's workflow now emits
+ *  `name:` and a namespace-scoped `DEVDIGEST_DIR`/ingest-secret reference; a
+ *  legacy installation's re-export emits byte-identical YAML but records `2`
+ *  too — harmless, since the CI tab's drift banner compares `agent_version`,
+ *  not `workflow_version` (`CiTab/helpers.ts`'s `isDrifted`). */
+export const WORKFLOW_VERSION = 2;
 
 /** >= 256 bits (AC-50). */
 export const INGEST_TOKEN_BYTES = 32;

@@ -50,6 +50,14 @@ export interface CiInstallationRow {
    * bug this closes.
    */
   manifestPath: string;
+  /**
+   * SPEC-05: `NULL` means legacy — an installation created before namespacing
+   * existed, frozen on its unnamespaced SPEC-04 layout forever (AC-14, never
+   * migrated/re-namespaced/re-keyed). A non-null value is this installation's
+   * OWN namespace, resolved once at first install and reused verbatim on
+   * every later re-export (AC-4), exactly like `manifestPath` above.
+   */
+  namespace: string | null;
   updatedAt: Date;
 }
 
@@ -86,6 +94,21 @@ export interface UpsertInstallationInput {
    *  installation / reused from `existing.manifestPath`) before calling
    *  this method — this field just persists whatever was resolved. */
   manifestPath: string;
+  /**
+   * SPEC-05: this installation's resolved namespace (`null` for legacy) —
+   * the caller has already resolved it (fresh `deriveNamespace` output for
+   * a brand-new installation, or reused verbatim from an existing row) BEFORE
+   * calling this method, same pattern as `manifestPath` above.
+   *
+   * On an UPDATE (the row already exists), the Drizzle adapter's
+   * `onConflictDoUpdate` `set` clause deliberately OMITS `namespace`
+   * entirely — like `tokenHash`, it must be structurally incapable of being
+   * rewritten by a re-export, however many times the caller passes a
+   * different value (AC-4, AC-14). Callers should still pass the existing
+   * row's own namespace on an update, for clarity, but the guarantee does
+   * not depend on that discipline.
+   */
+  namespace: string | null;
   /**
    * Used ONLY when this call performs a genuine INSERT (no existing row for
    * this `(agentId, repo)` pair). On an UPDATE (the row already exists), the
@@ -171,16 +194,15 @@ export interface CiRepository {
    *  last-run summary (AC-43). */
   listInstallationsForAgent(workspaceId: string, agentId: string): Promise<CiInstallationWithLastRun[]>;
 
-  /** The installation for this exact `(agent, repo)` pair, if any — drives
-   *  the "update, keep the token" branch of Install (AC-38). */
-  findInstallationByAgentAndRepo(
-    workspaceId: string,
-    agentId: string,
-    repo: string,
-  ): Promise<CiInstallationRow | undefined>;
-
-  /** Every installation for this repo in this workspace, regardless of
-   *  agent — drives AC-39's different-agent conflict check. */
+  /**
+   * Every installation for this repo in this workspace, regardless of
+   * agent (AC-37's workspace-scoped join). SPEC-05's `CiService.resolveLayout`
+   * is the ONE caller — it partitions the result into "this agent's own row,
+   * if any" (the old `findInstallationByAgentAndRepo`'s job, now folded into
+   * this single query rather than a second round trip) and "every OTHER
+   * installation on the repo" (the AC-8 path-collision guard's input, and the
+   * taken-namespace set for a brand-new installation).
+   */
   findInstallationsByRepo(workspaceId: string, repo: string): Promise<CiInstallationRow[]>;
 
   /** Create-or-update keyed on the `(agent_id, repo)` unique index. See

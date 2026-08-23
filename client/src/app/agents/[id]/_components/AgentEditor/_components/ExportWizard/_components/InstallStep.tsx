@@ -4,7 +4,6 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { Button, Card } from "@devdigest/ui";
-import { ApiError } from "@/lib/api";
 import type { CiExport, CiExportInputBody } from "@/lib/types";
 import { s } from "../styles";
 
@@ -21,12 +20,17 @@ function errMsg(err: unknown): string {
 }
 
 /**
- * Install step (AC-34..AC-41, AC-50) — PR vs. zip, the AC-39 conflict
- * confirmation, a setup-docs link, and the one-time ingest token display —
- * the highest-stakes moment in this wizard: shown exactly once, with a
- * copy affordance and a warning that must be visible before the dialog can
- * be dismissed (the Modal wrapping this step omits its close [X] while
- * that warning is unacknowledged, see ExportWizard.tsx).
+ * Install step (AC-34..AC-41, AC-50, SPEC-05 AC-28/AC-32) — PR vs. zip, a
+ * setup-docs link, and the one-time ingest token display — the
+ * highest-stakes moment in this wizard: shown exactly once, with a copy
+ * affordance and a warning that must be visible before the dialog can be
+ * dismissed (the Modal wrapping this step omits its close [X] while that
+ * warning is unacknowledged, see ExportWizard.tsx).
+ *
+ * SPEC-05 AC-11/AC-12/UX-1: a different agent already installed on this
+ * repo is no longer a conflict on the `gha` path — this step no longer
+ * renders a replace-existing confirmation; `install` either succeeds or
+ * fails for an ordinary reason.
  */
 export function InstallStep({
   repo,
@@ -42,14 +46,13 @@ export function InstallStep({
   filesCount: number;
   install: InstallMutation;
   zip: ZipMutation;
-  onInstall: (replaceExisting?: boolean) => void;
+  onInstall: () => void;
   onZip: () => void;
   onAcknowledgeToken: () => void;
   onClose: () => void;
 }) {
   const t = useTranslations("ci");
   const [copied, setCopied] = React.useState(false);
-  const conflict = install.isError && install.error instanceof ApiError && install.error.status === 409;
 
   if (install.isSuccess) {
     const data = install.data;
@@ -81,8 +84,12 @@ export function InstallStep({
             </div>
             {/* AC-50/UX-9 — this warning must be visible before the dialog
                can be dismissed; ExportWizard.tsx withholds Modal's onClose
-               until this exact button is pressed. */}
-            <p style={s.warnText}>{t("exportWizard.tokenBlock.warning")}</p>
+               until this exact button is pressed. SPEC-05 AC-28/UX-3: names
+               the EXACT secret to paste under — this installation's own
+               `ingest_secret_name`, never the bare literal. */}
+            <p style={s.warnText}>
+              {t("exportWizard.tokenBlock.warning", { secretName: data.installation.ingest_secret_name })}
+            </p>
             <Button kind="primary" onClick={onAcknowledgeToken}>
               {t("exportWizard.tokenBlock.close")}
             </Button>
@@ -102,17 +109,7 @@ export function InstallStep({
         {t("exportWizard.setupDocsLink")}
       </a>
 
-      {conflict && (
-        <div style={s.conflictBox}>
-          <div style={s.conflictTitle}>{t("exportWizard.conflictTitle")}</div>
-          <p style={s.note}>{errMsg(install.error)}</p>
-          <Button kind="danger" onClick={() => onInstall(true)} loading={install.isPending}>
-            {t("exportWizard.conflictConfirm")}
-          </Button>
-        </div>
-      )}
-
-      {install.isError && !conflict && (
+      {install.isError && (
         <p style={s.errorText}>
           {t("exportWizard.installFailed")}: {errMsg(install.error)}
         </p>

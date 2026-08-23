@@ -1,12 +1,24 @@
 import { API_BASE } from "@/lib/api";
-import type { CiExportInputBody } from "@/lib/types";
+import type { CiExportInputBody, CiFile } from "@/lib/types";
 
-/** The exact fixed paths AC-9 requires (Simplicity constraints: no target
- *  abstraction, so these are literals here too — the server is still the
- *  real source of truth, this only lets the wizard recognize which
- *  returned file is which for its own display rules). */
-export const WORKFLOW_PATH = ".github/workflows/devdigest-review.yml";
-export const MEMORY_PATH = ".devdigest/memory.jsonl";
+/**
+ * SPEC-05: there is no longer one fixed workflow filename or memory path —
+ * each installation's files live under its OWN namespace
+ * (`.devdigest/<ns>/…`, `.github/workflows/devdigest-review-<ns>.yml`), or
+ * under the unnamespaced SPEC-04 paths for a legacy installation. The wizard
+ * can no longer recognize "the workflow file" or "the memory file" by a
+ * literal path — it keys off what the SERVER already told it: the one file
+ * marked `editable: true` is always the workflow (`generateFiles` in
+ * `service.ts` marks exactly one), and the memory placeholder is always the
+ * one file whose path ends in `memory.jsonl`.
+ */
+export function isWorkflowFile(file: CiFile): boolean {
+  return file.editable === true;
+}
+
+export function isMemoryFile(file: CiFile): boolean {
+  return file.path.endsWith("memory.jsonl");
+}
 
 const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
@@ -36,12 +48,19 @@ export interface WizardState {
   postAs: CiExportInputBody["post_as"];
   ingestUrl: string;
   workflowOverride: string | null;
-  replaceExisting: boolean;
 }
 
-/** Builds the exact body every one of Preview/Install/Zip sends — the same
- *  object shape for all three is what keeps "what Preview shows" and "what
- *  Install commits" from ever drifting apart (UX-1). */
+/**
+ * Builds the exact body every one of Preview/Install/Zip sends — the same
+ * object shape for all three is what keeps "what Preview shows" and "what
+ * Install commits" from ever drifting apart (UX-1).
+ *
+ * SPEC-05 AC-12: `replace_existing` is no longer sent — a different agent
+ * already installed on this repo is not a conflict on the `gha` path, so
+ * there is nothing left for it to confirm. The field stays in the shared
+ * contract (server-ignored) for compatibility with an in-flight client; this
+ * wizard simply omits it, which the server's `.default(false)` covers.
+ */
 export function buildExportInput(state: WizardState): CiExportInputBody {
   return {
     repo: state.repo,
@@ -51,7 +70,6 @@ export function buildExportInput(state: WizardState): CiExportInputBody {
     base: state.base,
     workflow_override: state.workflowOverride,
     ingest_url: state.ingestUrl,
-    replace_existing: state.replaceExisting,
   };
 }
 

@@ -13,7 +13,7 @@ import type {
 import { CiIngestInput } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import {
-  ConflictError,
+  AppError,
   ExternalServiceError,
   NotFoundError,
   UnauthorizedError,
@@ -22,15 +22,17 @@ import {
 import { AgentsService } from '../agents/service.js';
 import type { CiInstallationRow, CiInstallationWithLastRun, CiRepository, CiRunListRow } from './repository.js';
 import {
-  AGENTS_SUBDIR,
+  agentsSubdirFor,
   CI_BRANCH,
+  ingestSecretNameFor,
   INGEST_TOKEN_BYTES,
-  MEMORY_PATH,
+  memoryPathFor,
   RUNNER_PATH,
-  WORKFLOW_PATH,
+  skillsSubdirFor,
+  workflowPathFor,
   WORKFLOW_VERSION,
 } from './constants.js';
-import { disambiguate, slugify, type RepoRef } from './helpers.js';
+import { deriveNamespace, disambiguate, slugify, type RepoRef } from './helpers.js';
 import {
   buildManifest,
   emitManifestYaml,
@@ -41,6 +43,50 @@ import {
 import { emitWorkflowYaml } from './workflow.js';
 import { validateWorkflowOverride } from './workflow-validate.js';
 import { previewPlaceholder, readRunnerBundle } from './bundle.js';
+
+/**
+ * A resolved installation LAYOUT (SPEC-05) — the one value threaded through
+ * `generateFiles`, the override re-validator and the AC-8 guard for a SINGLE
+ * export, so "what Preview shows" and "what Install commits" cannot drift
+ * (Recommendation 6). `namespace: null` means legacy (AC-14).
+ */
+export interface CiExportLayout {
+  namespace: string | null;
+  manifestPath: string;
+}
+
+/** `resolveLayout`'s full result — the layout PLUS the two installation
+ *  lists every caller already needs alongside it, so nothing re-queries the
+ *  same `(workspace, repo)` row set twice. */
+export interface ResolvedLayout {
+  layout: CiExportLayout;
+  /** This installation's own existing row, if any — drives AC-9's "update,
+   *  keep the token" branch. */
+  existing: CiInstallationRow | undefined;
+  /** Every OTHER installation already on this (workspace, repo) — drives
+   *  the AC-8 path-collision guard and, for a brand-new installation, the
+   *  taken-namespace set `deriveNamespace` disambiguates against. */
+  others: CiInstallationRow[];
+}
+
+/** Every path an installation with this ROW's own persisted layout owns —
+ *  the same subdirectories/files a namespaced or legacy export ever writes,
+ *  minus `RUNNER_PATH` (AC-6's one intentionally-shared path). */
+function ownedDirsAndFiles(row: CiInstallationRow): { dirs: string[]; files: string[] } {
+  return {
+    dirs: [agentsSubdirFor(row.namespace), skillsSubdirFor(row.namespace)],
+    files: [memoryPathFor(row.namespace), workflowPathFor(row.namespace)],
+  };
+}
+
+/** AC-8: `true` when `path` falls inside `dir` — compared on PATH SEGMENTS
+ *  (an exact `dir` boundary via `dir + '/'`), never a raw string prefix, so
+ *  `.devdigest/agents` can never appear to "contain" a sibling directory
+ *  that merely shares the prefix text (e.g. a namespace slug beginning with
+ *  `agents`) — only a path that is ACTUALLY nested under `dir` matches. */
+function isPathInsideDir(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(`${dir}/`);
+}
 
 /** Structural log sink — `req.log` (pino) satisfies this as-is, same shape
  *  `EvalLogSink`/`IntentLogSink` already use elsewhere. Never logs generated
@@ -92,6 +138,7 @@ function toInstallationContract(row: CiInstallationWithLastRun): CiInstallation 
     post_as: row.postAs,
     triggers: row.triggers,
     base: row.baseBranch,
+    ingest_secret_name: ingestSecretNameFor(row.namespace),
     last_run: row.lastRun
       ? {
           ran_at: row.lastRun.ranAt.toISOString(),
@@ -146,6 +193,42 @@ export class CiService {
   ) {}
 
   /**
+   * SPEC-05: the ONE read-only layout resolution used by Preview, Install
+   * and Zip alike (Recommendation 6) — so "what Preview shows" and "what
+   * Install commits" cannot drift. A single `findInstallationsByRepo` read
+   * (already workspace-scoped via the `agents` join, AC-37) serves both this
+   * installation's OWN row (if any, `existing` — AC-4/AC-9's "reuse verbatim"
+   * branch) and every OTHER installation on the repo (`others` — AC-8's
+   * guard input, and the taken-namespace set for a brand-new installation).
+   *
+   * - existing → reuse ITS OWN persisted `namespace`/`manifestPath` verbatim,
+   *   however many times the agent has since been renamed (AC-4, AC-9,
+   *   AC-14, AC-26).
+   * - no existing → `deriveNamespace(agent.name, others' namespaces)` and a
+   *   manifest path under that namespace — uniformly, including the FIRST
+   *   agent on a fresh repository (AC-1, AC-2, AC-17: no "first agent gets
+   *   the short paths" special case).
+   */
+  async resolveLayout(workspaceId: string, agentId: string, repo: string): Promise<ResolvedLayout> {
+    const agentsService = new AgentsService(this.container);
+    const agent = await agentsService.get(workspaceId, agentId);
+    if (!agent) throw new NotFoundError('Agent not found');
+
+    const rows = await this.repo.findInstallationsByRepo(workspaceId, repo);
+    const existing = rows.find((r) => r.agentId === agentId);
+    const others = rows.filter((r) => r.agentId !== agentId);
+
+    if (existing) {
+      return { layout: { namespace: existing.namespace, manifestPath: existing.manifestPath }, existing, others };
+    }
+
+    const taken = others.map((r) => r.namespace).filter((ns): ns is string => ns !== null);
+    const namespace = deriveNamespace(agent.name, taken);
+    const manifestPath = `${agentsSubdirFor(namespace)}/${slugify(agent.name)}.yaml`;
+    return { layout: { namespace, manifestPath }, existing: undefined, others };
+  }
+
+  /**
    * Assemble the exported file set for an agent, in the fixed order AC-9
    * requires: manifest → one file per enabled linked skill (agent order) →
    * memory placeholder → runner bundle (preview-omitted) → workflow. Zero
@@ -156,24 +239,18 @@ export class CiService {
    * shared method, so Preview's "placeholder only" guarantee holds by
    * construction, not by caller discipline).
    *
-   * `manifestPathOverride` (fix, finding 2): the manifest's path is a
-   * STABLE, persisted property of an installation, not a fresh per-export
-   * re-derivation from the agent's CURRENT name — see `db/schema/ci.ts`'s
-   * `manifestPath` doc comment for the bug this closes (a renamed, re-
-   * exported, previously-replaced agent used to leave TWO manifest files in
-   * the target tree, which makes `agent-runner`'s `findManifestPath` refuse
-   * to start). `install()` resolves the correct value (the agent's own
-   * fresh slug / inherited from a replaced installation / reused from
-   * `existing.manifestPath`) BEFORE calling this method and passes it here;
-   * when absent (Preview, and a genuinely fresh install with no override
-   * resolved yet), this falls back to the agent's own slug-derived path,
-   * exactly as every export always computed it.
+   * `layout` (SPEC-05, replacing the old `manifestPathOverride?` parameter):
+   * resolved ONCE per export via `resolveLayout` above and passed down here
+   * — never re-derived per file. Every namespaced (or legacy) path this
+   * method emits comes from `layout.namespace` via `constants.ts`'s
+   * derivations, so the manifest, skill files, memory placeholder and
+   * workflow all land under the SAME directory.
    */
   async generateFiles(
     workspaceId: string,
     agentId: string,
     input: CiExportInput,
-    manifestPathOverride?: string,
+    layout: CiExportLayout,
   ): Promise<CiFile[]> {
     const agentsService = new AgentsService(this.container);
     const agent = await agentsService.get(workspaceId, agentId);
@@ -190,21 +267,21 @@ export class CiService {
 
     const files: CiFile[] = [];
 
-    const manifestPath = manifestPathOverride ?? `${AGENTS_SUBDIR}/${slugify(agent.name)}.yaml`;
     files.push({
-      path: manifestPath,
+      path: layout.manifestPath,
       contents: manifestYaml,
       editable: false,
       preview_omitted: false,
     });
 
+    const skillsDir = skillsSubdirFor(layout.namespace);
     for (const skill of skillsWithSlug) {
-      const skillFile = emitSkillFile(skill);
+      const skillFile = emitSkillFile(skill, skillsDir);
       files.push({ ...skillFile, editable: false, preview_omitted: false });
     }
 
     files.push({
-      path: MEMORY_PATH,
+      path: memoryPathFor(layout.namespace),
       contents: emitMemoryPlaceholder(),
       editable: false,
       preview_omitted: false,
@@ -227,8 +304,35 @@ export class CiService {
     // trust boundary — they re-validate before committing/downloading anything.
     const workflowText =
       input.workflow_override ??
-      emitWorkflowYaml({ triggers: input.triggers, postAs: input.post_as, ingestUrl: input.ingest_url });
-    files.push({ path: WORKFLOW_PATH, contents: workflowText, editable: true, preview_omitted: false });
+      emitWorkflowYaml({
+        triggers: input.triggers,
+        postAs: input.post_as,
+        ingestUrl: input.ingest_url,
+        namespace: layout.namespace,
+      });
+    files.push({
+      path: workflowPathFor(layout.namespace),
+      contents: workflowText,
+      editable: true,
+      preview_omitted: false,
+    });
+
+    // AC-7: `.devdigest/<ns>/agents/` (or the legacy `.devdigest/agents/`)
+    // must hold EXACTLY one manifest after this export — `agent-runner`
+    // refuses to start otherwise (`agent-runner/src/manifest.ts:37-45`).
+    // Fail-closed HERE, before any GitHub call, rather than commit a tree
+    // that cannot run (A10).
+    const agentsDir = agentsSubdirFor(layout.namespace);
+    const manifestCount = files.filter(
+      (f) => f.path.startsWith(`${agentsDir}/`) && f.path.endsWith('.yaml'),
+    ).length;
+    if (manifestCount !== 1) {
+      throw new AppError(
+        'manifest_count_invalid',
+        `Expected exactly one agent manifest under ${agentsDir}, would commit ${manifestCount}.`,
+        500,
+      );
+    }
 
     return files;
   }
@@ -248,25 +352,17 @@ export class CiService {
    * second path): commits the generated file set to `CI_BRANCH` and opens
    * (or reuses) an ordinary pull request, minting a one-time ingest token
    * only when a NEW installation is created. Follows the plan's binding
-   * order of operations — everything through step 6 below must succeed
-   * before ANYTHING is written; the installation row is persisted LAST.
+   * order of operations — everything through the commit/PR step below must
+   * succeed before ANYTHING is written; the installation row is persisted
+   * LAST.
    *
-   * Fix (finding 2): step 4 (conflict check) is now resolved BEFORE
-   * generating files, not after — a pure re-ordering of two read-only steps
-   * (no write moves earlier). This is required because the manifest's path
-   * is now a STABLE, persisted property of the resolved installation
-   * (`existing`/`conflicting`), not a fresh per-export re-derivation from
-   * the agent's CURRENT name — `generateFiles` needs to know that path
-   * up front to emit the manifest file at the right place, instead of the
-   * old flow, which generated at the agent's own slug unconditionally and
-   * then (only in the replace-conflict case) rewrote the path afterward via
-   * the now-removed `avoidDoubleManifest`. That rewrite never happened on a
-   * PLAIN re-export of an already-installed agent (the `existing` branch),
-   * so a second export of a previously-replaced installation re-derived the
-   * manifest path from the agent's current name and left the old path's
-   * manifest still committed — two `.devdigest/agents/*.yaml` files, which
-   * makes `agent-runner`'s `findManifestPath` refuse to start. See
-   * `db/schema/ci.ts`'s `manifestPath` doc comment.
+   * SPEC-05 AC-11: a different agent already installed on this repo is no
+   * longer a conflict — `resolveLayout` below simply derives this agent its
+   * own namespace among `others`' taken namespaces, and the export proceeds
+   * as an ordinary install. No confirmation, no deletion of another
+   * installation's row, no inheriting another installation's namespace,
+   * manifest path or ingest token. `input.replace_existing` is read nowhere
+   * on this path (AC-12) — there is nothing left for it to confirm.
    */
   async install(
     workspaceId: string,
@@ -279,48 +375,46 @@ export class CiService {
     const agent = await agentsService.get(workspaceId, agentId);
     if (!agent) throw new NotFoundError('Agent not found');
 
-    // Step 4 (moved earlier): conflict check. Read-only — no write happens
-    // any earlier than it used to.
-    const existing = await this.repo.findInstallationByAgentAndRepo(workspaceId, agentId, input.repo);
-    let conflicting: CiInstallationRow | undefined;
-    if (!existing) {
-      const conflicts = await this.repo.findInstallationsByRepo(workspaceId, input.repo);
-      conflicting = conflicts.find((c) => c.agentId !== agentId);
-      if (conflicting && !input.replace_existing) {
-        throw new ConflictError(
-          `${input.repo} is already exported from a different agent. Set replace_existing to confirm replacing it.`,
-        );
+    // Read-only — resolves this installation's own namespace/manifest path
+    // (reused verbatim if `existing`) and the repo's OTHER installations
+    // (`others`), which both the AC-8 guard below and (for a brand-new
+    // installation) the namespace derivation itself need.
+    const { layout, existing, others } = await this.resolveLayout(workspaceId, agentId, input.repo);
+
+    // Regenerate the WHOLE file set server-side (the only client-supplied
+    // content is `workflow_override`); a missing runner bundle fails inside
+    // `generateFiles`, before any GitHub call and before any token is minted
+    // (AC-17, E-1). The AC-7 "exactly one manifest" guard runs inside
+    // `generateFiles` too.
+    let files = await this.generateFiles(workspaceId, agentId, input, layout);
+    files = await this.withRealBundle(files);
+
+    // AC-8: this export must never write a path belonging to ANOTHER
+    // installation on this repo — the two committed file sets may intersect
+    // ONLY at the shared runner bundle (AC-6). Fail-closed, before any
+    // GitHub call.
+    for (const other of others) {
+      const { dirs, files: ownedFiles } = ownedDirsAndFiles(other);
+      for (const f of files) {
+        if (f.path === RUNNER_PATH) continue;
+        const collides = ownedFiles.includes(f.path) || dirs.some((dir) => isPathInsideDir(f.path, dir));
+        if (collides) {
+          throw new AppError(
+            'namespace_collision',
+            `Generated path "${f.path}" would overwrite installation ${other.id}'s own files.`,
+            500,
+          );
+        }
       }
     }
 
-    // Fix (finding 2): resolve the STABLE manifest path exactly once, here.
-    //  - plain re-export of an existing installation: reuse ITS OWN
-    //    persisted path, unconditionally — never re-derived from the
-    //    agent's current name, however many times it has been renamed.
-    //  - confirmed replace-conflict: INHERIT the conflicting installation's
-    //    own persisted path (not a fresh re-derivation from that
-    //    installation's agent's CURRENT name either), so the committed tree
-    //    still ends up with exactly one manifest under `.devdigest/agents/`
-    //    (AC-39/E-2) — same "overwrite, not delete" strategy the removed
-    //    `avoidDoubleManifest` used, just sourced from a stable column
-    //    instead of re-slugifying a name that can itself have drifted.
-    //  - fresh install, no conflict: the agent's own slug-derived path,
-    //    exactly as every export has always computed it.
-    const manifestPath = existing
-      ? existing.manifestPath
-      : (conflicting?.manifestPath ?? `${AGENTS_SUBDIR}/${slugify(agent.name)}.yaml`);
-
-    // Steps 1 + 3: regenerate the WHOLE file set server-side (the only
-    // client-supplied content is `workflow_override`); a missing runner
-    // bundle fails inside `generateFiles`, before any GitHub call and before
-    // any token is minted (AC-17, E-1).
-    let files = await this.generateFiles(workspaceId, agentId, input, manifestPath);
-    files = await this.withRealBundle(files);
-
-    // Step 2: re-validate a client-supplied workflow override SERVER-SIDE —
-    // never trust the client's own "valid" claim (AC-32, AC-33, A06).
+    // Re-validate a client-supplied workflow override SERVER-SIDE — never
+    // trust the client's own "valid" claim (AC-32, AC-33, A06). AC-24: also
+    // refuses an override aimed at another installation's namespace or
+    // ingest secret, checked against THIS installation's own resolved
+    // layout, never re-derived independently.
     if (input.workflow_override != null) {
-      const result = validateWorkflowOverride(input.workflow_override);
+      const result = validateWorkflowOverride(input.workflow_override, { namespace: layout.namespace });
       if (!result.ok) {
         throw new ValidationError(
           `Workflow override rejected — violates required invariant "${result.violated}".`,
@@ -328,18 +422,10 @@ export class CiService {
       }
     }
 
-    // Step 4b: on a confirmed replace, remove the OTHER installation row now
-    // — `generateFiles` above already emitted the new agent's manifest AT
-    // the inherited path, so no post-hoc file-path rewrite is needed here
-    // (finding 2 removes the old `avoidDoubleManifest` step).
-    if (conflicting) {
-      await this.repo.deleteInstallation(workspaceId, conflicting.id);
-    }
-
-    // Step 5: mint the token ONLY when creating a new installation
-    // (AC-38/UX-12 — an update keeps the existing token untouched; the
-    // repository's `upsertInstallation` also enforces this at the DB level
-    // regardless of what is passed here).
+    // Mint the token ONLY when creating a new installation (AC-38/UX-12 — an
+    // update keeps the existing token untouched; the repository's
+    // `upsertInstallation` also enforces this at the DB level regardless of
+    // what is passed here).
     let ingestToken: string | null = null;
     let tokenHash: string;
     if (existing) {
@@ -349,10 +435,10 @@ export class CiService {
       tokenHash = createHash('sha256').update(ingestToken, 'utf8').digest('hex');
     }
 
-    // Step 6: commit, then reuse-or-open the PR. Never the base branch
-    // itself (AC-34, AC-36, E-9, E-10) — `commitFiles` only ever
-    // creates/fast-forwards `CI_BRANCH`. Reuses the adapter exactly as it
-    // exists today — no new GitHub port method (D-10, AC-80).
+    // Commit, then reuse-or-open the PR. Never the base branch itself
+    // (AC-34, AC-36, E-9, E-10) — `commitFiles` only ever creates/fast-
+    // forwards `CI_BRANCH`, the SAME shared branch every installation on
+    // this repo commits to (D-2 — no per-agent branch/PR, E-3 accepted).
     const github = await this.container.github();
     const message = existing
       ? `Update DevDigest CI review config for "${agent.name}"`
@@ -382,7 +468,8 @@ export class CiService {
       // AC-40, A10: no half-state. The commit already landed on
       // `commitResult.branch` — report that plainly, and persist NOTHING,
       // so a retry can pick the branch back up (via `findOpenPr`/create-PR)
-      // without needing to re-commit.
+      // without needing to re-commit. This leaves every OTHER installation
+      // on this repo untouched (AC-13).
       throw new ExternalServiceError(
         `Files were committed to branch "${commitResult.branch}" but opening the pull request failed: ` +
           `${(err as Error).message}. The installation was NOT recorded — retry Install; your files are ` +
@@ -390,8 +477,8 @@ export class CiService {
       );
     }
 
-    // Step 7: persist the installation LAST — only after the commit AND the
-    // PR step both succeeded.
+    // Persist the installation LAST — only after the commit AND the PR step
+    // both succeeded.
     await this.repo.upsertInstallation({
       agentId,
       repo: input.repo,
@@ -402,9 +489,8 @@ export class CiService {
       postAs: input.post_as,
       triggers: input.triggers,
       baseBranch: input.base,
-      // Fix (finding 2): persist the SAME stable path `generateFiles` above
-      // just used, so the next export of this installation reuses it too.
-      manifestPath,
+      manifestPath: layout.manifestPath,
+      namespace: layout.namespace,
       tokenHash,
     });
 
@@ -415,14 +501,15 @@ export class CiService {
       throw new ExternalServiceError('Installation was written but could not be re-read.');
     }
 
-    // AC-74, A09 — repo, agent id, installation id, workflow/agent version,
-    // outcome. NEVER the token, its hash, file contents, the system prompt,
-    // or skill bodies.
+    // AC-74, A09 — repo, agent id, installation id, namespace, workflow/agent
+    // version, outcome. NEVER the token, its hash, file contents, the system
+    // prompt, or skill bodies.
     log.info(
       {
         repo: input.repo,
         agentId,
         installationId: installationRow.id,
+        namespace: layout.namespace,
         workflowVersion: WORKFLOW_VERSION,
         agentVersion: agent.version,
         outcome: existing ? 'updated' : 'created',
@@ -451,17 +538,24 @@ export class CiService {
    * files and install them yourself" escape hatch. CI Runs will not record
    * runs for a repo installed this way until the user later installs via
    * the PR path.
+   *
+   * SPEC-05: resolves the SAME layout Preview/Install would (a candidate
+   * namespace, for a not-yet-installed agent — pre-existing shape, widened
+   * rather than fixed, see the plan's Risks section) and passes it to both
+   * the generator and the override validator, same as Install.
    */
   async exportZip(workspaceId: string, agentId: string, input: CiExportInput): Promise<Buffer> {
+    const { layout } = await this.resolveLayout(workspaceId, agentId, input.repo);
+
     if (input.workflow_override != null) {
-      const result = validateWorkflowOverride(input.workflow_override);
+      const result = validateWorkflowOverride(input.workflow_override, { namespace: layout.namespace });
       if (!result.ok) {
         throw new ValidationError(
           `Workflow override rejected — violates required invariant "${result.violated}".`,
         );
       }
     }
-    let files = await this.generateFiles(workspaceId, agentId, input);
+    let files = await this.generateFiles(workspaceId, agentId, input, layout);
     files = await this.withRealBundle(files);
 
     const zip = new JSZip();
@@ -553,11 +647,13 @@ export class CiService {
       error: body.error ?? null,
     });
 
-    // AC-60, AC-74: installation id, actions run id, head sha, findings,
-    // cost, outcome. NEVER the token, the hash, or the request body.
+    // AC-60, AC-74, A09: installation id, namespace, actions run id, head
+    // sha, findings, cost, outcome. NEVER the token, the hash, or the
+    // request body.
     log.info(
       {
         installationId: installation.id,
+        namespace: installation.namespace,
         actionsRunId: body.actions_run_id,
         headSha: body.head_sha,
         findingsCount: body.result?.findings_count ?? null,

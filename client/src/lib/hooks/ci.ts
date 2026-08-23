@@ -10,7 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { CiExport, CiExportInputBody, CiFile, CiInstallation, CiRun } from "../types";
+import type { CiExport, CiExportInputBody, CiExportPreview, CiInstallation, CiRun } from "../types";
 
 // ===========================================================================
 // Preview / Install / Zip (WI20 — the Export Wizard's three mutations)
@@ -19,11 +19,14 @@ import type { CiExport, CiExportInputBody, CiFile, CiInstallation, CiRun } from 
 /** POST /agents/:id/export-ci/preview — zero server-side side effects, but
  *  kept as a mutation (not a query) so it only ever runs when explicitly
  *  triggered by the wizard (entering Preview, or changing a Configure
- *  option) — never automatically on mount (AC-2, AC-46). */
+ *  option) — never automatically on mount (AC-2, AC-46). SPEC-05: the
+ *  response also carries `ingest_secret_name` (Recommendation 6) — the
+ *  secrets panel renders before any installation exists, so the name can't
+ *  come from `CiInstallation`. */
 export function useCiPreview() {
   return useMutation({
     mutationFn: ({ agentId, input }: { agentId: string; input: CiExportInputBody }) =>
-      api.post<{ files: CiFile[] }>(`/agents/${agentId}/export-ci/preview`, input),
+      api.post<CiExportPreview>(`/agents/${agentId}/export-ci/preview`, input),
   });
 }
 

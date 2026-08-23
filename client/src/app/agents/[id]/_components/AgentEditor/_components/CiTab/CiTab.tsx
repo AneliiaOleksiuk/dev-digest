@@ -126,6 +126,13 @@ export function CiTab({ agent }: { agent: Agent }) {
                     <span style={s.rowMeta}>v{inst.workflow_version}</span>
                   </div>
 
+                  {/* SPEC-05 AC-31/UX-3: this installation's own ingest
+                     secret name — not re-derivable by hand once the agent
+                     has been renamed. */}
+                  <div style={s.secretMeta}>
+                    {t("ciTab.ingestSecretLabel", { secretName: inst.ingest_secret_name })}
+                  </div>
+
                   {drifted && (
                     <div style={s.driftBanner}>
                       {t("ciTab.driftBanner", {

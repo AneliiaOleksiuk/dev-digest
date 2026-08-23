@@ -33,6 +33,7 @@ export function ConfigureStep({
   onPostAsChange,
   ingestUrl,
   onIngestUrlChange,
+  ingestSecretName,
 }: {
   agent: Agent;
   triggers: string[];
@@ -41,6 +42,10 @@ export function ConfigureStep({
   onPostAsChange: (value: CiExportInputBody["post_as"]) => void;
   ingestUrl: string;
   onIngestUrlChange: (v: string) => void;
+  /** SPEC-05 AC-28: this export's own ingest secret name, server-derived
+   *  (Preview's `ingest_secret_name` — Recommendation 6) — `null` only
+   *  before the first Preview response has returned. */
+  ingestSecretName: string | null;
 }) {
   const t = useTranslations("ci");
   const localhost = isLocalhostUrl(ingestUrl);
@@ -106,7 +111,11 @@ export function ConfigureStep({
           <span style={s.secretStatus}>{t("exportWizard.secretsPanel.githubTokenStatus")}</span>
         </div>
         <div style={s.secretRow}>
-          <span style={s.secretName}>{t("exportWizard.secretsPanel.ingestTokenName")}</span>
+          <span style={s.secretName}>
+            {t("exportWizard.secretsPanel.ingestTokenName", {
+              secretName: ingestSecretName ?? "DEVDIGEST_INGEST_TOKEN",
+            })}
+          </span>
           <span style={s.secretStatus}>{t("exportWizard.secretsPanel.ingestTokenStatus")}</span>
         </div>
         <p style={s.note}>{t("exportWizard.secretsPanel.disclaimer")}</p>

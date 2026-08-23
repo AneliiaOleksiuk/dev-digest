@@ -50,6 +50,26 @@ export const ciInstallations = pgTable(
      * files, which makes `agent-runner`'s `findManifestPath` refuse to start.
      */
     manifestPath: text('manifest_path').notNull(),
+    /**
+     * SPEC-05 (multi-agent CI per repo) Recommendation 1: NULLABLE, no
+     * default. Every row that existed before this column was added is
+     * `NULL` by construction — that IS the definition of "legacy" (AC-14):
+     * a legacy installation keeps its unnamespaced `.devdigest/agents/`
+     * paths, its `.github/workflows/devdigest-review.yml` filename and its
+     * bare `DEVDIGEST_INGEST_TOKEN` secret forever, and is NEVER migrated,
+     * re-namespaced or re-keyed on any later export. A row inserted after
+     * this column exists always gets a non-null, server-derived namespace
+     * (`helpers.ts`'s `deriveNamespace`) — set once at first install and
+     * reused verbatim on every later re-export, exactly like `manifestPath`
+     * above.
+     *
+     * Deliberately NO unique index here (Recommendation 2): uniqueness is
+     * per `(workspace, repo)`, enforced in `service.ts` over the
+     * workspace-scoped `findInstallationsByRepo` read — a GLOBAL unique
+     * index on `(repo, namespace)` would make workspace B's export collide
+     * with workspace A's same-named repo, which AC-37 forbids.
+     */
+    namespace: text('namespace'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({

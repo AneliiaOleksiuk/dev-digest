@@ -81,6 +81,33 @@ export function disambiguate(slugs: string[]): string[] {
   });
 }
 
+// ---- deriveNamespace (SPEC-05 AC-1, AC-2) -----------------------------------
+
+/**
+ * Derive a per-agent namespace, unique among the namespaces already taken on
+ * this repository (SPEC-05 AC-1, AC-2). `slugify(agentName)` inherits every
+ * hostile-input guarantee above verbatim (charset, `..`, leading dot,
+ * reserved device names, non-empty fallback, length cap) — this function
+ * adds only the collision-suffix step.
+ *
+ * NOT `disambiguate([...taken, slugify(agentName)])` — `disambiguate` counts
+ * occurrences WITHIN one list, so `taken = ['sec', 'sec-2']` and a candidate
+ * `sec` would yield `sec-2` (the count-based suffix for the second `sec`
+ * occurrence), colliding with the ALREADY-TAKEN `sec-2`. This instead
+ * increments a numeric suffix until the result is absent from `taken`,
+ * reusing `disambiguate`'s `-2`/`-3` suffix SHAPE without reusing its
+ * count-within-one-list semantics. `disambiguate` itself is untouched — the
+ * skill-slug path depends on its current behavior.
+ */
+export function deriveNamespace(agentName: string, taken: readonly string[]): string {
+  const base = slugify(agentName);
+  const takenSet = new Set(taken);
+  if (!takenSet.has(base)) return base;
+  let n = 2;
+  while (takenSet.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
 // ---- parseRepoRef (AC-4) -----------------------------------------------------
 
 /** Exactly two `[A-Za-z0-9._-]+` segments separated by exactly one `/` — a

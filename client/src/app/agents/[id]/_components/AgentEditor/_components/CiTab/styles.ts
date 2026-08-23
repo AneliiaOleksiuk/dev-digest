@@ -24,6 +24,14 @@ export const s = {
   rowHead: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } satisfies CSSProperties,
   repo: { fontSize: 14, fontWeight: 600 } satisfies CSSProperties,
   rowMeta: { fontSize: 12, color: "var(--text-muted)", marginLeft: "auto" } satisfies CSSProperties,
+  /** SPEC-05 AC-31 — this installation's own ingest secret name, on its own
+   *  line below the header row (not inside `rowHead`'s flex row, so it never
+   *  inherits `rowMeta`'s `marginLeft: auto`). */
+  secretMeta: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+    fontFamily: "var(--font-mono, monospace)",
+  } satisfies CSSProperties,
   driftBanner: {
     fontSize: 12,
     color: "var(--warn)",

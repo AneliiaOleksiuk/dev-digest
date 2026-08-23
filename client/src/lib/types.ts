@@ -92,6 +92,7 @@ export type {
   CiTarget,
   CiRunStatus,
   CiFile,
+  CiExportPreview,
   AgentManifest,
   CiExportInput,
   CiExportInputBody,

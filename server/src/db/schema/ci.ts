@@ -7,6 +7,7 @@ import {
   doublePrecision,
   jsonb,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
 
@@ -22,7 +23,10 @@ export const ciInstallations = pgTable(
     installedAt: timestamp('installed_at', { withTimezone: true }).defaultNow().notNull(),
     /**
      * sha256(token) — the plaintext one-time ingest token is NEVER stored;
-     * it exists only in the immediate Install response (AC-50).
+     * it exists only in the immediate Install response (AC-50). Looked up
+     * directly (fix, finding 1) by `findInstallationByTokenHash` — the hash
+     * match itself IS the authentication on `POST /ci/ingest`, hence the
+     * plain (non-unique) index below.
      */
     tokenHash: text('token_hash').notNull(),
     /** Where the CI job POSTs its result artifact back to (Q-8). */
@@ -34,11 +38,27 @@ export const ciInstallations = pgTable(
       .default('github_review'),
     triggers: jsonb('triggers').$type<string[]>().notNull(),
     baseBranch: text('base_branch').notNull().default('main'),
+    /**
+     * Fix (finding 2): a STABLE, persisted property of the installation —
+     * set once (fresh install: the agent's own slug-derived path; a
+     * confirmed replace-conflict: inherited from the conflicting
+     * installation's own `manifestPath`) and reused verbatim on every later
+     * re-export, regardless of how many times the agent is renamed. Without
+     * this, a second export of an already-installed, previously-replaced
+     * agent re-derives the path from the agent's CURRENT name, leaving the
+     * old path's manifest file still committed — two `.devdigest/agents/*.yaml`
+     * files, which makes `agent-runner`'s `findManifestPath` refuse to start.
+     */
+    manifestPath: text('manifest_path').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
     // AC-38's "update, don't duplicate" enforced by the database, not only the service.
     agentRepoUq: uniqueIndex('ci_installations_agent_repo_uq').on(t.agentId, t.repo),
+    // Fix (finding 1): the ingest endpoint's lookup path. A hash collision is
+    // not this feature's threat model (D-1's simplicity mandate) — plain,
+    // not unique.
+    tokenHashIdx: index('ci_installations_token_hash_idx').on(t.tokenHash),
   }),
 );
 

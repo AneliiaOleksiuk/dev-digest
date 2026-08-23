@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import JSZip from 'jszip';
 import type {
   CiExport,
@@ -51,24 +51,22 @@ export interface CiLogSink {
   info(obj: Record<string, unknown>, msg?: string): void;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** `installation.tokenHash` is stored as a hex string (see
- *  `repository.drizzle.ts`) — parse defensively so a corrupt/short stored
- *  value degrades to "auth failed" rather than throwing (A10). */
-function hexToBuffer(hex: string): Buffer | null {
-  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) return null;
-  return Buffer.from(hex, 'hex');
-}
-
 /**
- * Constant-time digest comparison (AC-51, A04). `timingSafeEqual` THROWS on a
- * length mismatch rather than returning false — so length is checked and
- * ruled out FIRST, and it is never called on two mismatched-length buffers.
+ * Fix (finding 1): parse `Authorization: Bearer <token>` (case-insensitive
+ * on the scheme, per RFC 7235 §2.1). Anything else — an absent header, a
+ * different scheme, or a scheme with no token — returns `null` and is
+ * treated identically to a missing header always was: 401, write nothing
+ * (AC-51). This replaces the old two-custom-header
+ * (`x-devdigest-installation` / `x-devdigest-token`) read, which the
+ * generated workflow (`workflow.ts`) never actually emitted — see
+ * `routes.ts`'s module docblock and `workflow.ts`'s own comment on why THAT
+ * file needed no change for this fix.
  */
-function constantTimeEqual(a: Buffer, b: Buffer): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+function parseBearerToken(header: string | undefined): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  const token = match?.[1]?.trim();
+  return token && token.length > 0 ? token : null;
 }
 
 function installPrBody(agentName: string): string {
@@ -157,8 +155,26 @@ export class CiService {
    * bundle bytes via `withRealBundle` — Q-3 keeps that swap OUT of this
    * shared method, so Preview's "placeholder only" guarantee holds by
    * construction, not by caller discipline).
+   *
+   * `manifestPathOverride` (fix, finding 2): the manifest's path is a
+   * STABLE, persisted property of an installation, not a fresh per-export
+   * re-derivation from the agent's CURRENT name — see `db/schema/ci.ts`'s
+   * `manifestPath` doc comment for the bug this closes (a renamed, re-
+   * exported, previously-replaced agent used to leave TWO manifest files in
+   * the target tree, which makes `agent-runner`'s `findManifestPath` refuse
+   * to start). `install()` resolves the correct value (the agent's own
+   * fresh slug / inherited from a replaced installation / reused from
+   * `existing.manifestPath`) BEFORE calling this method and passes it here;
+   * when absent (Preview, and a genuinely fresh install with no override
+   * resolved yet), this falls back to the agent's own slug-derived path,
+   * exactly as every export always computed it.
    */
-  async generateFiles(workspaceId: string, agentId: string, input: CiExportInput): Promise<CiFile[]> {
+  async generateFiles(
+    workspaceId: string,
+    agentId: string,
+    input: CiExportInput,
+    manifestPathOverride?: string,
+  ): Promise<CiFile[]> {
     const agentsService = new AgentsService(this.container);
     const agent = await agentsService.get(workspaceId, agentId);
     if (!agent) throw new NotFoundError('Agent not found');
@@ -174,9 +190,9 @@ export class CiService {
 
     const files: CiFile[] = [];
 
-    const agentSlug = slugify(agent.name);
+    const manifestPath = manifestPathOverride ?? `${AGENTS_SUBDIR}/${slugify(agent.name)}.yaml`;
     files.push({
-      path: `${AGENTS_SUBDIR}/${agentSlug}.yaml`,
+      path: manifestPath,
       contents: manifestYaml,
       editable: false,
       preview_omitted: false,
@@ -228,50 +244,29 @@ export class CiService {
   }
 
   /**
-   * AC-39/D-3: the target tree must never hold two `.devdigest/agents/*.yaml`
-   * files — `agent-runner`'s `findManifestPath` refuses to start otherwise.
-   * ACTUAL deletion of the conflicting installation's manifest path is not
-   * expressible through the existing `commitFiles({path, contents})` port
-   * (GitHub's Trees API needs a `sha: null` entry to delete a path, which
-   * this port does not carry — D-10/AC-80 forbid adding a new adapter
-   * method, and WI13's file scope is `service.ts`/`routes.ts` only, not
-   * `adapters/github/octokit.ts`). Deleting is therefore out of reach here;
-   * OVERWRITING is: writing the NEW agent's manifest at the conflicting
-   * installation's own already-committed manifest path leaves exactly one
-   * `.yaml` file in the tree post-commit, which is the runner's actual
-   * constraint (file COUNT — `findManifestPath` never reads the filename).
-   * The tradeoff (flagged for human review, same as the zip-path decision
-   * below): the new agent's manifest ships under a filename that no longer
-   * matches its own slug in this one replace-conflict case. A true delete
-   * needs a GitHub adapter change, out of this phase's scope.
-   */
-  private async avoidDoubleManifest(
-    workspaceId: string,
-    conflicting: CiInstallationRow,
-    files: CiFile[],
-  ): Promise<CiFile[]> {
-    const agentsService = new AgentsService(this.container);
-    const oldAgent = await agentsService.get(workspaceId, conflicting.agentId);
-    // `ci_installations.agent_id` is `ON DELETE CASCADE` off `agents` — a
-    // conflicting installation row cannot outlive its agent, so this should
-    // be unreachable. Best-effort no-op (keep the new agent's own slug)
-    // rather than throw, if it ever is.
-    if (!oldAgent) return files;
-    const oldManifestPath = `${AGENTS_SUBDIR}/${slugify(oldAgent.name)}.yaml`;
-    return files.map((f) =>
-      f.path.startsWith(`${AGENTS_SUBDIR}/`) && f.path !== oldManifestPath
-        ? { ...f, path: oldManifestPath }
-        : f,
-    );
-  }
-
-  /**
    * Install (and re-Install/"Update CI config" — AC-45, same route, no
    * second path): commits the generated file set to `CI_BRANCH` and opens
    * (or reuses) an ordinary pull request, minting a one-time ingest token
    * only when a NEW installation is created. Follows the plan's binding
    * order of operations — everything through step 6 below must succeed
    * before ANYTHING is written; the installation row is persisted LAST.
+   *
+   * Fix (finding 2): step 4 (conflict check) is now resolved BEFORE
+   * generating files, not after — a pure re-ordering of two read-only steps
+   * (no write moves earlier). This is required because the manifest's path
+   * is now a STABLE, persisted property of the resolved installation
+   * (`existing`/`conflicting`), not a fresh per-export re-derivation from
+   * the agent's CURRENT name — `generateFiles` needs to know that path
+   * up front to emit the manifest file at the right place, instead of the
+   * old flow, which generated at the agent's own slug unconditionally and
+   * then (only in the replace-conflict case) rewrote the path afterward via
+   * the now-removed `avoidDoubleManifest`. That rewrite never happened on a
+   * PLAIN re-export of an already-installed agent (the `existing` branch),
+   * so a second export of a previously-replaced installation re-derived the
+   * manifest path from the agent's current name and left the old path's
+   * manifest still committed — two `.devdigest/agents/*.yaml` files, which
+   * makes `agent-runner`'s `findManifestPath` refuse to start. See
+   * `db/schema/ci.ts`'s `manifestPath` doc comment.
    */
   async install(
     workspaceId: string,
@@ -284,11 +279,42 @@ export class CiService {
     const agent = await agentsService.get(workspaceId, agentId);
     if (!agent) throw new NotFoundError('Agent not found');
 
+    // Step 4 (moved earlier): conflict check. Read-only — no write happens
+    // any earlier than it used to.
+    const existing = await this.repo.findInstallationByAgentAndRepo(workspaceId, agentId, input.repo);
+    let conflicting: CiInstallationRow | undefined;
+    if (!existing) {
+      const conflicts = await this.repo.findInstallationsByRepo(workspaceId, input.repo);
+      conflicting = conflicts.find((c) => c.agentId !== agentId);
+      if (conflicting && !input.replace_existing) {
+        throw new ConflictError(
+          `${input.repo} is already exported from a different agent. Set replace_existing to confirm replacing it.`,
+        );
+      }
+    }
+
+    // Fix (finding 2): resolve the STABLE manifest path exactly once, here.
+    //  - plain re-export of an existing installation: reuse ITS OWN
+    //    persisted path, unconditionally — never re-derived from the
+    //    agent's current name, however many times it has been renamed.
+    //  - confirmed replace-conflict: INHERIT the conflicting installation's
+    //    own persisted path (not a fresh re-derivation from that
+    //    installation's agent's CURRENT name either), so the committed tree
+    //    still ends up with exactly one manifest under `.devdigest/agents/`
+    //    (AC-39/E-2) — same "overwrite, not delete" strategy the removed
+    //    `avoidDoubleManifest` used, just sourced from a stable column
+    //    instead of re-slugifying a name that can itself have drifted.
+    //  - fresh install, no conflict: the agent's own slug-derived path,
+    //    exactly as every export has always computed it.
+    const manifestPath = existing
+      ? existing.manifestPath
+      : (conflicting?.manifestPath ?? `${AGENTS_SUBDIR}/${slugify(agent.name)}.yaml`);
+
     // Steps 1 + 3: regenerate the WHOLE file set server-side (the only
     // client-supplied content is `workflow_override`); a missing runner
     // bundle fails inside `generateFiles`, before any GitHub call and before
     // any token is minted (AC-17, E-1).
-    let files = await this.generateFiles(workspaceId, agentId, input);
+    let files = await this.generateFiles(workspaceId, agentId, input, manifestPath);
     files = await this.withRealBundle(files);
 
     // Step 2: re-validate a client-supplied workflow override SERVER-SIDE —
@@ -302,20 +328,12 @@ export class CiService {
       }
     }
 
-    // Step 4: conflict check.
-    const existing = await this.repo.findInstallationByAgentAndRepo(workspaceId, agentId, input.repo);
-    if (!existing) {
-      const conflicts = await this.repo.findInstallationsByRepo(workspaceId, input.repo);
-      const conflicting = conflicts.find((c) => c.agentId !== agentId);
-      if (conflicting) {
-        if (!input.replace_existing) {
-          throw new ConflictError(
-            `${input.repo} is already exported from a different agent. Set replace_existing to confirm replacing it.`,
-          );
-        }
-        files = await this.avoidDoubleManifest(workspaceId, conflicting, files);
-        await this.repo.deleteInstallation(workspaceId, conflicting.id);
-      }
+    // Step 4b: on a confirmed replace, remove the OTHER installation row now
+    // — `generateFiles` above already emitted the new agent's manifest AT
+    // the inherited path, so no post-hoc file-path rewrite is needed here
+    // (finding 2 removes the old `avoidDoubleManifest` step).
+    if (conflicting) {
+      await this.repo.deleteInstallation(workspaceId, conflicting.id);
     }
 
     // Step 5: mint the token ONLY when creating a new installation
@@ -384,6 +402,9 @@ export class CiService {
       postAs: input.post_as,
       triggers: input.triggers,
       baseBranch: input.base,
+      // Fix (finding 2): persist the SAME stable path `generateFiles` above
+      // just used, so the next export of this installation reuses it too.
+      manifestPath,
       tokenHash,
     });
 
@@ -456,27 +477,46 @@ export class CiService {
    * AC-52) → zod-validate the body (422 on failure) → repo string-equality
    * check (AC-54) → one explicit-column insert, idempotent on the
    * `(installation, actions_run_id)` unique index (AC-57).
+   *
+   * Fix (finding 1): authenticates via a SINGLE `Authorization: Bearer
+   * <token>` header — the exact shape the generated workflow's reporting
+   * step has always sent (`workflow.ts`) — instead of the two custom headers
+   * (`x-devdigest-installation` / `x-devdigest-token`) this used to read,
+   * which nothing ever emitted.
    */
-  async ingest(
-    installationIdHeader: string | undefined,
-    tokenHeader: string | undefined,
-    rawBody: unknown,
-    log: CiLogSink,
-  ): Promise<void> {
-    if (!installationIdHeader || !tokenHeader || !UUID_RE.test(installationIdHeader)) {
+  async ingest(authorizationHeader: string | undefined, rawBody: unknown, log: CiLogSink): Promise<void> {
+    const token = parseBearerToken(authorizationHeader);
+    if (!token) {
       throw new UnauthorizedError('Invalid or missing ingest credentials');
     }
+
+    const hash = createHash('sha256').update(token, 'utf8').digest('hex');
 
     // The ingest path's own exception to "every method takes workspaceId" —
     // tenancy is exactly what this lookup resolves (repository.ts docblock).
-    const installation = await this.repo.findInstallationById(installationIdHeader);
+    // The LOOKUP ITSELF is the authentication: a hash match proves
+    // possession of the token; there is no separate "installation unknown"
+    // step to fold in, since an unmatched hash simply returns no row, which
+    // is the 401 case below.
+    //
+    // This is why NO `timingSafeEqual`/constant-time comparison is needed
+    // here, unlike the old compare-then-fetch flow it replaces. What
+    // `timingSafeEqual` defends against is an attacker learning a SECRET
+    // buffer's bytes incrementally, one byte at a time, by timing how far a
+    // byte-by-byte comparison gets before it bails out early on a mismatch —
+    // that only works when the attacker controls one side of an explicit
+    // buffer-vs-buffer comparison whose early-exit point they can observe.
+    // A hash-KEYED lookup performs no such comparison in attacker-visible
+    // time: Postgres resolves `WHERE token_hash = $1` via the index in
+    // essentially the same time whether zero rows match (a wrong guess) or
+    // one row matches (the right guess) — there is no partial-match signal
+    // to narrow in on, because equality on an indexed column is not
+    // evaluated byte-by-byte from the caller's perspective. The 256-bit
+    // token space also makes a blind guess computationally infeasible
+    // regardless of timing precision, but that's a backstop, not the reason
+    // this is safe — the reason is there is no incremental signal to time.
+    const installation = await this.repo.findInstallationByTokenHash(hash);
     if (!installation) {
-      throw new UnauthorizedError('Invalid or missing ingest credentials');
-    }
-
-    const presented = createHash('sha256').update(tokenHeader, 'utf8').digest();
-    const stored = hexToBuffer(installation.tokenHash);
-    if (!stored || !constantTimeEqual(presented, stored)) {
       throw new UnauthorizedError('Invalid or missing ingest credentials');
     }
 

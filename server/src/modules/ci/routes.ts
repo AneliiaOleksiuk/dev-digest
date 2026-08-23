@@ -22,10 +22,20 @@ import { CiService } from './service.js';
  *                                             installation, no token (AC-37).
  *   POST   /ci/ingest                      → the module's ONE result-
  *                                             accepting route (AC-49);
- *                                             authenticated by header
- *                                             installation id + token, NOT
- *                                             by session (`getContext` is
- *                                             never called here, AC-52).
+ *                                             authenticated by a single
+ *                                             `Authorization: Bearer <token>`
+ *                                             header — the exact shape the
+ *                                             generated workflow's reporting
+ *                                             step sends (`workflow.ts`) —
+ *                                             NOT by session (`getContext`
+ *                                             is never called here, AC-52).
+ *                                             Fix (finding 1): this used to
+ *                                             read two custom headers
+ *                                             (`x-devdigest-installation` /
+ *                                             `x-devdigest-token`) that the
+ *                                             generator never emitted, so
+ *                                             the ingest path could never
+ *                                             authenticate in production.
  *   GET    /ci/runs                        → workspace's CI runs (`source
  *                                             ='ci'` only), filterable.
  *   GET    /agents/:id/ci-installations    → an agent's installations.
@@ -138,9 +148,12 @@ export default async function ciRoutes(appBase: FastifyInstance) {
     '/ci/ingest',
     { config: { rateLimit: INGEST_RATE_LIMIT }, bodyLimit: MAX_INGEST_BODY_BYTES },
     async (req, reply) => {
-      const installationId = firstHeaderValue(req.headers['x-devdigest-installation']);
-      const token = firstHeaderValue(req.headers['x-devdigest-token']);
-      await service.ingest(installationId, token, req.body, req.log);
+      // Fix (finding 1) — a single `Authorization: Bearer <token>` header,
+      // matching what the generated workflow's reporting step actually
+      // sends (`workflow.ts`). `service.ingest` parses the `Bearer` scheme
+      // and hashes/looks up the token itself.
+      const authorizationHeader = firstHeaderValue(req.headers['authorization']);
+      await service.ingest(authorizationHeader, req.body, req.log);
       reply.status(201);
       return { ok: true };
     },

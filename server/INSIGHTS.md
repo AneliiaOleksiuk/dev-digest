@@ -1649,3 +1649,80 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   token/hash/contents/systemPrompt/body confirmed by grep across
   `modules/ci/*.ts`. No test authorship this session (explicit user
   instruction for this pass, not just the usual "test-writer's job next").
+
+- **SPEC-04 fix-loop, iteration 1 (2026-08-23) — three `plan-verifier`
+  findings, each a durable lesson beyond this feature:**
+  1. **The ingest header-auth entry directly above this one documents
+     `POST /ci/ingest` as "header-authenticated" and even claims a live
+     verification — but the header names on each side were never
+     cross-checked against each other.** `workflow.ts`'s reporting step has
+     ALWAYS sent `Authorization: Bearer $INGEST_TOKEN`; `routes.ts`/
+     `service.ts` read `x-devdigest-installation` + `x-devdigest-token`,
+     which nothing ever emitted — so the whole push-based ingest path was
+     dead in production despite each half individually passing its own
+     phase's live check (the Phase C verification above tested the route
+     directly via a hand-crafted curl using the headers the ROUTE expected,
+     never against what the GENERATOR actually produces). Lesson: whenever a
+     credential/contract crosses a generator/consumer boundary (a workflow
+     you emit vs. an endpoint you also own), grep BOTH sides for the literal
+     header/field name before calling it done — "each half is independently
+     correct" is not the same claim as "the two halves agree", and a
+     same-repo generator+consumer pair is exactly the case where it's easy
+     to assume they were written to agree without checking. Fixed by
+     converging the SERVER on the single `Authorization: Bearer` header the
+     generator already emitted (simpler than threading an installation id
+     through the generator, which would have created a Preview/Install
+     byte-identity problem AC-5 doesn't otherwise have) — added
+     `findInstallationByTokenHash`, since the hash lookup itself is now the
+     whole authentication (no separate compare-then-fetch step, so no
+     `timingSafeEqual` needed: a hash-KEYED indexed lookup exposes no
+     byte-by-byte comparison timing signal the way a fetch-then-compare flow
+     does).
+  2. **A path/identifier derived from a MUTABLE field (`slugify(agent.name)`)
+     and re-derived on every operation, instead of being persisted once and
+     reused, is stable-looking on the first call and silently drifts on the
+     Nth.** `avoidDoubleManifest`'s replace-conflict handling rewrote the
+     manifest path correctly for exactly one export, but a later plain
+     re-export of that same (now-installed) agent took a different code
+     branch that never called it, re-deriving the path from the agent's
+     CURRENT name instead — leaving the old committed file behind (two
+     manifests, `agent-runner` refuses to start). General lesson for this
+     codebase: if a generated artifact's identity/path needs to survive
+     across multiple future operations on the same row, it belongs in a
+     persisted column set once at creation, not a function of a live,
+     editable field re-evaluated each time — "the same computation on the
+     same inputs is deterministic" is true but not the property that was
+     actually needed (the inputs, i.e. the agent's name, are exactly what
+     can change between calls).
+  3. **Never reuse a job step's EXIT-CODE-driving signal as an unrelated
+     status field, when that signal is deliberately overloaded to produce a
+     side effect.** `steps.review.outcome` is intentionally `failure`
+     whenever the deterministic gate wants to redden the GitHub check
+     (that's the entire mechanism `ci_fail_on` relies on) — reusing the same
+     value to decide the ingested `status` field conflated "did the review
+     complete" with "should the check be red", made a correctly-blocking
+     review indistinguishable from a pre-review crash, and made one of four
+     enum states (`no_findings`) permanently unreachable. Fix: derive
+     `status` from the ARTIFACT's own content (`findings_count` from
+     `devdigest-result.json`) and leave the exit-code-driven gate step
+     completely alone — two different questions, two different signals,
+     never merge them just because one script has both available in scope.
+  4. **Live-testing a worktree's OWN code against a shared dev Postgres:
+     check `netstat -ano` for which PID actually owns the port you're about
+     to curl before trusting it's your code.** Multiple `tsx watch
+     src/server.ts` processes can be running simultaneously across
+     different worktrees/checkouts, all pointed at the same
+     `devdigest-postgres` container (same default `DATABASE_URL`) — curling
+     `localhost:3001` can silently hit a DIFFERENT worktree's server if one
+     got there first. Booting your own instance on an alternate `API_PORT`
+     (env var, defaults to 3001) against the same shared DB is a safe,
+     supported way to live-verify a fix without disturbing whatever else is
+     running — schema changes and data are shared, code is not.
+  All three findings fixed; `pnpm typecheck`/`arch:check` clean;
+  findings 1 and 2 re-verified live (a throwaway `ci_installations` row +
+  `curl` for finding 1's 401/201 cases and `agent_runs.workspace_id`
+  tenancy; a throwaway tsx script exercising `CiService.install()` directly
+  against real Postgres, with only `container.github()` mocked, for
+  finding 2's fresh-install → replace-conflict → re-export sequence) —
+  all test data deleted afterward. No test authorship this session either
+  (same explicit user instruction as the original SPEC-04 pass).

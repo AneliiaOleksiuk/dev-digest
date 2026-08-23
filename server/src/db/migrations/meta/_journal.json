@@ -155,6 +155,13 @@
       "when": 1787435424411,
       "tag": "0021_wide_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787443169564,
+      "tag": "0022_colorful_miss_america",
+      "breakpoints": true
     }
   ]
 }

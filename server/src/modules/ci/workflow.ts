@@ -63,16 +63,32 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
     DEVDIGEST_POST_AS: input.postAs,
   };
 
+  // Fix (finding 3): `status` is derived from the ARTIFACT's own content,
+  // never from `steps.review.outcome`. The review step's exit code is
+  // DELIBERATELY non-zero whenever the deterministic gate triggers
+  // REQUEST_CHANGES — that's how a CRITICAL finding turns the check red
+  // (AC-31/D-9, see the gate step below, which still reads
+  // `$REVIEW_OUTCOME` for THAT decision and is unchanged). Conflating the two
+  // meant a correctly-blocking review was recorded as `failed`, indistinguishable
+  // from a genuine pre-review crash, and made `no_findings` unreachable.
+  // Here: RESULT missing/literally `null` (the runner's hard-fail path wrote
+  // no artifact) -> failed; RESULT present with findings_count === 0 ->
+  // no_findings; any other findings_count -> succeeded.
   const reportScript = [
     'if [ -f devdigest-result.json ]; then',
     '  RESULT=$(cat devdigest-result.json)',
     'else',
     '  RESULT=null',
     'fi',
-    'if [ "$REVIEW_OUTCOME" = "success" ]; then',
-    '  STATUS=succeeded',
-    'else',
+    'if [ "$RESULT" = "null" ]; then',
     '  STATUS=failed',
+    'else',
+    "  FINDINGS_COUNT=$(echo \"$RESULT\" | jq -r '.findings_count')",
+    '  if [ "$FINDINGS_COUNT" = "0" ]; then',
+    '    STATUS=no_findings',
+    '  else',
+    '    STATUS=succeeded',
+    '  fi',
     'fi',
     'BODY=$(jq -n \\',
     '  --argjson result "$RESULT" \\',
@@ -133,7 +149,11 @@ export function buildWorkflow(input: BuildWorkflowInput): Document {
               ACTIONS_RUN_ID: '${{ github.run_id }}',
               JOB_URL:
                 '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
-              REVIEW_OUTCOME: '${{ steps.review.outcome }}',
+              // NOTE: deliberately NOT passing REVIEW_OUTCOME here (finding 3)
+              // — this step's status derivation reads ONLY the artifact
+              // (RESULT/findings_count) above. REVIEW_OUTCOME is still read,
+              // unchanged, by the separate "Gate on review outcome" step below,
+              // which is what actually turns the job (and the check) red.
             },
             run: reportScript,
           },

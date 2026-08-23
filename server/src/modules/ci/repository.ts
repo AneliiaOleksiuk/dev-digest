@@ -6,16 +6,17 @@
  *
  * TENANCY (A01): `ci_installations` carries NO `workspace_id` column of its
  * own (`db/schema/ci.ts`) — every method below that takes a `workspaceId`
- * joins through `agents.workspace_id` to enforce it. The ONE exception is
- * `findInstallationById`, used only by the ingest path (`POST /ci/ingest`)
- * BEFORE tenancy is known — the presented token is what proves which
- * installation (and therefore which workspace) the caller may write into,
- * so this method resolves and RETURNS `workspaceId` with the row rather than
- * accepting it, and every other ingest-path operation is scoped from that
- * resolved value (never from `getContext`, AC-52). `agent_runs` (unlike
- * `ci_installations`) already carries its own `workspace_id` column
- * (`db/schema/runs.ts`, added Phase A) — `insertCiRun`/`listCiRuns` scope
- * directly off that column, no `agents` join needed for those two.
+ * joins through `agents.workspace_id` to enforce it. The exception is
+ * `findInstallationByTokenHash`, used only by the ingest path
+ * (`POST /ci/ingest`) BEFORE tenancy is known — the presented token is what
+ * proves which installation (and therefore which workspace) the caller may
+ * write into, so it resolves and RETURNS `workspaceId` with the row rather
+ * than accepting it, and every other ingest-path operation is scoped from
+ * that resolved value (never from `getContext`, AC-52). `agent_runs` (unlike
+ * `ci_installations`) already
+ * carries its own `workspace_id` column (`db/schema/runs.ts`, added Phase A)
+ * — `insertCiRun`/`listCiRuns` scope directly off that column, no `agents`
+ * join needed for those two.
  */
 
 // ---- shared literal unions (mirrors the DB enums; kept local rather than
@@ -40,6 +41,15 @@ export interface CiInstallationRow {
   postAs: CiPostAs;
   triggers: string[];
   baseBranch: string;
+  /**
+   * Fix (finding 2): a STABLE, persisted path for this installation's
+   * manifest under `.devdigest/agents/` — set once (fresh install, or
+   * inherited from a replaced installation on a confirmed conflict) and
+   * reused on every later re-export, never re-derived from the agent's
+   * CURRENT name. See `db/schema/ci.ts`'s `manifestPath` doc comment for the
+   * bug this closes.
+   */
+  manifestPath: string;
   updatedAt: Date;
 }
 
@@ -54,7 +64,7 @@ export interface CiInstallationWithLastRun extends CiInstallationRow {
   lastRun: CiLastRunSummary | null;
 }
 
-/** `findInstallationById`'s return shape — the row PLUS its resolved
+/** `findInstallationByTokenHash`'s return shape — the row PLUS its resolved
  *  workspace, so the ingest path can never forget to scope off it (AC-52). */
 export interface CiInstallationWithWorkspace extends CiInstallationRow {
   workspaceId: string;
@@ -70,6 +80,12 @@ export interface UpsertInstallationInput {
   postAs: CiPostAs;
   triggers: string[];
   baseBranch: string;
+  /** Fix (finding 2) — see `CiInstallationRow.manifestPath`'s doc comment.
+   *  The caller (service.ts) has already resolved the correct value for
+   *  this export (fresh slug-derived path / inherited from a replaced
+   *  installation / reused from `existing.manifestPath`) before calling
+   *  this method — this field just persists whatever was resolved. */
+  manifestPath: string;
   /**
    * Used ONLY when this call performs a genuine INSERT (no existing row for
    * this `(agentId, repo)` pair). On an UPDATE (the row already exists), the
@@ -85,7 +101,7 @@ export interface UpsertInstallationInput {
 
 /** One CI run to record — every field explicit, nothing spread from the
  *  ingest request body (A08). `workspaceId`/`agentId` are DATA carried on
- *  the row (resolved by the caller from `findInstallationById`, never
+ *  the row (resolved by the caller from `findInstallationByTokenHash`, never
  *  re-derived here) — this method does not use them to SCOPE the write the
  *  way every other method's `workspaceId` parameter does, which is why it is
  *  the second of the two ingest-path exceptions named in this file's module
@@ -176,13 +192,19 @@ export interface CiRepository {
    *  `ON DELETE SET NULL` — past CI runs stay readable (E-24's precedent). */
   deleteInstallation(workspaceId: string, id: string): Promise<boolean>;
 
-  // ---- ingest-path exceptions (see module docblock) ------------------------
+  // ---- ingest-path exception (see module docblock) --------------------------
 
-  /** Resolve an installation by id ALONE, with its workspace — used ONLY by
-   *  `POST /ci/ingest`, and only AFTER the presented token has already been
-   *  verified against this row's `tokenHash` by the caller (the row must
-   *  never be used for anything before that check succeeds). */
-  findInstallationById(id: string): Promise<CiInstallationWithWorkspace | undefined>;
+  /**
+   * Fix (finding 1) — the ingest endpoint's actual authentication path.
+   * `hash` is `sha256(presentedToken)`, computed by the caller BEFORE this
+   * call. The lookup itself IS the authentication: a hash match proves
+   * possession of the token (there is no separate "installation is
+   * unknown" step to fold in — an unmatched hash simply returns no row,
+   * which the caller treats as 401). Returns the row with its resolved
+   * `workspaceId`, same shape as `findInstallationById`, for the same
+   * reason (AC-52).
+   */
+  findInstallationByTokenHash(hash: string): Promise<CiInstallationWithWorkspace | undefined>;
 
   /** Idempotent on the `(ci_installation_id, actions_run_id)` unique index —
    *  a conflict is a no-op SUCCESS (returns normally), never a thrown error

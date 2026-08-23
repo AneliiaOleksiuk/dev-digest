@@ -83,6 +83,7 @@ export class DrizzleCiRepository implements CiRepository {
         postAs: input.postAs,
         triggers: input.triggers,
         baseBranch: input.baseBranch,
+        manifestPath: input.manifestPath,
         tokenHash: input.tokenHash,
       })
       .onConflictDoUpdate({
@@ -95,6 +96,12 @@ export class DrizzleCiRepository implements CiRepository {
           postAs: input.postAs,
           triggers: input.triggers,
           baseBranch: input.baseBranch,
+          // Fix (finding 2): the caller has already resolved the STABLE
+          // value (fresh / inherited / reused from `existing.manifestPath`)
+          // before calling this method, so persisting whatever is passed is
+          // correct here — unlike `tokenHash`, there is no "never overwrite"
+          // requirement for this column.
+          manifestPath: input.manifestPath,
           updatedAt: new Date(),
           // tokenHash intentionally absent — see doc comment above.
         },
@@ -117,14 +124,18 @@ export class DrizzleCiRepository implements CiRepository {
     return true;
   }
 
-  // ---- ingest-path exceptions (see repository.ts's module docblock) ------
+  // ---- ingest-path exception (see repository.ts's module docblock) -------
 
-  async findInstallationById(id: string): Promise<CiInstallationWithWorkspace | undefined> {
+  /** Fix (finding 1) — see `repository.ts`'s doc comment. `token_hash` has a
+   *  plain (non-unique) index (`db/schema/ci.ts`); a collision is not this
+   *  feature's threat model (D-1), so `LIMIT 1` via destructuring the first
+   *  row is an accepted, deliberate simplification, not an oversight. */
+  async findInstallationByTokenHash(hash: string): Promise<CiInstallationWithWorkspace | undefined> {
     const [row] = await this.db
       .select({ installation: t.ciInstallations, workspaceId: t.agents.workspaceId })
       .from(t.ciInstallations)
       .innerJoin(t.agents, eq(t.ciInstallations.agentId, t.agents.id))
-      .where(eq(t.ciInstallations.id, id));
+      .where(eq(t.ciInstallations.tokenHash, hash));
     return row ? { ...toInstallationRow(row.installation), workspaceId: row.workspaceId } : undefined;
   }
 
@@ -279,6 +290,7 @@ function toInstallationRow(row: CiInstallationSelectRow): CiInstallationRow {
     postAs: row.postAs as CiPostAs,
     triggers: row.triggers,
     baseBranch: row.baseBranch,
+    manifestPath: row.manifestPath,
     updatedAt: row.updatedAt,
   };
 }

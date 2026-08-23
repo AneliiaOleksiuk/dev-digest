@@ -33,7 +33,7 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          INGEST_URL: " https://f31783aa7fe5.ngrok.app/ci/ingest"
+          INGEST_URL: https://f31783aa7fe5.ngrok.app/ci/ingest
           INGEST_TOKEN: ${{ secrets.DEVDIGEST_INGEST_TOKEN_GENERAL_REVIEWER }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

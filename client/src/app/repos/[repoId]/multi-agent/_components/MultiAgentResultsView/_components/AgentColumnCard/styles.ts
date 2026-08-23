@@ -33,5 +33,17 @@ export const s = {
     fontSize: 12.5,
     lineHeight: 1.4,
   } as React.CSSProperties,
-  footer: { display: "flex", justifyContent: "flex-end" } as React.CSSProperties,
+  footer: { display: "flex", alignItems: "center", justifyContent: "space-between" } as React.CSSProperties,
+  footerCount: { fontSize: 12, color: "var(--text-muted)" } as React.CSSProperties,
+  findingsList: { display: "flex", flexDirection: "column", gap: 8 } as React.CSSProperties,
+  findingRow: { display: "flex", alignItems: "flex-start", gap: 8 } as React.CSSProperties,
+  findingMain: { flex: 1, minWidth: 0 } as React.CSSProperties,
+  findingTitle: {
+    fontSize: 12.5,
+    color: "var(--text-primary)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } as React.CSSProperties,
+  findingLoc: { fontSize: 11.5, color: "var(--text-muted)" } as React.CSSProperties,
 };

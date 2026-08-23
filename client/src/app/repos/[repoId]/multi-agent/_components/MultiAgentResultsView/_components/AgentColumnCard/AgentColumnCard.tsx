@@ -12,7 +12,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Button, CircularScore, Icon, LiveLogStream, type LogLine } from "@devdigest/ui";
+import { Button, CircularScore, Icon, LiveLogStream, SeverityBadge, type LogLine } from "@devdigest/ui";
 import type { AgentColumn } from "@devdigest/shared";
 import { formatCost } from "@/helpers/format";
 import { useRunEvents } from "@/lib/hooks/reviews";
@@ -21,6 +21,10 @@ import { statusMetaFor } from "./helpers";
 import { s } from "./styles";
 
 const LOG_HEIGHT = 160;
+// Top findings shown inline per the Columns design screenshot — the rest are
+// still counted in the footer and fully visible in Tabs/the finding groups
+// below; this cap keeps a done column's height sane with a noisy agent.
+const INLINE_FINDINGS_LIMIT = 3;
 
 export function AgentColumnCard({
   column,
@@ -65,18 +69,37 @@ export function AgentColumnCard({
           <span>{column.error ?? t(`page.columnCard.status.${column.status}`)}</span>
         </div>
       ) : (
-        <div style={s.meta}>
-          {column.score != null && <CircularScore score={column.score} size={36} stroke={3} />}
-          <span>{t("column.findingsCount", { count: column.findings.length })}</span>
-          {durationS != null && <span>{durationS}s</span>}
-          <span>{formatCost(column.cost_usd)}</span>
-        </div>
+        <>
+          <div style={s.meta}>
+            {column.score != null && <CircularScore score={column.score} size={36} stroke={3} />}
+            {durationS != null && <span>{durationS}s</span>}
+            <span>{formatCost(column.cost_usd)}</span>
+          </div>
+          {column.findings.length > 0 && (
+            <div style={s.findingsList}>
+              {column.findings.slice(0, INLINE_FINDINGS_LIMIT).map((f) => (
+                <div key={f.id} style={s.findingRow}>
+                  <SeverityBadge severity={f.severity} compact />
+                  <div style={s.findingMain}>
+                    <div style={s.findingTitle}>{f.title}</div>
+                    <div className="mono" style={s.findingLoc}>
+                      {f.file}:{f.start_line}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <div style={s.footer}>
         <Button kind="ghost" size="sm" icon="PanelRight" onClick={onOpenTrace}>
           {t("viewTrace")}
         </Button>
+        {column.status === "done" && (
+          <span style={s.footerCount}>{t("column.findingsCount", { count: column.findings.length })}</span>
+        )}
       </div>
     </div>
   );

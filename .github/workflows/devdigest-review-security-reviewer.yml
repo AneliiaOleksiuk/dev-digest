@@ -1,3 +1,4 @@
+name: devdigest-review-security-reviewer
 on:
   pull_request:
     types:
@@ -26,13 +27,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           DEVDIGEST_POST_AS: github_review
+          DEVDIGEST_DIR: .devdigest/security-reviewer
         run: node .devdigest/runner/index.js
       - name: Report result to DevDigest
         if: always()
         continue-on-error: true
         env:
-          INGEST_URL: " https://f31783aa7fe5.ngrok.app"
-          INGEST_TOKEN: ${{ secrets.DEVDIGEST_INGEST_TOKEN }}
+          INGEST_URL: https://f31783aa7fe5.ngrok.app
+          INGEST_TOKEN: ${{ secrets.DEVDIGEST_INGEST_TOKEN_SECURITY_REVIEWER }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

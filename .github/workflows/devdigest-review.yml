@@ -1,0 +1,79 @@
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: DevDigest review
+        id: review
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEVDIGEST_POST_AS: github_review
+        run: node .devdigest/runner/index.js
+      - name: Report result to DevDigest
+        if: always()
+        continue-on-error: true
+        env:
+          INGEST_URL: http://localhost:3008/ci/ingest
+          INGEST_TOKEN: ${{ secrets.DEVDIGEST_INGEST_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTIONS_RUN_ID: ${{ github.run_id }}
+          JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |-
+          if [ -f devdigest-result.json ]; then
+            RESULT=$(cat devdigest-result.json)
+          else
+            RESULT=null
+          fi
+          if [ "$RESULT" = "null" ]; then
+            STATUS=failed
+          else
+            FINDINGS_COUNT=$(echo "$RESULT" | jq -r '.findings_count')
+            if [ "$FINDINGS_COUNT" = "0" ]; then
+              STATUS=no_findings
+            else
+              STATUS=succeeded
+            fi
+          fi
+          BODY=$(jq -n \
+            --argjson result "$RESULT" \
+            --arg repo "$REPO" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg actions_run_id "$ACTIONS_RUN_ID" \
+            --arg job_url "$JOB_URL" \
+            --arg status "$STATUS" \
+            '{result: $result, repo: $repo, head_sha: $head_sha, pr_number: ($pr_number | tonumber? // null), actions_run_id: $actions_run_id, job_url: $job_url, source: "github_actions", status: $status, duration_ms: null, error: null}')
+          curl -sS -X POST "$INGEST_URL" \
+            -H "Authorization: Bearer $INGEST_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"
+      - name: Gate on review outcome
+        if: always()
+        env:
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |-
+          echo "Review step outcome: $REVIEW_OUTCOME"
+          if [ "$REVIEW_OUTCOME" = "failure" ]; then
+            echo "Review reported blocking findings or failed to run; failing the job."
+            exit 1
+          fi

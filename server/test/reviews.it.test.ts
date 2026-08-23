@@ -292,6 +292,45 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     await app.close();
   });
 
+  it('regression: accepting one finding does not reorder the others in the list', async () => {
+    // Reproduces a real bug: reviewsForPull's findings query had no ORDER BY,
+    // so Postgres's row order was unspecified — an UPDATE (accept sets
+    // accepted_at) can relocate a row's physical tuple, so the SAME query
+    // returned a DIFFERENT order right after an accept, and a finding
+    // appeared to "jump" in the UI for no reason a reader could see.
+    const app = await appWith(REVIEW_FIXTURE);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [review] = await pg.handle.db
+      .insert(t.reviews)
+      .values({ workspaceId, prId: pr.id, kind: 'review', verdict: 'comment', summary: 's' })
+      .returning();
+    const findingRows = await pg.handle.db
+      .insert(t.findings)
+      .values([
+        { reviewId: review!.id, file: 'a.ts', startLine: 1, endLine: 1, severity: 'WARNING', category: 'bug', title: 'A', rationale: 'r', confidence: 0.8 },
+        { reviewId: review!.id, file: 'b.ts', startLine: 1, endLine: 1, severity: 'WARNING', category: 'bug', title: 'B', rationale: 'r', confidence: 0.8 },
+        { reviewId: review!.id, file: 'c.ts', startLine: 1, endLine: 1, severity: 'WARNING', category: 'bug', title: 'C', rationale: 'r', confidence: 0.8 },
+      ])
+      .returning();
+
+    const before = (
+      await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })
+    ).json();
+    const idsBefore = before[0].findings.map((f: { id: string }) => f.id);
+
+    // Accept the MIDDLE one — an UPDATE most likely to relocate its tuple.
+    await app.inject({ method: 'POST', url: `/findings/${findingRows[1]!.id}/accept` });
+
+    const after = (
+      await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })
+    ).json();
+    const idsAfter = after[0].findings.map((f: { id: string }) => f.id);
+
+    expect(idsAfter).toEqual(idsBefore);
+
+    await app.close();
+  });
+
   it('SSE: /runs/:id/events streams events and completes', async () => {
     const app = await appWith(REVIEW_FIXTURE);
     const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);

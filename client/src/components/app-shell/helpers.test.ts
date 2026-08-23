@@ -35,3 +35,23 @@ describe("activeKeyFor — E-17/AC-37 nav-collision fix", () => {
     expect(activeKeyFor("/some/other/route")).toBe("");
   });
 });
+
+/**
+ * L06 WI13 — "What was built" records `app-shell/helpers.ts` fixing an
+ * `activeKeyFor` nav-highlight bug: the predicate compared against the
+ * singular "eval", which never matches `nav.ts`'s NAV item key "evals"
+ * (plural), leaving the sidebar entry permanently unhighlighted. Oracle:
+ * AC-36 requires the entry ("component test on the nav registry"); a
+ * registry entry that never highlights when its own route is active is a
+ * regression this dedicated case exists to catch even if `nav.test.ts`'s
+ * registry-shape assertions pass.
+ */
+describe("activeKeyFor — L06/AC-36 evals nav-highlight", () => {
+  it("/evals resolves to the 'evals' key (matching nav.ts's item key exactly, not 'eval')", () => {
+    expect(activeKeyFor("/evals")).toBe("evals");
+  });
+
+  it("a sub-path of /evals still resolves to the 'evals' key", () => {
+    expect(activeKeyFor("/evals?agent=ag1")).toBe("evals");
+  });
+});

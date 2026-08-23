@@ -36,7 +36,13 @@ export function activeKeyFor(pathname: string): string {
   if (pathname.includes("/pulls")) return "pulls";
   if (pathname.startsWith("/skills")) return "skills";
   if (pathname.startsWith("/agents")) return "agents";
-  if (pathname.startsWith("/eval")) return "eval";
+  // Pre-wired ahead of the nav entry (same pattern INSIGHTS.md already
+  // documents for /context and /conventions) — the string MUST match
+  // `nav.ts`'s NAV item `key` exactly ("evals", plural, per the L06 plan),
+  // not the route prefix. Was "eval" (singular) here, which never matched
+  // and left the sidebar item permanently unhighlighted; fixed alongside
+  // adding the nav entry itself.
+  if (pathname.startsWith("/evals")) return "evals";
   if (pathname.startsWith("/memory")) return "memory";
   if (pathname.startsWith("/agent-performance")) return "agent-performance";
   if (pathname.startsWith("/ci-runs")) return "ci-runs";

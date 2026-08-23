@@ -66,6 +66,24 @@ export type {
   BriefTimelineResponse,
 } from "@devdigest/shared";
 
+/* Eval Pipeline (L06, docs/plans/eval-pipeline.md WI9) — the eval-ci
+   contract types, re-exported per this file's own header convention
+   (add here rather than redefine locally). `hooks/eval.ts` imports from
+   "../types" the same way `hooks/brief.ts` imports BriefResponse. */
+export type {
+  EvalExpectationEntry,
+  EvalExpectation,
+  EvalCaseInputMeta,
+  EvalCaseInput,
+  EvalCaseFromFindingInput,
+  EvalCaseRecord,
+  EvalRunRecord,
+  EvalBatchRecord,
+  EvalComparison,
+  EvalTrendPoint,
+  EvalDashboard,
+} from "@devdigest/shared";
+
 /** What a findings-deep-link click should focus: a run, a severity, a
  *  single finding, or any combination — driven from the PR list hover
  *  preview, the Timeline, a Review-runs header badge, or a diff-line tag. */

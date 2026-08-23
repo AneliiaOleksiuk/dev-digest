@@ -147,6 +147,29 @@ export class AgentsService {
   }
 
   /**
+   * WI7 (eval batch runner) — the shape `skillLinks` above can't provide
+   * (ids + order only). Additive, read-only, no behaviour change to any
+   * existing agents route: exists so `modules/eval` never imports
+   * `AgentsRepository` directly (onion-architecture "Cross-module reads"
+   * rule) — `modules/reviews/run-executor.ts:231` reaching into
+   * `container.agentsRepo.linkedSkills` directly is the pre-existing pattern
+   * this method exists specifically to avoid copying for the eval module.
+   */
+  async linkedSkillsForRun(agentId: string): Promise<
+    { skill_id: string; name: string; body: string; enabled: boolean; version: number; order: number }[]
+  > {
+    const links = await this.repo.linkedSkills(agentId);
+    return links.map((l) => ({
+      skill_id: l.skill.id,
+      name: l.skill.name,
+      body: l.skill.body,
+      enabled: l.skill.enabled,
+      version: l.skill.version,
+      order: l.order,
+    }));
+  }
+
+  /**
    * Set / reorder the agent's linked skills. If `skillIds` is provided, replaces
    * the whole set in that order. Returns the resulting ordered links.
    */

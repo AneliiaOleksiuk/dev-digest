@@ -400,6 +400,87 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   (`findMemoryByToken`) was deleted outright, not kept as a fallback — the
   new dedicated column is strictly better and the old approach had no
   remaining callers.
+- **`onion-architecture`'s `rules/dependency-rule.md` table says `service.ts`
+  must never import `platform/container.ts`, but the real, already-shipped
+  precedent contradicts the table and IS the pattern to follow
+  (2026-08-20, L06-Evals Phase B, `modules/eval/service.ts`).**
+  `modules/blast/service.ts` (a genuinely new, post-skill module cited
+  elsewhere in this file as "otherwise a normal onion module") takes
+  `Container` in its constructor and calls `this.container.repoIntel...`
+  directly — `examples.md`'s own "good" `XService` example, by contrast,
+  takes only the repository interface, no `Container`. When a new module's
+  service needs to construct a SIBLING module's `Service` class for a
+  cross-module read (the skill's own sanctioned "depend on the owning
+  module's `service.ts`, not its `repository.ts`" rule), that construction
+  has to happen somewhere, and the working examples in this codebase
+  (`brief/sources.node.ts:45` constructing `BlastService`, and now
+  `eval/service.ts` constructing `AgentsService`) all do it by threading
+  `Container` through, not by trying to avoid importing `Container` at all
+  costs. Followed the real precedent (Container in the constructor, used
+  only to build peer `*Service` instances or read cross-cutting facades like
+  `repoIntel`) rather than the stricter written table — `arch:check` stayed
+  green either way, since none of the four dependency-cruiser rules actually
+  forbid `service.ts → platform/container.ts` (only `db/schema|client`,
+  `adapters/`, and — for `helpers.ts` only — `container.ts` itself are
+  matched). If a future session tightens `dependency-rule.md`'s table to
+  match this practice (or adds a fifth dependency-cruiser rule to actually
+  enforce the stricter table), don't be surprised that `blast/service.ts`
+  and `eval/service.ts` both need it grandfathered or rewritten.
+- **Re-implementing a cross-module join locally (per onion's "Cross-module
+  reads" rule) is mechanical, not risky, when the source function is a plain
+  `db.select()` chain (2026-08-20, `modules/eval/repository.drizzle.ts`'s
+  `getFindingContext`).** `modules/reviews/repository.ts`'s `findingContext`
+  (three sequential `getFinding`/`getReview`/one inline `pull_requests`
+  select) and `modules/reviews/diff-loader.ts`'s `diffFromPrFiles` (a
+  four-line-per-file `diff --git`/`---`/`+++`/patch text builder) were both
+  copied in SHAPE, not imported, into `modules/eval/`'s own
+  `repository.drizzle.ts` (`getFindingContext`) and `helpers.ts`
+  (`buildDiffText`) respectively — neither original function was touched.
+  Both are ~10-15 lines of straight-line Drizzle/string-building code with no
+  hidden behavior, so the duplication is a one-time cost, not an ongoing
+  maintenance burden; if `diffFromPrFiles`'s four-line format ever changes,
+  grep for the literal `diff --git a/` string to find every place that needs
+  updating in lockstep (currently 2: the original and this mirror).
+
+- **The Agents module's update route is `PUT /agents/:id`, not `PATCH`**
+  (`modules/agents/routes.ts:109`) — every other module touched by L06-Evals
+  (`eval-cases`, etc.) uses `PATCH` for its own partial-update route, so it's
+  an easy wrong guess to carry over when writing a cross-module test/script
+  against agents. `POST /agents`/`DELETE /agents/:id` are the usual verbs;
+  only the update route is the outlier.
+- **`EvalDashboard.delta`'s three metric fields are plain non-nullable
+  `z.number()`s in the committed Phase-A contract, unlike
+  `EvalComparison.delta`'s fields, which ARE individually nullable
+  (2026-08-21, WI8, `modules/eval/service.ts`'s `buildDashboard`).** Once
+  `buildDashboard` decides to render a delta block at all (>=2 batches for
+  the same owner), every one of `recall`/`precision`/`citation_accuracy` must
+  be a real number — there is no per-field null escape hatch the way
+  `EvalComparison.delta`'s schema allows. The chosen compromise (documented
+  inline at the computation): when either endpoint batch's OWN metric is
+  null (e.g. a batch whose cases had zero `must_find` entries, so `recall`
+  is genuinely unmeasured), report `0` for that delta field rather than
+  subtracting against a fabricated non-null baseline — the latter would read
+  as a false swing ("recall dropped by 0.8") when the truth is "unmeasured
+  this batch," which is strictly worse. `EvalComparison`'s own delta (WI8's
+  `compare()` method) does NOT have this problem — use `null` there whenever
+  either side's metric is null, since the schema allows it. If a future
+  session widens `EvalDashboard.delta`'s fields to `.nullable()` to close this
+  gap, `buildDashboard`'s `0`-fallback branch should be replaced with a real
+  null at the same time — don't leave both paths inconsistent.
+  **STALE as of 2026-08-21 (Phase C `plan-verifier` fix-loop, Major finding
+  #2) — the gap above is now closed, not just documented as a tradeoff.**
+  `EvalDashboard.delta`'s three fields were widened to `.nullable()` in BOTH
+  vendored `eval-ci.ts` copies, and `buildDashboard`'s `0`-fallback branch was
+  replaced with `latest.x !== null && previous.x !== null ? latest.x -
+  previous.x : null` per field — exactly the fix this entry's last sentence
+  anticipated. The `0`-fallback code this entry describes no longer exists;
+  don't reintroduce it from memory of this entry alone, check the current
+  `service.ts`. Confirmed zero client consumers of `EvalDashboard.delta`
+  existed before the widening (`grep -r "delta" client/src` hit only
+  `MetricCard`'s own unrelated generic `delta` prop and a `Showcase` demo
+  usage), so this contract ripple needed no client-side fixture update —
+  unlike the `project_context_docs`/`risk_areas` ripples documented
+  elsewhere in this file.
 
 ## Tool & Library Notes
 
@@ -502,6 +583,186 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   violation bubble up as a raw 500. If a future feature needs the same
   "DB constraint as idempotency guarantee, not just a crash-preventer"
   shape, this is the exact error-code check to reuse.
+- **pgvector column dimension mismatch after embedding model change silently
+  returns zero rows (2026-08-20).** When switching embedding models (e.g.,
+  OpenAI `text-embedding-3-small` 1536-dim → a different provider's 3072-dim),
+  the pgvector column's vector-dimension constraint stays at the OLD size.
+  Subsequent queries with embeddings of the NEW dimension silently return empty
+  results — no SQL error, no type error, just no matching rows. The cause is
+  hidden inside pgvector's distance-computation internals: a vector of
+  dimension 3072 cannot compute distance against a column defined as dimension
+  1536, so the WHERE clause silently matches nothing. **Fix:** after changing
+  the embedding model, regenerate and apply a fresh Drizzle migration — `pnpm
+  db:generate` (inspect the resulting `migrations/*.sql` to confirm the
+  column's `vector(n)` constraint changed to the new dimension), then `pnpm
+  db:migrate`. The dimension is baked into the column's type definition at the
+  DDL level; the database will not auto-adapt it. **Prevention:** Store the
+  embedding model name and expected dimension in a schema comment or Drizzle
+  migration so a future model change surfaces the mismatch during code review:
+  `// Embedded with OpenAI text-embedding-3-small (1536-dim)` on the column
+  definition. This is especially subtle because a local schema mismatch won't
+  surface until you actually run a query — typecheck and connection testing both
+  pass silently.
+- **The two vendored `eval-ci.ts` copies had pre-existing byte-drift before
+  L06-Evals touched them (2026-08-20).** `client/src/vendor/shared/contracts/
+  eval-ci.ts` was missing `AgentManifest`/`AgentManifestInput` entirely, only
+  imported `Provider`/`CiFailOn` implicitly via that missing export, and
+  `ConformanceInput.provider`'s enum lacked the `'openrouter'` variant the
+  server copy has — none of it exercised anywhere in `client/src` (grep
+  confirmed zero references to `AgentManifest`), so it never surfaced as a
+  bug. `docs/plans/eval-pipeline.md` WI1's Definition of done requires `git
+  diff --no-index` between the two files to print **nothing**, which this
+  drift would have failed regardless of the new eval-batch content being
+  correct on both sides. Fixed by copying the server file's full content
+  (old + new) onto the client file rather than patching only the new
+  sections — confirmed with the same `--no-index` command afterward. If a
+  future session edits `eval-ci.ts` again, run that diff BEFORE starting, not
+  just after, so pre-existing drift doesn't get silently attributed to the
+  current change.
+- **`drizzle-kit generate` did NOT prompt interactively for a pure-ADD schema
+  change spanning two tables (2026-08-20, `eval_batches` + `eval_runs.batch_id`).**
+  The documented `ADD+DROP-in-one-run` interactive-prompt gotcha (below, `pnpm
+  db:generate` entry) only fires when one run both drops and adds columns on
+  the SAME table. A new table (`eval_batches`) plus a new nullable FK column
+  on an existing table (`eval_runs.batch_id`) plus two new indexes — all pure
+  additions, no renames/drops anywhere in the diff — generated cleanly in one
+  non-interactive run with no rename-vs-create ambiguity. Don't pre-emptively
+  split an all-additive migration into two `db:generate` runs "just in case";
+  the two-pass workaround is only needed when a rename could plausibly be
+  inferred.
+- **The `.default([])` vs. explicit-`null` Zod gotcha (documented above for
+  `AgentManifest.skills`, a YAML-authored field) recurs identically for a
+  genuinely nullable DB column, not just a YAML-parsed one (2026-08-20,
+  plan-verifier Phase 2 fix pass on `docs/plans/eval-pipeline.md`).**
+  `eval_batches.skills_fingerprint` was `jsonb('skills_fingerprint')` with no
+  DB default — a real NULL row — while `EvalBatchRecord.skills_fingerprint`
+  was `z.array(...).default([])`. `.default()` only fires when the KEY is
+  absent from the parsed object; a Drizzle-read row always has the key
+  present (value `null`), so `EvalBatchRecord.safeParse` failed on a
+  genuinely-empty-fingerprint row instead of degrading to `[]`. Fixed the
+  same way as `AgentManifest.skills`: `.nullish().transform((v) => v ?? [])`
+  on the Zod side (both vendored `eval-ci.ts` copies, kept byte-identical),
+  PLUS closed it at the DB layer too — `.notNull().default(...)` with a
+  raw-SQL `'[]'::jsonb` default expression on the column (same pattern as
+  `prIntent`'s `inScope`/`sources`/etc. in
+  `db/schema/reviews.ts`) — so a future row can't reintroduce the NULL this
+  contract now tolerates but shouldn't rely on. If you see `.default([])`
+  guarding a jsonb array field anywhere else in `eval-ci.ts` (or any other
+  contract file), grep the matching Drizzle column for whether it's
+  `.notNull()` — if not, the same silent-`safeParse`-failure risk applies
+  even though no bug report will mention "Zod" or "`.default()`" by name.
+- **Combine every open schema fix into ONE `pnpm db:generate` run, even
+  across unrelated tables, rather than one run per fix (2026-08-20).**
+  Fixing `eval_batches.skills_fingerprint`'s nullability AND adding
+  `eval_runs.findings_total`/`eval_runs.error` (two unrelated Major findings
+  from the same `plan-verifier` Phase 2 pass) in the same schema edit before
+  running `db:generate` produced one migration
+  (`0020_early_korvac.sql`) instead of two — halves the
+  journal/snapshot bookkeeping surface that the 2026-08-14 "three artifacts,
+  commit all three" incident (below) warns about, with no downside since
+  neither fix depended on the other applying first. Verified this migration
+  both incrementally (`pnpm db:migrate` against the already-migrated dev DB)
+  and via a full from-scratch replay (`CREATE DATABASE
+  devdigest_replay_check` in the same Postgres container, then `DATABASE_URL=
+  ...devdigest_replay_check pnpm exec tsx src/db/migrate.ts` runs migrations
+  0000→0020 in order) — both applied cleanly with zero manual SQL edits,
+  confirming `SET NOT NULL` on `skills_fingerprint` was safe (checked first
+  via `SELECT count(*) FROM eval_batches WHERE skills_fingerprint IS NULL`
+  → 0 rows in the live dev DB before running it).
+
+- **A raw `db.insert(t.agents).values(...)` (bypassing `AgentsRepository
+  .insert()`) creates an agent with NO `agent_versions` snapshot for version
+  1 — only `AgentsRepository.insert()`'s own `snapshotVersion()` side effect
+  writes that row (confirmed 2026-08-21, WI7/WI8 manual verification against
+  real Postgres).** A test or script that inserts an agent directly via
+  Drizzle and then calls `AgentsService.getVersion(workspaceId, agentId, 1)`
+  gets `undefined` — which is the CORRECT "missing snapshot" degradation
+  (AC-32, `modules/eval/service.ts`'s `compare()`: a missing snapshot yields
+  a `null` prompt, never the live one), not a bug in `getVersion` or in the
+  eval compare view. Easy to misdiagnose as a compare-view bug when it's
+  actually a test-fixture gap. Create the agent through `POST /agents` (or
+  `AgentsRepository.insert()` directly) whenever a version-1 snapshot needs
+  to actually exist.
+- **An "open with placeholder, close with real aggregate" two-step INSERT
+  makes the placeholder row a real read-path hazard, not just an internal
+  implementation detail — fixed by deferring the whole write to close time
+  (2026-08-21, Phase C `plan-verifier` fix-loop, Major finding #1,
+  `modules/eval/{repository,repository.drizzle,service}.ts`).** WI7 as
+  originally shipped wrote an `eval_batches` row at batch-OPEN (before any
+  case had run) with placeholder aggregates (`status: 'failed'`,
+  `cases_total: 0`, every metric `null`), then overwrote it via a separate
+  `closeBatch` once the real aggregate was known. The doc comment claimed
+  this was never read back by a caller — false: `listBatchesForOwner` has no
+  status filter and sorts `ran_at` desc, so the placeholder WAS `batches[0]`
+  (the "latest" batch) for the ENTIRE in-flight window — a concurrent
+  `GET /agents/:id/eval-dashboard` mid-run saw `current.*` all null,
+  `cases_total: 0` for an agent with real history, and computed a fabricated
+  `delta` against real prior data. Worse: a process dying mid-batch left a
+  PERMANENT fake-failed row indistinguishable from a genuine AC-21
+  all-failed batch. **Fix:** merged `insertBatch`+`closeBatch` into one
+  `insertClosedBatch` — the batch row is written EXACTLY ONCE, already
+  closed, only after `runBatch()` returns and the aggregate is computed.
+  `EvalBatchWrite` (the port's insert type) now carries both the pin fields
+  (`agentVersion`/`provider`/`model`/`skillsFingerprint`) AND the final
+  aggregate AND an explicit `ranAt: Date` — `runPinnedBatch` still captures
+  `ranAt = new Date()` at the old "OPEN" moment (before running any case) so
+  the persisted `ran_at` keeps meaning "when the batch started," even though
+  the actual DB write now happens after the batch finishes. Per-case
+  `eval_runs` inserts had to move to AFTER the batch insert (their `batch_id`
+  column is a real FK against `eval_batches.id` — you cannot insert a run row
+  referencing a batch that doesn't exist yet), which is safe here because
+  `runBatch()` already collects every case's result fully in memory before
+  any per-case persistence happens. Net effect: a still-running batch now
+  has literally NO row in `eval_batches` until it's done — nothing for any
+  read path to pick up as "latest" — and a mid-batch crash leaves no row at
+  all rather than a permanent bogus one. **Alternative considered and
+  rejected:** adding a `'running'` status value (would require widening
+  `EvalBatchRecord.status`/`eval_batches.status` in both vendored
+  `eval-ci.ts` copies) — rejected as the larger diff for no real benefit,
+  since a `'running'` row would STILL need active exclusion from every read
+  path (same problem, just moved into a filter instead of removed by
+  construction) and would STILL get stuck forever on a process crash. If a
+  future session is tempted to add an "open" batch row again (e.g. to show
+  live progress mid-run), it needs an explicit exclusion filter on every one
+  of `listBatchesForOwner`/dashboard/trend/compare — don't reintroduce the
+  old shape without also adding that filter everywhere this entry's "why it
+  matters" paragraph describes.
+  **Amended 2026-08-21 (Phase C fix-loop iteration 2, Minor findings #1/#2)
+  — the single `insertClosedBatch` + N separate `insertRun` calls above were
+  themselves N+1 separate autocommits with no transaction, so a throw/crash
+  between them could still commit a batch whose `cases_total` didn't match
+  its actual `eval_runs` row count.** Merged into one
+  `EvalRepository.insertBatchWithRuns(batch, runs)` port method that wraps
+  the batch insert and every run insert in a single `db.transaction` (this
+  repo's first use of `.transaction(...)` anywhere in `server/src` — `grep
+  -rn "\.transaction("` returned zero hits before this change). Fixes Minor
+  finding #1 by construction: if anything in the transaction throws, nothing
+  commits, so a persisted batch's `cases_total` and its `eval_runs` row count
+  can never diverge. **Honest residual (Minor finding #2), not fully fixed:**
+  this only protects what the transaction commits — if the process crashes
+  WHILE `runBatch()` is still executing (i.e. before this transaction even
+  starts), any spend already incurred by cases that already completed is not
+  persisted anywhere and is not recoverable. Fixing that fully would mean
+  committing each case's cost as it finishes, which is the pre-fix-loop-1
+  per-case-write design this whole entry describes moving away from — so
+  it's accepted as a tradeoff, documented here and in `EvalBatchWrite`'s doc
+  comment (`repository.ts`), not silently claimed as a pure win.
+- **Testcontainers-backed `*.it.test.ts` files (`test/helpers/pg.ts`'s
+  `startPg()`) are fully self-contained** — they spin up their OWN ephemeral
+  `pgvector/pgvector:pg16` container and run migrations, independent of the
+  docker-compose `devdigest-postgres` container `pnpm dev` normally talks to.
+  Confirmed 2026-08-21: both the manually-started `devdigest-postgres`
+  container and a `startPg()`-spun one ran side by side in the same session
+  with no conflict (different ports, testcontainers picks an ephemeral one).
+  **This contradicts this file's own "Docker Desktop is not auto-started in
+  this environment" framing (see root `INSIGHTS.md`'s Tool & Library Notes)
+  — that note describes one session's environment state, not a permanent
+  fact about this dev machine.** Always check `docker info` (or
+  `dockerAvailable()`) fresh each session rather than assuming Docker is
+  down because a past session's notes said so; if it's up, running the real
+  `.it.test.ts` suite (or a throwaway ad hoc one against `startPg()`) is a
+  strictly stronger correctness check than unit tests alone for anything
+  touching `repository.drizzle.ts`.
 
 ## Recurring Errors & Fixes
 
@@ -1368,3 +1629,122 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   them correctly — if `dockerAvailable()` reports false on the FIRST
   integration run of a session, retry once before concluding Docker really
   isn't reachable.
+- 2026-08-20: L06-Evals Phase A (`docs/plans/eval-pipeline.md` WI1/WI2, on
+  `L06-Evals-homework`) — contracts + schema only, no module code yet.
+  `EvalExpectation`/`EvalExpectationEntry` (versioned, `match_scope: 'range'
+  | 'file'` per Q-6), `EvalBatchRecord`, `EvalComparison`,
+  `EvalCaseFromFindingInput`, `EvalCaseRecord` (with `expectation_status`
+  degrade-on-parse-failure) added to `eval-ci.ts`;
+  `EvalCaseInput.expected_output` moved off `z.unknown()`;
+  `EvalDashboard`/`EvalTrendPoint` widened to nullable metrics/delta per the
+  plan's Recommendation 1. Hand-mirrored to the client copy — see the new
+  Tool & Library Notes entry above for the pre-existing drift that had to be
+  reconciled to make the two files byte-identical. New `eval_batches` table
+  + `eval_runs.batch_id` + two new indexes (`db/schema/eval.ts`), migration
+  `0019_unique_gravity.sql` generated cleanly (see the other new Tool &
+  Library Notes entry — no interactive prompt for this pure-ADD change).
+  Docker was not running this session, so `pnpm db:migrate` was **not** run
+  against a live database — verified via `tsc --noEmit` only (both packages
+  clean) plus the required `--no-index` byte-identity check. Phases B–E
+  (module scaffold, case CRUD, scorer, batch runner, read APIs, client,
+  gate script) are separate `implementer` passes per the plan's phasing.
+
+- 2026-08-20 (later, same day): L06-Evals Phase B (`docs/plans/eval-pipeline.md`
+  WI3-WI6, on `L06-Evals-homework`) — new `modules/eval/` (onion port/adapter:
+  `repository.ts`/`repository.drizzle.ts`/`helpers.ts`/`service.ts`/
+  `routes.ts`/`constants.ts`/`scorer.ts`), `container.evalRepo` (lazy getter +
+  `ContainerOverrides.evalRepo`, mirrors `briefRepo`), registered in
+  `modules/index.ts` as `eval: evalModule` (import renamed off the reserved
+  word `eval`; the OBJECT KEY `eval` is fine, only the binding identifier
+  can't be named that in strict-mode ESM). Case CRUD
+  (`GET/POST/PATCH/DELETE /eval-cases`, `GET /agents/:id/eval-cases`) with
+  tenancy-first + `owner_id` IDOR resolved through `AgentsService.get`
+  (never a raw id comparison), `MAX_INPUT_DIFF_BYTES` cap, and read-side
+  degrade-not-crash for a corrupt `expected_output` row
+  (`expectation_status: 'unusable'`). One-click `POST /findings/:id/eval-case`
+  derives everything server-side (expectation kind from
+  `accepted_at`/`dismissed_at`, `match_scope` from `findings.kind` via the
+  module-local `FULL_FILE_KINDS` mirror, owner from `reviews.agent_id`) and
+  refuses-and-writes-nothing on a pending finding / null-`agent_id` review /
+  patchless file / foreign-workspace finding. `scorer.ts` (WI6) is fully
+  pure — zero imports beyond the module and shared contract TYPES — see the
+  two new Codebase Patterns entries above for the `Container`-in-`service.ts`
+  precedent question this surfaced and the local-join-reimplementation
+  pattern. Verified: `tsc --noEmit` clean, `depcruise --config
+  .dependency-cruiser.cjs src` clean (216 modules, 765 deps, zero
+  violations), full unit suite green except the pre-existing
+  `indexer-pipeline.test.ts` Windows flake (confirmed via `git status` —
+  file untouched this session, matches the existing Recurring-Errors-&-Fixes
+  entry), vendored `eval-ci.ts` byte-identity (`git diff --no-index`) still
+  clean (Phase B touched zero contract/schema files). No migration needed —
+  Phase A's `eval_cases` table shape already covered every field this phase
+  writes. Phase C (batch runner, WI7-WI8), Phase D (client), Phase E (gate
+  script) are separate `implementer` passes per the plan's phasing. Test
+  authorship (`test-writer`'s job next) not attempted beyond the pre-existing
+  suites passing.
+
+- 2026-08-20 (later, same day): Targeted fix pass on Phase A per
+  `plan-verifier`'s Phase 2 architecture review (two Major findings, both
+  fixed rather than deferred). See the two new Tool & Library Notes entries
+  above for the technical detail. Summary: `eval_batches.skills_fingerprint`
+  is now not-null with a raw-SQL `'[]'::jsonb` default (was nullable, no
+  default) and both vendored `EvalBatchRecord.skills_fingerprint` schemas now
+  `.nullish().transform((v) => v ?? [])` instead of `.default([])`;
+  `eval_runs` gained `findings_total`/`error` columns matching
+  `EvalRunRecord`'s existing contract fields. One combined migration
+  (`0020_early_korvac.sql`), applied both incrementally and via a
+  from-scratch replay against live Docker Postgres (available this time,
+  unlike the Phase A session). `tsc --noEmit` clean, `--no-index`
+  byte-identity check clean, the existing 29-test
+  `test/eval-ci-contracts.test.ts` suite passed unchanged (none of its
+  existing assertions tested `skills_fingerprint: null` explicitly, so none
+  encoded the bug being fixed — no test edits were needed or made).
+
+- 2026-08-21: L06-Evals Phase C (`docs/plans/eval-pipeline.md` WI7/WI8, on
+  `L06-Evals-homework`) — the version-pinned batch runner + zero-LLM-call
+  read APIs. New `modules/eval/runner.ts` (pure orchestration: no DB, no
+  `Container` — `runOneCase`/`runBatch` take an already-resolved
+  `RunnerAgentSnapshot` + `LLMProvider`, run cases SERIALLY per Q-4, and
+  never throw — a provider error/timeout/schema failure is caught and
+  returned as a failed `CaseRunResult` so the caller's isolation loop needs
+  no try/catch of its own). `AgentsService.linkedSkillsForRun` (additive,
+  read-only) added so `service.ts` never imports `AgentsRepository`
+  directly. `service.ts` gained `runForAgent`/`runOneCase` (funnel through
+  one shared `runPinnedBatch`: in-process `workspaceId:agentId` concurrency
+  guard, pin `agent_version`/`provider`/`model`/`skills_fingerprint` once,
+  open a placeholder `eval_batches` row, run serially, persist each
+  `eval_runs` row, close the batch with `scorer.ts`'s aggregate, one
+  structured log line with counts/metrics/tokens/cost, never diff/prompt/raw
+  response) and the five WI8 read methods (`getDashboardForAgent`,
+  `getWorkspaceDashboard`, `listBatchesForAgent`, `getBatch`, `compare`), all
+  workspace-scoped through the batch row (`eval_runs` itself still has no
+  `workspace_id`). `repository.ts`/`repository.drizzle.ts` gained
+  `insertBatch`/`closeBatch`/`insertRun` and the five read queries
+  (`getBatchById`, `listBatchesForOwner`, `listRunsForBatch` via a LEFT JOIN
+  to `eval_cases` for `case_name`, `listDashboardOwnerIds` via
+  `selectDistinct` unioned in JS from both `eval_cases` and `eval_batches`,
+  `countCasesForOwner`). Two new routes (`POST /agents/:id/eval-runs`,
+  `POST /eval-cases/:id/run`, both rate-limited via the existing
+  `EVAL_RUN_RATE_LIMIT`) and five new GET routes. One new unit test file
+  (`test/eval-runner.test.ts`, plan-mandated: asserts the object passed to a
+  mocked `reviewPullRequest` has no `callers`/`repoMap`/`specs`/`intent` key,
+  per AC-18/D-2) — full AC-14..AC-33 test authorship is `test-writer`'s job
+  next. Manually verified beyond the plan's minimum: Docker was actually up
+  this session (see the new Tool & Library Notes entry above), so besides
+  the required unit-level `tsc`/`depcruise`/`vitest --exclude '**/*.it.test.ts'`
+  commands, also ran the pre-existing `eval-cases.it.test.ts`/
+  `eval-create-from-finding.it.test.ts` (21 tests, unaffected — confirms no
+  Phase-B regression) plus two THROWAWAY, not-committed integration checks
+  against real Postgres via `app.inject()`: one exercising `runner.runBatch`
+  directly (8 cases → 8 results, a mid-batch provider throw isolates to
+  exactly one failed case, an all-throwing provider → `status: 'failed'`
+  with every metric `null`), and one over real HTTP (8 cases → 8 `eval_runs`
+  rows sharing one `batch_id`/`agent_version`, WI8 reads issue zero further
+  LLM calls, a foreign-workspace batch id 404s, two concurrent
+  `POST /eval-cases/:id/run` calls for the same case → one 201 + one 409 from
+  the concurrency guard, and `compare()`'s `base_prompt` correctly comes back
+  `null` for an agent created via raw DB insert with no `agent_versions` row
+  — see the new "raw insert bypasses agent_versions snapshot" Recurring
+  Errors & Fixes entry above, which THIS check surfaced). Both throwaway
+  files deleted before this session's Implementation Report; test-writer
+  owns the real, committed integration coverage next.

@@ -36,6 +36,28 @@ _(to be filled in)_
   `agents/implementation-planner.md`/`agents/spec-creator.md`'s "Blocking
   questions" section for the exact contract. Chat-native tools (Cursor,
   Codex) were never affected — there, asking was already a normal reply.
+- **`skill-creator`'s benchmark only validates a skill's authored content,
+  never its runtime behavior in this repo (2026-08-19).** Ran
+  `skill-creator`'s old-vs-new comparison workflow on
+  `.claude/skills/onion-architecture/` (added two rules — cross-module
+  repository access, adapter-to-module imports — plus
+  `evals/fixtures/case-4-analytics` and `case-5-digest`; results in
+  `.claude/skills/onion-architecture-workspace/iteration-2/`). Its subagent
+  runs don't call the `Skill` tool at all — they `Read` `SKILL.md`/
+  `rules/*.md` directly and reason from that (done deliberately here, so the
+  old-snapshot run couldn't accidentally load the live/new skill content by
+  name). That means a 100%-vs-73% pass-rate delta only proves the *text* of
+  the new rules changes what a reviewer concludes when handed the files
+  directly — it says nothing about whether `onion-architecture` actually
+  triggers on a natural prompt in a real Claude Code session, whether
+  `implementation-planner`/`implementer`/`plan-verifier` invoke it during
+  their normal SDD flow, how it interacts with `AGENTS.md`/`CLAUDE.md`
+  project instructions, or whether `plan-verifier`'s Phase 2 (architecture
+  review) catches the same violation when reviewing a real diff instead of a
+  subagent reading isolated fixture files. Don't cite a skill-creator
+  benchmark as evidence a skill "works in DevDigest" — it only shows the
+  skill's instructions are internally sound. See the matching Open Questions
+  entry below.
 
 ## Codebase Patterns
 
@@ -86,6 +108,23 @@ _(to be filled in)_
 
 ## Tool & Library Notes
 
+- **`skill-creator`'s `scripts/aggregate_benchmark.py` silently produces an
+  all-zero benchmark if `grading.json` sits one directory level too shallow
+  (2026-08-20).** It only scans `<eval-dir>/<config>/run-*/grading.json` —
+  a `grading.json` written directly at `<eval-dir>/<config>/grading.json`
+  (no `run-N/` wrapper) is invisible to it, and the script does not error or
+  warn; it just reports 0% pass rate / 0 tokens / 0 time for every
+  configuration with no diagnostic pointing at the real cause. Same for
+  `timing.json` and the `outputs/` dir — all three must live under
+  `run-1/` (or `run-2`, etc.), not directly under `with_skill/`/
+  `without_skill/`. Confirmed by comparing against a known-good existing
+  layout (`.claude/skills/onion-architecture-workspace/iteration-1/eval-0-*/
+  with_skill/run-1/grading.json`) after a first aggregation attempt on
+  `pr-description-workspace` came back all-zero despite six real,
+  individually-correct `grading.json` files existing one level too shallow.
+  Fix: `mkdir <config>/run-1 && mv <config>/{outputs,grading.json,timing.json}
+  <config>/run-1/` before running the aggregator, even for a single-run
+  (non-repeated) benchmark.
 - **`pnpm <script>` can abort with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`**
   in this Windows/PowerShell tool environment (no TTY attached) whenever pnpm
   detects any drift between the lockfile and `node_modules` and wants to
@@ -139,6 +178,21 @@ _(to be filled in)_
   status`/`git diff --cached --stat` immediately before a commit intended
   to be narrowly scoped, especially in a long session where earlier
   `git add` calls (yours or a prior session's) may still be pending.
+- **pgvector queries return zero rows after embedding model rotation if the
+  vector column dimensionality isn't updated (2026-08-20).** Changing from
+  one embedding model to another (e.g., OpenAI `text-embedding-3-small`
+  1536-dim → `text-embedding-3-large` 384-dim, or vice versa) silently breaks
+  all similarity searches on tables still using the old dimension. The Postgres
+  `vector` type does not enforce a dimension check at query time — distance
+  functions like `cosine`, `inner_product`, or `l2` simply fail to match when
+  dimensions don't align, returning zero results with no error. **Fix:** when
+  rotating models, create a new column with the new dimension
+  (e.g., `embeddings_v2 vector(384)`), re-embed all rows with the new model
+  into it, run a migration to drop/rename columns if needed, and update queries
+  to reference the new column. **Prevention:** Store the embedding model name
+  and expected dimension in a schema comment or Drizzle migration so a future
+  model change surfaces the mismatch during code review: `// Embedded with
+  OpenAI text-embedding-3-small (1536-dim)` on the column definition.
 
 - **`curl localhost:3000`/`:3001` from inside a git worktree can silently hit
   the wrong checkout (2026-08-23).** When multiple `pnpm dev` instances are
@@ -394,9 +448,153 @@ _(to be filled in)_
   fixed the `AskUserQuestion`-in-subagents problem across both planner
   personas (see What Doesn't Work) after the user noticed the pattern.
 
+- 2026-08-19: Extended `.claude/skills/onion-architecture/` with two new
+  boundary rules (cross-module repository access in
+  `rules/dependency-rule.md`'s "Cross-module access" section; adapter-to-
+  module imports in the same file's "Adapter-to-module imports" section —
+  both include a ready dependency-cruiser snippet in `rules/enforcement.md`,
+  not yet wired into the real `server/.dependency-cruiser.cjs`), added two
+  eval fixtures (`evals/fixtures/case-4-analytics`,
+  `evals/fixtures/case-5-digest`) and ran `skill-creator`'s old-vs-new
+  benchmark across all 5 eval cases — results in
+  `.claude/skills/onion-architecture-workspace/iteration-2/` (`benchmark.md`,
+  `review.html`), old-version snapshot in
+  `.claude/skills/onion-architecture-workspace/skill-snapshot/`. Both new
+  rules were grounded in real pre-existing violations in this repo
+  (`conventions/service.ts` → `repos/repository.ts`;
+  `adapters/astgrep/index.ts` → `modules/repo-intel/constants.ts`), so
+  neither is hypothetical. See the matching What Doesn't Work entry above
+  for the methodology caveat (content-only comparison, no `Skill` tool
+  invocation) and the Open Questions entry below for what a real
+  workflow-level test would still need to cover.
+- **A skill-creator benchmark's aggregate pass-rate delta can hide that most
+  of its assertions weren't actually testing the skill (2026-08-20).** The
+  `pr-description` benchmark (Session Notes below) looked like a clean win
+  at the aggregate level (100% vs. 75%), but reading the per-assertion
+  breakdown showed the entire delta was carried by exactly one assertion
+  category — every other assertion passed in both the with-skill and
+  baseline configurations across all 3 evals, meaning base Claude behavior
+  already satisfied them unprompted. A skill's *measured* contribution can
+  be much narrower than its aggregate score implies. Don't stop at the
+  aggregate delta when deciding whether a skill "works" or which parts of it
+  are worth keeping — read the per-assertion table (or the eval viewer's
+  Outputs tab) and check which assertions actually flip between
+  configurations.
+
+- 2026-08-20: Ran a fresh skill-creator eval benchmark on
+  `.claude/skills/pr-description/` (3 scenarios × with-skill/baseline, 6
+  subagents against real local git fixtures under
+  `evals/fixtures/case-{1,2,3}-*`, graded, aggregated — see
+  `.claude/skills/pr-description-workspace/iteration-1/benchmark.json` and
+  `review.html`). Aggregate pass rate: 100% with-skill vs. 75% baseline, but
+  the per-assertion breakdown showed the entire delta came from exactly one
+  assertion category (the Effort section's exact two-bullet format); every
+  other assertion (draft-shown-before-`gh`, diff-grounded Scope bullets,
+  honest "no browser tool" disclosure, explicit pushback on an adversarial
+  "skip the draft" request) passed in both configurations across all 3
+  evals. See the new What Doesn't Work entry below for what this implies
+  about reading benchmark results. No skill changes made — testing only.
+
+- 2026-08-20: Ran the L06-Evals "version A/B" exercise on the
+  `architecture-reviewer` subagent (`evals/agents/architecture-reviewer/`,
+  N=2 per phase — `eval:repeat` capped the requested N=3 to 2 for token
+  economy). `.claude/agents/architecture-reviewer.md` no longer exists in
+  this repo (merged into `plan-verifier`'s Phase 2 on 2026-08-07, see the
+  2026-08-07 entry above) but the eval package still expects it on disk, so
+  it was restored from `git show 8426e6d:.claude/agents/architecture-reviewer.md`
+  for eval purposes only — not wired back into any production dispatch path.
+  **Version B** = same file minus the "One rule citation per finding" hard
+  rule. Result: the citation-shaped practices themselves
+  (`names the exact documented rule identifier ...`) stayed 100%→100% in
+  both configs — a strong-enough base model volunteers the identifier
+  unprompted, exactly as `architecture-reviewer.cases.ts`'s own comments
+  predicted. The practice that actually moved was
+  `does not fabricate a documented-rule violation for a benign rename`
+  (100%→50%), and it reproduced cleanly on revert
+  (version-B→restored: 50%→100%). **One practice did NOT reproduce
+  cleanly**: `does not fabricate an architecture finding for the
+  out-of-scope security-shaped change` was already 50% in baseline *with*
+  the rule present — reading the trajectory
+  (`evals/results/outputs/20260819T215150/does-not-fabricate-an-architecture-finding-for-the-out-of-scope-...md`)
+  showed the model volunteering a testability aside ("prevents tests from
+  injecting mocks and makes the code harder to maintain"), which trips the
+  practice's own "does not comment on ... test coverage" clause — a
+  case/grader sensitivity unrelated to the rule edit, not a real regression.
+  Confirms the general lesson: when a delta doesn't reproduce, check the
+  trajectory before blaming the edit — it may be the case design flaking
+  independent of what changed. Raw data:
+  `evals/results/repeat-{baseline,version-B,restored}.json`.
+
+  **Update (later session, same day):** the `git show 8426e6d:...`
+  restore-for-eval-purposes-only workaround above got accidentally
+  upgraded into a real, committed `.claude/agents/architecture-reviewer.md`
+  (+ a new `-lite` sibling) while wiring CI around it — i.e. exactly the
+  "wired back into a production dispatch path" outcome this entry says was
+  deliberately avoided. Caught during a docs-cross-check pass. Fixed
+  properly this time: both files now live only as eval fixtures
+  (`evals/agents/architecture-reviewer/fixtures/architecture-reviewer.md`,
+  `evals/agents/architecture-reviewer-lite/fixtures/architecture-reviewer-lite.md`),
+  `agentContent()`/`agentTools()` (`evals/src/artifacts/load.ts`) fall back
+  to that fixtures path when an agent isn't found in the real
+  `.claude/agents/`, and the workflow-tier dispatch case
+  (`evals/workflow/review-workflow.cases.ts`) now targets `researcher` (a
+  real, currently-registered agent) instead — dispatch through
+  `settingSources: ["project"]` only ever finds agents actually on disk in
+  `.claude/agents/`, so a retired persona can't be a dispatch target
+  without re-registering it, which is the thing to avoid.
+
 ## Open Questions
 
 - **`reviewer-core/` is on npm while everything else is on pnpm:** unclear
   from the code — most likely an artifact of how the package was bootstrapped
   separately. Worth normalizing to pnpm if it ever causes friction; until then
   it's a known, harmless inconsistency, not a bug to "fix" reflexively.
+
+- **The course has no workflow-level eval harness for `.claude/skills/*` —
+  only `skill-creator`'s content-level one (2026-08-19).** After the
+  onion-architecture old-vs-new run (see What Doesn't Work / Session Notes
+  above), four things a course session might reasonably want to verify are
+  still untested by any tool in this repo:
+  1. **Activation** — does `onion-architecture` (or any skill) actually
+     get selected by the `Skill` tool on a realistic user prompt in a live
+     Claude Code session, given its current `description` frontmatter?
+     Nothing here plays the role of the skill-creator "description
+     optimization" loop (`run_loop.py`) against *this repo's* actual skills.
+  2. **Dispatch** — when `implementation-planner` scaffolds a new
+     `server/src/modules/<name>/`, or `implementer` builds it, does either
+     one actually consult `onion-architecture` mid-task the way
+     `agents/implementation-planner.md`/`agents/implementer.md` assume, or
+     does it silently skip it? No SDD-chain run has been observed and
+     checked for this specifically.
+  3. **`AGENTS.md`/`CLAUDE.md` interaction** — do a skill's rules and the
+     project's own `AGENTS.md`/`server/AGENTS.md` ever give conflicting
+     guidance (e.g. do-not-touch paths, "not a monorepo" minimal-tooling
+     stance vs. a skill recommending a new dependency), and if so which
+     wins in practice? Untested either way.
+  4. **`plan-verifier` Phase 2** — does the architecture-review phase
+     actually catch a skill violation (e.g. the case-4/case-5 patterns
+     above) when reviewing a real Development Plan's diff, the way this
+     session's isolated fixture-reading subagents did? `plan-verifier.md`
+     assumes skills inform its judgment but that path has never been
+     exercised end-to-end and graded.
+  No decision yet on whether this becomes a course lesson, a `agents/`
+  addition, or stays out of scope — flagging so a future session doesn't
+  assume skill-creator's benchmark already covers it.
+
+- 2026-08-22: Added `scripts/verify-l06.sh` (Phase E, WI14/WI15 of
+  `docs/plans/eval-pipeline.md`) — same five-lane shape as `verify-l03.sh`
+  plus a new `depcruise --config .dependency-cruiser.cjs src` lane (Q-5,
+  Recommendation 4): server typecheck, server `arch:check`, server unit
+  tests narrowed to the four non-`.it.test.ts` L06 suites
+  (`eval-ci-contracts`, `eval-helpers`, `eval-runner`, `eval-scorer`), client
+  typecheck, client's full `vitest run`. Verified live exactly like
+  `verify-l03.sh` got: the real `devdigest-postgres` container was actually
+  `docker stop`ped (not just "assumed down") before the full run, confirming
+  none of the five lanes touch Postgres; then a deliberate `number`/`string`
+  type mismatch in `modules/eval/scorer.ts` made the script fail at lane 1
+  with a non-zero exit and the lane named, then was fully reverted (`git
+  diff` on the file empty, `git status` showing only the new script
+  untracked) before restarting the container to leave the environment as
+  found. WI16 (the validation experiment) is untouched by design — it is
+  human-run, spends real provider money, and needs a browser; the same
+  precedent as SPEC-01 WI13 (2026-08-13 entry above) applies.

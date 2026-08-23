@@ -1,5 +1,5 @@
 {
-  "id": "1072174e-3856-4c7c-a72b-086bcf37b3de",
+  "id": "d1fb81a5-5b1c-4043-9902-2301c5bb616e",
   "prevId": "f975485d-599e-4f70-aaa9-176b51c35b34",
   "version": "7",
   "dialect": "postgresql",
@@ -1747,12 +1747,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "learned_finding_id": {
-          "name": "learned_finding_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1786,21 +1780,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "memory_learned_finding_uq": {
-          "name": "memory_learned_finding_uq",
-          "columns": [
-            {
-              "expression": "learned_finding_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2599,6 +2578,201 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.eval_batches": {
+      "name": "eval_batches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_kind": {
+          "name": "owner_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_version": {
+          "name": "agent_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skills_fingerprint": {
+          "name": "skills_fingerprint",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ran_at": {
+          "name": "ran_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cases_total": {
+          "name": "cases_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cases_passed": {
+          "name": "cases_passed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cases_failed": {
+          "name": "cases_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recall": {
+          "name": "recall",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "precision": {
+          "name": "precision",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "citation_accuracy": {
+          "name": "citation_accuracy",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recall_cases": {
+          "name": "recall_cases",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precision_cases": {
+          "name": "precision_cases",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "citation_cases": {
+          "name": "citation_cases",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "findings_total": {
+          "name": "findings_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_ms": {
+          "name": "duration_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost_usd": {
+          "name": "cost_usd",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "eval_batches_workspace_owner_ran_at_idx": {
+          "name": "eval_batches_workspace_owner_ran_at_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ran_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "eval_batches_workspace_id_workspaces_id_fk": {
+          "name": "eval_batches_workspace_id_workspaces_id_fk",
+          "tableFrom": "eval_batches",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.eval_cases": {
       "name": "eval_cases",
       "schema": "",
@@ -2666,17 +2840,11 @@
         }
       },
       "indexes": {
-        "eval_cases_ws_owner_uq": {
-          "name": "eval_cases_ws_owner_uq",
+        "eval_cases_workspace_owner_idx": {
+          "name": "eval_cases_workspace_owner_idx",
           "columns": [
             {
               "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_kind",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2688,8 +2856,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
-          "where": "\"eval_cases\".\"owner_kind\" = 'finding'",
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2732,6 +2899,12 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "batch_id": {
+          "name": "batch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "ran_at": {
           "name": "ran_at",
@@ -2796,6 +2969,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "eval_runs_batch_id_eval_batches_id_fk": {
+          "name": "eval_runs_batch_id_eval_batches_id_fk",
+          "tableFrom": "eval_runs",
+          "tableTo": "eval_batches",
+          "columnsFrom": [
+            "batch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2975,12 +3161,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "multi_agent_run_id": {
-          "name": "multi_agent_run_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "ran_at": {
           "name": "ran_at",
           "type": "timestamp with time zone",
@@ -3068,23 +3248,7 @@
           "notNull": false
         }
       },
-      "indexes": {
-        "agent_runs_multi_agent_run_id_idx": {
-          "name": "agent_runs_multi_agent_run_id_idx",
-          "columns": [
-            {
-              "expression": "multi_agent_run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "agent_runs_workspace_id_workspaces_id_fk": {
           "name": "agent_runs_workspace_id_workspaces_id_fk",
@@ -3118,19 +3282,6 @@
           "tableTo": "pull_requests",
           "columnsFrom": [
             "pr_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "agent_runs_multi_agent_run_id_multi_agent_runs_id_fk": {
-          "name": "agent_runs_multi_agent_run_id_multi_agent_runs_id_fk",
-          "tableFrom": "agent_runs",
-          "tableTo": "multi_agent_runs",
-          "columnsFrom": [
-            "multi_agent_run_id"
           ],
           "columnsTo": [
             "id"

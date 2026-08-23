@@ -52,6 +52,15 @@ Concretely, for a module `server/src/modules/<name>/`:
 - `Container` (`platform/container.ts`) — the only place that constructs a
   concrete adapter/repository and hands it to a service. Services never `new`
   an adapter themselves.
+- **Module boundaries**: a module's `service.ts` never imports *another*
+  module's `repository.ts`/`repository.drizzle.ts` directly — it depends on
+  that module's `service.ts` instead. See `rules/dependency-rule.md`'s
+  "Cross-module access" section.
+- **Adapter boundaries, the reverse direction**: `adapters/<name>/` never
+  imports a file from `modules/<name>/` — an adapter implements a port and
+  takes plain data as parameters; it doesn't reach into a module to fetch
+  or reshape that data itself. See `rules/dependency-rule.md`'s
+  "Adapter-to-module imports" section.
 
 Read `rules/layers.md` for the full layer-to-folder mapping (including
 `adapters/`, `platform/`, `db/`) and `rules/dependency-rule.md` for the

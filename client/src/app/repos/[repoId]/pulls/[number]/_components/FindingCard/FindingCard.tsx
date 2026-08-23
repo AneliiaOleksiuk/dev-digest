@@ -30,6 +30,7 @@ export function FindingCard({
   forceExpanded,
   highlighted,
   onAction,
+  onCreateEvalCase,
   pending,
   repoFullName,
   headSha,
@@ -43,6 +44,13 @@ export function FindingCard({
   /** Briefly emphasized border/shadow — the deep-linked finding among others. */
   highlighted?: boolean;
   onAction?: (action: FindingActionKind, reply?: string) => void;
+  /** "Turn into eval case" (L06, AC-4/UX-1) — a SEPARATE action from
+   *  `onAction`'s accept/dismiss/learn/reply (`FindingActionKind` is a
+   *  shared contract this feature must not widen). Only ever rendered when
+   *  `accepted || dismissed` below, since the expectation kind is derived
+   *  from that decision (AC-3) — offering it on a pending finding would
+   *  force a choice the system then ignores. */
+  onCreateEvalCase?: () => void;
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
@@ -119,6 +127,20 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {/* UX-1/AC-4 — only once a decision exists to derive the
+               expectation kind from (UX-3: third button in this row, not a
+               mockup-copy layout problem). */}
+            {muted && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="FlaskConical"
+                disabled={pending}
+                onClick={() => onCreateEvalCase?.()}
+              >
+                {t("finding.turnIntoEvalCase")}
+              </Button>
+            )}
           </div>
         </div>
       )}

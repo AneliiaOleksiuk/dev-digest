@@ -138,8 +138,22 @@
     {
       "idx": 19,
       "version": "7",
-      "when": 1787441043894,
-      "tag": "0019_aromatic_snowbird",
+      "when": 1787253006782,
+      "tag": "0019_unique_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787254295737,
+      "tag": "0020_early_korvac",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787486932835,
+      "tag": "0021_glamorous_the_stranger",
       "breakpoints": true
     }
   ]

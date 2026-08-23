@@ -16,7 +16,7 @@ Shipped per
 committed at `0a35802`. HTTP/contract lookup:
 [`docs/reference/multi-agent-api.md`](../reference/multi-agent-api.md).
 Concurrency-without-modifying-`run-executor.ts` decision:
-[ADR 0006](../adr/0006-concurrency-without-modifying-run-executor.md).
+[ADR 0007](../adr/0007-concurrency-without-modifying-run-executor.md).
 
 ## What it does
 

@@ -311,6 +311,37 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   history, then drill into one entry" feature (the list here is capped at 50
   rows) rather than a summary-list + per-item-detail-fetch split.
 
+- **No per-case-across-batches read exists server-side for the Eval
+  Pipeline (2026-08-21, L06, docs/plans/eval-pipeline.md WI9/WI12).** The
+  server's eval module has `GET /agents/:id/eval-cases` (no run info at
+  all) and `GET /eval-batches/:id` (a batch's own per-case rows), but
+  nothing answering "this case's most recent run, across whichever batch it
+  last ran in." To show each case's last pass/fail + recall in the Agent
+  Editor's Evals tab (AC-35), `EvalsTab/helpers.ts`'s `buildLastRunByCase`
+  reconstructs it client-side: walk an agent's recent batches NEWEST FIRST
+  (`EvalDashboard.recent_runs`, capped to 5 via a new `useEvalBatches`
+  hook — `lib/hooks/eval.ts`, a `useQueries`-based addition beyond the 12
+  hooks the plan named by name, same shape as `hooks/context.ts`'s
+  `useSkillContexts`) and take the first run matching each `case_id`. This
+  is only fully correct when every batch walked contains every case that
+  existed at that time — true for a "run whole set" batch
+  (`POST /agents/:id/eval-runs`), but NOT for a single-case run
+  (`POST /eval-cases/:id/run`, a ONE-CASE batch): running just one case
+  makes every OTHER case's last-run display fall back to whatever it showed
+  in the last full-set batch, even if that's now stale relative to the
+  just-run case. No dedicated endpoint exists to fix this properly —
+  documented as a known limitation in the helper's own doc comment, not
+  silently presented as exact.
+- **`hooks/eval.ts` imports its contract types from `"../types"`
+  (`lib/types.ts`), not `"@devdigest/shared"` directly — following
+  `hooks/brief.ts`'s precedent, not `hooks/agents.ts`'s/`hooks/reviews.ts`'s
+  (2026-08-21, L06).** Both import styles coexist in this codebase; which
+  one to follow isn't arbitrary per-file taste — `docs/plans/eval-pipeline.md`
+  WI9 explicitly said "re-export via `lib/types.ts`, the file's own header
+  says to add them there," and `lib/types.ts`'s own header comment says the
+  same. When a plan/spec names the file's own stated convention, follow
+  that over whichever sibling hook file happens to be open.
+
 ## Tool & Library Notes
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
@@ -382,6 +413,44 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   reach for `--border-strong` by default for any new bordered card/row on a
   dark elevated surface, not `--border`.
 
+- **`@devdigest/ui`'s `LineChart` (`vendor/ui/charts/LineChart.tsx`) fills a
+  missing index in a shorter series with a hard-coded `0`, not a gap
+  (2026-08-21, L06 Eval Pipeline, AC-39/E-7/E-11).** Row-building is
+  `row[s.name] = s.data[i] ?? 0` — there is no `null`/`undefined` support
+  and no `connectNulls`, so passing a metric straight through when it's
+  legitimately undefined for that point (e.g. a batch with no findings at
+  all, `citation_accuracy: null`) would render as a real, misleadingly LOW
+  point instead of "no data here." Its OTHER default, `yMin=0.6, yMax=1.0`
+  (already the subject of AC-39/E-7 — always pass explicit `yMin={0}
+  yMax={1}`), is the well-known trap; this zero-fill behavior is a second,
+  separate trap in the same file. Since it's vendored/do-not-touch, the only
+  honest fix without editing it is to filter each metric's series
+  independently before handing it to `LineChart` (drop null points per
+  series, don't substitute 0) — `AgentEvalDetail.tsx`'s `trendSeries` does
+  this, with an on-screen caption noting the tradeoff: multi-series charts
+  built this way do NOT preserve x-axis alignment across series when their
+  null patterns differ. Worth knowing before reusing `LineChart` for any
+  other per-point-nullable metric.
+- **`next-intl`'s missing-message fallback renders the literal message path
+  as visible text, not an empty string** (2026-08-22) — a missing
+  `t("nav.evals")` renders `"nav.evals"` inline (e.g. "Go to nav.evals" /
+  "Go to shell.nav.evals" depending on namespace scope), confirmed by
+  actually reverting the `client/messages/en/shell.json` fix and re-running
+  the test; don't assume a missing key silently blanks out. Separately,
+  `client/src/vendor/ui/command-palette/CommandPalette.tsx` is gated
+  `if (!open) return null` — its command labels (built by
+  `useShellCommands.ts`, one `t(`nav.${it.key}`)` call per `NAV` item) are
+  computed unconditionally during SSR (the `useMemo` runs either way) but
+  never reach the DOM unless a user has actually opened the palette
+  (Cmd/Ctrl+K). A plain `curl` of a page's initial HTML therefore cannot
+  prove or disprove a `nav.ts`-key ↔ `shell.json` `nav.<key>` mismatch for
+  this component — only `next build`'s static-generation error (real, hard
+  failure: `Error: MISSING_MESSAGE: shell.nav.evals (en)`) or a hook-level
+  test rendering the real `useShellCommands()` against a real
+  `NextIntlClientProvider` + real `messages/en/shell.json` (no mocks — see
+  `client/src/components/app-shell/hooks/useShellCommands.test.tsx`) proves
+  it either way.
+
 ## Recurring Errors & Fixes
 
 - **A native `<select>`'s open dropdown popup renders unreadable
@@ -433,6 +502,38 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the user's other complaints (unreadable dropdown, collapsed grid column)
   turned out to be the two real bugs above, only discoverable once the
   stale-bundle red herring was ruled out first.
+- **A pre-wired `activeKeyFor` prefix check can anticipate the WRONG nav key,
+  not just anticipate one early (2026-08-21, L06 Eval Pipeline client,
+  docs/plans/eval-pipeline.md WI13).** `components/app-shell/helpers.ts`
+  already had `if (pathname.startsWith("/eval")) return "eval";` sitting
+  unused, presumably guessed ahead of time the same way `/context` and
+  `/conventions` were pre-wired before their `nav.ts` entries existed (see
+  the Codebase Patterns entries above) — but the plan's actual required
+  `nav.ts` key is `"evals"` (plural), so the pre-wired singular string never
+  matched and the sidebar item would have stayed permanently unhighlighted
+  on `/evals` if shipped as-is. Fixed alongside adding the `nav.ts` entry:
+  `pathname.startsWith("/evals")` → `"evals"`. Generalizes the existing
+  onboarding-tour lesson ("pre-authored code anticipates the intended UX,
+  but check it for collisions before trusting it verbatim") one step
+  further: also check that the pre-wired STRING it returns is the exact key
+  you're about to add, not just that the route-prefix check fires at all —
+  grep `activeKeyFor` for the feature's own prefix before assuming a hit
+  there is already correct.
+- **Running `next build` while a `next dev` process is already live on the
+  same `client/.next` directory (Windows) leaves the dev server broken
+  afterwards** (2026-08-22) — the build itself completes fine and doesn't
+  error, but the dev process silently starts 500ing subsequent requests
+  once the build finishes (observed: `curl` against a route that was 200
+  moments earlier now 500s, with nothing new in the dev server's own log
+  beyond a stale/earlier error). If a fix-loop task needs BOTH a `next
+  build` verification and a live `curl`/`next dev` verification in the same
+  session: run the build first, then explicitly find and kill whatever
+  process already owns the dev port (`Get-NetTCPConnection -LocalPort
+  <port> | Select-Object OwningProcess`, `Stop-Process -Id <pid> -Force` on
+  Windows) — don't assume a `next dev` you didn't just start yourself is
+  healthy just because it responded 200 earlier in the session — delete
+  `.next`, and start a fresh `next dev` before trusting any `curl` result
+  against it.
 
 ## Session Notes
 
@@ -1430,3 +1531,143 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Verified: `tsc --noEmit` clean; full client Vitest green (52 files / 296
   tests, up from 52/295 — one new assertion: 6 unmapped agents get 6
   distinct icons even though only 2 distinct colors exist among them).
+- 2026-08-21: L06 Eval Pipeline client side (Phase D,
+  `docs/plans/eval-pipeline.md` WI9-WI13; server Phases A-C already shipped).
+  New `lib/hooks/eval.ts` (the plan's 12 named hooks plus `useEvalBatch`/
+  `useEvalBatches`, added for a real gap — see the new Codebase Patterns
+  entry above) and `lib/types.ts` re-exports; new `eval.compare.*`/
+  `eval.dashboard.na`/`naReason`/`relativeScoresNote`/`runAllAgents*` i18n
+  plus `prReview.finding.turnIntoEvalCase`/`evalCaseCreatedMustFind`/
+  `evalCaseCreatedMustNotFlag` — deliberately minimal, following AC-41's
+  enumerated new-key list; several other UX requirements (version badges,
+  skills-fingerprint caveat, "first run" label, per-case cost estimate
+  captions) were rendered as plain hardcoded English strings instead of new
+  i18n keys, the same established precedent this file already documents for
+  incidental copy (e.g. the hardcoded "Skills Lab"/"Agents" breadcrumb
+  literals in `agents/[id]/page.tsx`). `FindingCard` gained a third
+  action button ("Turn into eval case", `onCreateEvalCase` prop, separate
+  from `onAction`'s `FindingActionKind` union so the shared contract stayed
+  untouched), shown only when `accepted || dismissed`; `FindingsPanel` wires
+  it to `useCreateEvalCaseFromFinding` + a toast confirming which
+  expectation kind was created (UX-2). Agent Editor gained an `evals` tab
+  (`AgentEditor/_components/EvalsTab/`, metrics + case list +
+  `CaseEditorModal` with a live `EvalExpectation.safeParse` validity badge)
+  — `constants.ts`'s `TABS`/derived `TAB_KEYS` needed only one array entry,
+  confirming the 2026-08-13 `TAB_KEYS`-must-be-derived fix (entry above)
+  still holds. New `/evals` route (`EvalDashboardView` master list →
+  `AgentEvalDetail` per-agent trend/history/compare-picker →
+  `EvalCompareView` read-only diff) added to `nav.ts`'s SKILLS LAB group
+  (the sanctioned vendor exception, used again) — this ALSO required fixing
+  `activeKeyFor` (see the new Recurring Errors & Fixes entry above), which
+  is easy to miss since the page still renders fine without it, just with a
+  permanently-unhighlighted sidebar item. `LineChart` is passed explicit
+  `yMin={0} yMax={1}` per AC-39/E-7 (and see the new zero-fill quirk noted
+  in Tool & Library Notes). An EXISTING test file broke from this session's
+  change, not just needed new coverage: `FindingsPanel.test.tsx`'s `vi.mock`
+  for `lib/hooks/reviews` had no equivalent for the newly-added
+  `useCreateEvalCaseFromFinding` call, so the real hook ran and threw "No
+  QueryClient set" — fixed by extending the mock, same "a new child hook
+  call breaks an existing test's mock scaffolding" lesson this file already
+  recorded for SPEC-01 (2026-08-13 entry above). Verified: `tsc --noEmit`
+  clean; full Vitest green (38 files / 228 tests, once the `FindingsPanel`
+  mock fix above landed); zero ad-hoc `fetch(` in any new file
+  (grep-confirmed). New-test authorship for `EvalsTab`/`CaseEditorModal`/
+  `CaseRow`/`EvalDashboardView`/`AgentEvalDetail`/`EvalCompareView`/the
+  `FindingCard` third-button behavior is `test-writer`'s job next, not
+  attempted here beyond the pre-existing suites passing.
+
+- 2026-08-22: L06 Eval Pipeline, Phase D plan-verifier fix-loop iteration 1.
+  **A `@devdigest/shared` VALUE import (not `import type`) breaks Next's
+  webpack bundler even though `tsc --noEmit` and Vitest both stay green —
+  and it takes down every route that reaches it, not just the one that
+  imports it.** `CaseEditorModal.tsx` had `import { EvalExpectation } from
+  "@devdigest/shared"` (a runtime `.safeParse()` call, not just a type) —
+  the only non-`import type` client usage of the barrel in this codebase.
+  `client/src/vendor/shared/index.ts` re-exports via relative `./contracts/
+  *.js` specifiers pointing at `.ts` source files (the NodeNext convention —
+  `tsc`'s `moduleResolution: "Bundler"` and Vitest's Vite alias both resolve
+  this natively). Next's webpack does NOT, by default: `next dev` 500'd on
+  EVERY tab of `/agents/:id` (not just Evals — any route whose module graph
+  reaches the barrel at runtime), and `next build` failed with `Module not
+  found: Can't resolve './contracts/*.js'`. **Verified the narrower-looking
+  fix does NOT work**: importing the specific contract file directly
+  (`@devdigest/shared/contracts/eval-ci`, bypassing the barrel) still fails,
+  because `eval-ci.ts` itself has its own relative `.js` imports (`./
+  findings.js`, `./knowledge.js`) for schemas it genuinely uses at runtime
+  (`Verdict.default(...)`, `EvalOwnerKind` in a field type) — the `.js`→
+  `.ts` mismatch is a property of ANY relative import in `vendor/shared`,
+  not something scoped to the barrel file. The actual fix: `next.config.mjs`
+  gets a `webpack: (config) => { config.resolve.extensionAlias = { ...,
+  ".js": [".ts", ".tsx", ".js"] }; return config; }` — this is the ONE
+  non-vendor file allowed to touch this, and it makes the barrel (and any
+  contract file) safely value-importable everywhere going forward, not just
+  at this one call site. Confirmed live, not just via `tsc`/`vitest`
+  (plan-verifier explicitly flagged those as blind to this class of break):
+  `next dev` serving `/agents/:id?tab=evals` (and `config`, `/evals`, `/`)
+  all 200 before AND after adding the alias would be the wrong test — the
+  500 only reproduces via `next build`'s webpack pass or a `next dev` route
+  that hasn't been compiled yet in that dev session; a stale `.next` cache
+  can hide it. Always verify a webpack-resolution fix with a fresh `next
+  build` (exit code, not just skimming for "Compiled successfully"), not
+  `tsc --noEmit` alone.
+- 2026-08-22 (same session): **`dashboard.current.recall/precision/
+  citation_accuracy` (both `AgentEvalDetail` and `EvalsTab`) are sourced
+  server-side from `recent_runs[0]` (the LATEST batch), not aggregated
+  across the owner's whole case history** — see `server/src/modules/eval/
+  service.ts`'s `buildDashboard`: `current = { recall: latest?.recall, ... }`
+  where `latest = batches[0]`. So that SAME batch's own `recall_cases`/
+  `precision_cases`/`citation_cases`/`cases_total` (already on
+  `EvalBatchRecord`, already present in `dashboard.recent_runs[0]` — no new
+  endpoint needed) are the correct per-metric contributing-case caption for
+  AC-30/UX-5, NOT `dashboard.cases_total` (the owner's whole case set,
+  which is deliberately a different, larger number and would misrepresent
+  "17 of 8 cases" as "17 of 20"). `MetricCard` (`vendor/ui/charts/
+  MetricCard.tsx`) has no caption/subtitle prop and is do-not-touch vendor
+  code — render the caption as a sibling `<p>` inside the existing
+  `metricWrap` flex column instead of extending the component.
+- 2026-08-22 (same session): a pre-existing i18n typo (`shell.nav.evals` —
+  `useShellCommands.ts` builds `t(`nav.${it.key}`)` from `nav.ts`'s item key
+  `"evals"`, but `messages/en/shell.json`'s `nav` block only has the
+  singular `eval`) fires as a caught `MISSING_MESSAGE` console error on
+  EVERY route (confirmed via live `next dev` log, including `/`) — it does
+  NOT fail the request (still 200) and is unrelated to any work this session
+  touched. Left alone (out of scope for this fix-loop's required items); if
+  picked up later, the fix is either renaming `messages/en/shell.json`'s
+  `nav.eval` → `nav.evals` or the reverse in `nav.ts`, not touching
+  `useShellCommands.ts`.
+- 2026-08-22 (same session): an "enumerated new-keys" inventory test
+  (`src/i18n/eval-l06-keys.test.ts`, AC-41) asserts the FULL exact list of
+  new `eval.json` keys added since a captured pre-Phase-D baseline — adding
+  any new key anywhere in that file, even a deliberately spec-justified one
+  from a later fix-loop, fails this test until the new key is added to its
+  `expectedNewKeys` array too. This is correct/expected behavior for this
+  test's design, not a test to route around: when a fix instruction says
+  "note this addition plainly, it falls outside the original enumerated
+  list," that plainly-noted addition belongs BOTH in a code comment near the
+  new key's usage AND as an explicit, commented addition to this test's
+  expected-list array (see `dashboard.metricCasesCaption`'s entry there) —
+  don't leave the test failing or weaken its exact-match assertion into a
+  subset check.
+- 2026-08-22 (fix-loop iteration 2, same Phase D session): the deferred
+  `shell.nav.evals` i18n mismatch noted above turned out to be
+  build-breaking, not just a caught console error — `next build`'s static
+  generation for `/evals` and `/agents/[id]` fails outright with `Error:
+  MISSING_MESSAGE: shell.nav.evals (en)` (plan-verifier caught this;
+  `next dev`'s earlier "still 200" observation was misleading — it only
+  held for ALREADY-COMPILED dev routes, not a fresh `next build` pass).
+  Fixed by renaming `messages/en/shell.json`'s `nav.eval` → `nav.evals`
+  (confirmed dead otherwise — grepped for any other `nav.eval` reference
+  before renaming rather than adding a second key). Added two regression
+  layers: a static key-diff test (`components/app-shell/nav.test.ts`) and a
+  real-`next-intl`-runtime hook test
+  (`components/app-shell/hooks/useShellCommands.test.tsx`) — see the Tool &
+  Library Notes entry above for why the static test alone doesn't prove the
+  runtime behavior. Also closed two required-fix items from the same
+  review round: added a contributing-case-count regression test per
+  component (`AgentEvalDetail.test.tsx`, `EvalsTab.test.tsx`, asserting
+  each metric tile's caption reads its OWN `*_cases` field, not
+  `cases_total` or another metric's count) and a
+  response-vs-timestamp-contradiction test in `FindingsPanel.test.tsx`
+  (pins that the "Turn into eval case" confirmation follows the mutation's
+  own response, not a client-side re-derivation from `accepted_at`/
+  `dismissed_at`).

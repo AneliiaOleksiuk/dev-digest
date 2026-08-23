@@ -1,4 +1,4 @@
-# ADR 0006: Concurrency via N single-element `executeRuns` calls, not a modified fan-out
+# ADR 0007: Concurrency via N single-element `executeRuns` calls, not a modified fan-out
 
 - **Status:** Accepted
 - **Date:** 2026-08-23

@@ -24,3 +24,13 @@ test-results/
 # emdash worktree config (local)
 .emdash.json
 .claude/settings.local.json
+
+# skill-creator's own scratch benchmark/iteration runs (evals/ has the tracked harness instead)
+.claude/skills/*-workspace/
+
+# pr-description skill-creator fixtures are real nested git repos (the eval needs an actual
+# `git diff` inside them) — git can't track a nested .git as plain files, only as a broken
+# gitlink with no remote. Left untracked pending a patch-file-based fixture format.
+.claude/skills/pr-description/evals/fixtures/case-1-ratelimiter-fix/
+.claude/skills/pr-description/evals/fixtures/case-2-ui-spinner/
+.claude/skills/pr-description/evals/fixtures/case-3-adversarial-gate/

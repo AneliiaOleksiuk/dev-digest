@@ -43,18 +43,22 @@ export function useAgentStats() {
   });
 }
 
+/** Response of `POST /pulls/:id/multi-agent-run` — deliberately NOT a
+ *  `MultiAgentRun` (that full, assembled shape doesn't exist yet at this
+ *  point; every column is still `running`). Mirrors `runBatch`'s actual
+ *  return type (`server/src/modules/reviews/multi-agent-service.ts`) field
+ *  for field: the parent batch id is `multi_agent_run_id`, not `id`. */
+export interface StartMultiAgentRunResult {
+  multi_agent_run_id: string;
+  runs: { run_id: string; agent_id: string; agent_name: string }[];
+}
+
 /** POST /pulls/:id/multi-agent-run — kicks off one batch across the given
- *  agent ids; the response is the initial `MultiAgentRun` (columns still
- *  `running`). Seeds the read-query cache immediately so the results screen
- *  doesn't show a loading flash for data it was just handed. */
+ *  agent ids and returns immediately (AC-12), before any agent completes. */
 export function useStartMultiAgentRun() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ prId, agentIds }: { prId: string; agentIds: string[] }) =>
-      api.post<MultiAgentRun>(`/pulls/${prId}/multi-agent-run`, { agent_ids: agentIds }),
-    onSuccess: (data) => {
-      qc.setQueryData(["multi-agent-run", data.id], data);
-    },
+      api.post<StartMultiAgentRunResult>(`/pulls/${prId}/multi-agent-run`, { agent_ids: agentIds }),
   });
 }
 

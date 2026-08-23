@@ -158,8 +158,24 @@ export const PINNED_ACTIONS = {
  *  be emitted (AC-29, E-29). */
 export const NODE_VERSION = '22';
 
-/** The branch Install commits to and opens a PR from (AC-34). */
+/** The LEGACY (unnamespaced) branch Install commits to and opens a PR from
+ *  (AC-34) — kept unchanged for a `namespace === null` installation (AC-14's
+ *  freeze). Namespaced installations use `ciBranchFor` below instead: one
+ *  branch, and therefore one PR, PER INSTALLATION — never shared across
+ *  agents, so a second agent's export can never land inside a PR titled
+ *  after a different agent, and never re-derive/overwrite a path another
+ *  installation owns via `findOpenPr`'s branch-scoped lookup. */
 export const CI_BRANCH = 'devdigest/ci';
+
+/** The branch a given installation's Install commits to and opens its OWN PR
+ *  from — `null` (legacy) returns `CI_BRANCH` unchanged; a namespaced
+ *  installation gets `${CI_BRANCH}-${namespace}`, so N agents on one
+ *  repository produce N independent branches/PRs, each named after and
+ *  containing ONLY that installation's own files (mirrors `workflowPathFor`'s
+ *  per-namespace shape). */
+export function ciBranchFor(namespace: string | null): string {
+  return namespace ? `${CI_BRANCH}-${namespace}` : CI_BRANCH;
+}
 
 /** Bumped BY HAND whenever `workflow.ts` changes what it emits (AC-18) — lets
  *  an installation row record which generator version produced its workflow.

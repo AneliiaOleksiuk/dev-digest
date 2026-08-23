@@ -8,6 +8,7 @@ import {
   devdigestDirFor,
   ingestSecretNameFor,
   workflowNameFor,
+  ciBranchFor,
   RUNNER_PATH,
   RUN_COMMAND,
   WORKFLOW_PATH,
@@ -15,6 +16,7 @@ import {
   SKILLS_SUBDIR,
   MEMORY_PATH,
   INGEST_SECRET_NAME_LEGACY,
+  CI_BRANCH,
 } from '../src/modules/ci/constants.js';
 
 /**
@@ -118,6 +120,20 @@ describe('AC-25: ingestSecretNameFor — DEVDIGEST_INGEST_TOKEN_<NAMESPACE>, leg
   it('returns the legacy INGEST_SECRET_NAME_LEGACY constant for namespace: null (AC-14)', () => {
     expect(ingestSecretNameFor(null)).toBe(INGEST_SECRET_NAME_LEGACY);
     expect(INGEST_SECRET_NAME_LEGACY).toBe('DEVDIGEST_INGEST_TOKEN');
+  });
+});
+
+describe('ciBranchFor — each namespaced installation gets its OWN branch, never the shared legacy one', () => {
+  it('derives a per-namespace branch off CI_BRANCH', () => {
+    expect(ciBranchFor(NS)).toBe(`${CI_BRANCH}-${NS}`);
+  });
+
+  it('two different namespaces never collide on a branch name', () => {
+    expect(ciBranchFor('security-reviewer')).not.toBe(ciBranchFor('api-contract-reviewer'));
+  });
+
+  it('returns the bare legacy CI_BRANCH for namespace: null', () => {
+    expect(ciBranchFor(null)).toBe(CI_BRANCH);
   });
 });
 

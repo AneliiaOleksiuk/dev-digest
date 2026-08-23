@@ -112,6 +112,11 @@ export function ExportWizard({
   };
 
   const doInstall = () => {
+    // Defensive: the Install button is already disabled while `install.isPending`,
+    // but a second `mutate()` racing in before that render lands would silently
+    // overwrite this call's response (and its one-time token) in `install.data` —
+    // guard here too, not just via the disabled prop.
+    if (install.isPending) return;
     const input = buildExportInput(currentState());
     install.mutate(
       { agentId: agent.id, input },

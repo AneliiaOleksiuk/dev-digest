@@ -23,7 +23,7 @@ import { AgentsService } from '../agents/service.js';
 import type { CiInstallationRow, CiInstallationWithLastRun, CiRepository, CiRunListRow } from './repository.js';
 import {
   agentsSubdirFor,
-  CI_BRANCH,
+  ciBranchFor,
   ingestSecretNameFor,
   INGEST_TOKEN_BYTES,
   memoryPathFor,
@@ -349,12 +349,13 @@ export class CiService {
 
   /**
    * Install (and re-Install/"Update CI config" — AC-45, same route, no
-   * second path): commits the generated file set to `CI_BRANCH` and opens
-   * (or reuses) an ordinary pull request, minting a one-time ingest token
-   * only when a NEW installation is created. Follows the plan's binding
-   * order of operations — everything through the commit/PR step below must
-   * succeed before ANYTHING is written; the installation row is persisted
-   * LAST.
+   * second path): commits the generated file set to this installation's OWN
+   * branch (`ciBranchFor(layout.namespace)`) and opens (or reuses, on a
+   * re-export of the SAME agent) that branch's own pull request, minting a
+   * one-time ingest token only when a NEW installation is created. Follows
+   * the plan's binding order of operations — everything through the
+   * commit/PR step below must succeed before ANYTHING is written; the
+   * installation row is persisted LAST.
    *
    * SPEC-05 AC-11: a different agent already installed on this repo is no
    * longer a conflict — `resolveLayout` below simply derives this agent its
@@ -435,16 +436,22 @@ export class CiService {
       tokenHash = createHash('sha256').update(ingestToken, 'utf8').digest('hex');
     }
 
-    // Commit, then reuse-or-open the PR. Never the base branch itself
-    // (AC-34, AC-36, E-9, E-10) — `commitFiles` only ever creates/fast-
-    // forwards `CI_BRANCH`, the SAME shared branch every installation on
-    // this repo commits to (D-2 — no per-agent branch/PR, E-3 accepted).
+    // Commit, then reuse-or-open THIS INSTALLATION'S OWN PR. Never the base
+    // branch itself (AC-34, AC-36, E-9, E-10) — `commitFiles` only ever
+    // creates/fast-forwards `ciBranchFor(layout.namespace)`, a branch scoped
+    // to this installation alone (legacy keeps sharing `CI_BRANCH`, per
+    // AC-14's freeze — there can only ever be one legacy installation per
+    // repo anyway). `findOpenPr` below is branch-scoped, so it can never
+    // return another installation's PR, and a new PR's title (from
+    // `agent.name`, just below) can never later be seen as "shared" with a
+    // different agent's export.
     const github = await this.container.github();
+    const branch = ciBranchFor(layout.namespace);
     const message = existing
       ? `Update DevDigest CI review config for "${agent.name}"`
       : `Add DevDigest CI review for "${agent.name}"`;
     const commitResult = await github.commitFiles(repoRef, {
-      branch: CI_BRANCH,
+      branch,
       base: input.base,
       files: files.map((f) => ({ path: f.path, contents: f.contents })),
       message,

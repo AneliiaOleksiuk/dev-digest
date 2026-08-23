@@ -1881,3 +1881,41 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   violated NAME is unchanged; only the predicate's name, which mismatched
   what it actually checks — any mention of the token, not just a
   `>>`-shaped write — was renamed).
+
+## SPEC-05's original "one shared branch/PR per repo" decision (D-2) was reversed after real-world use — reported as a bug, not a cosmetic cost
+
+SPEC-05 shipped every installation on a repository — however many agents —
+committing to the SAME `devdigest/ci` branch and reusing the SAME single open
+pull request, on purpose (D-2, ADR-adjacent, `docs/features/export-to-ci.md`'s
+"Multi-agent CI" section, `specs/SPEC-05-multi-agent-ci-per-repo.md`'s E-3).
+The reasoning at the time: retitling a human's already-open PR out from under
+them is worse than a stale title, and the PR body/diff make each agent's
+files legible regardless.
+
+In actual use this was NOT experienced as a cosmetic annoyance — a user
+debugging "why can't I add a second CI workflow" spent an entire session
+convinced the app was corrupting/overwriting data, because a second agent's
+own file changes (e.g. fixing its `INGEST_URL`) landed inside a PR titled
+after a completely different, earlier-installed agent. Confirmed via the
+user's actual GitHub repo history (`gh api repos/.../pulls`, `.../commits`):
+DB rows were always correct (distinct namespaces, distinct token hashes) —
+the confusion was 100% about which PR a given agent's files appeared in and
+under what title, compounded by the user closing PRs without merging when
+this looked broken, which (via GitHub's additive-only `commitFiles` — see
+ADR 0008) silently dropped whatever hadn't been merged yet.
+
+**Fix:** `constants.ts`'s `ciBranchFor(namespace)` — `null` (legacy) still
+returns the bare `CI_BRANCH` (`devdigest/ci`), since AC-14 only ever allows
+one legacy installation per repo; a namespaced installation gets
+`${CI_BRANCH}-${namespace}`. `service.ts`'s `install()` now commits to and
+opens/reuses THAT branch's own PR — `findOpenPr`'s existing branch-scoped
+lookup already did the right thing once the branch itself stopped being
+shared; no change needed there. **Lesson:** a "known limitation" documented
+as accepted-not-fixed is a hypothesis about user tolerance, not a settled
+fact — when a real user's actual behavior (repeatedly closing PRs unmerged,
+describing correct-but-confusing state as "conflict"/"overwritten") shows the
+tolerance assumption was wrong, revisit the decision instead of defending it.
+Also: when debugging a live "it's broken" report against a real external
+system (GitHub here), read the actual system's history (`gh api`) before
+trusting the local DB or the code's own comments — the DB was right the
+whole time; only the human-facing GitHub state was confusing.

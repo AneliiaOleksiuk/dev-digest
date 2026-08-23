@@ -91,10 +91,17 @@ an error into a non-event.
 ### Non-goals (this iteration)
 
 - **Changing `agent-runner/`.** Decision D-1. Not one line.
-- **A shared branch or PR per agent.** All agents on a repo continue to share
-  the single `devdigest/ci` branch and the single reused pull request
-  (`constants.ts:99`, `service.ts:367-380`) — decision D-2, with its known
-  cosmetic cost accepted (E-3).
+- ~~**A shared branch or PR per agent.** All agents on a repo continue to
+  share the single `devdigest/ci` branch and the single reused pull
+  request — decision D-2, with its known cosmetic cost accepted (E-3).~~
+  **Superseded, post-ship.** Real-world use showed a second agent's own
+  export landing inside a pull request titled after a different, unrelated
+  agent was confusing enough to be reported and treated as a bug, not an
+  accepted cosmetic cost. Each installation now commits to and opens **its
+  own** branch/PR (`constants.ts`'s `ciBranchFor`, `service.ts`'s `install`)
+  — a legacy (`namespace === null`) installation keeps sharing the bare
+  `devdigest/ci` branch, since AC-14 still allows only one legacy
+  installation per repository. E-3 below is superseded along with D-2.
 - **Migrating existing installations onto namespaces.** Decision D-3. Frozen
   means frozen: not on re-export, not on "Update CI config", not by a
   background job, not ever.
@@ -459,13 +466,11 @@ Binding on the Development Plan, in the same spirit as SPEC-04's own section:
   `Secret Leakage Gate` / `secret-leakage-gate` case. Deterministic `-2`
   suffixing, per repository, persisted at first install so it never drifts.
   Covered by AC-2, AC-4.
-- **E-3 The shared pull request's title names only the first agent.**
-  Grounded in `service.ts:367-380`: the PR is opened once with
-  `DevDigest CI review — <agent name>` and thereafter **reused** via
-  `findOpenPr`, so a second agent's files land in a PR titled after the first.
-  **Accepted, not fixed** (decision D-2) — the PR body and the file diff make
-  the contents legible, and retitling a human's open PR from underneath them
-  is worse than a stale title. Documented as a known limitation.
+- ~~**E-3 The shared pull request's title names only the first agent.**~~
+  **Superseded, post-ship** — see D-2's revision above. Each installation now
+  opens its own PR on its own branch (`ciBranchFor`), titled from ITS OWN
+  `agent.name` — there is no longer a "first agent" whose title a later
+  agent's export could land underneath.
 - **E-4 The agent is renamed after installation.** Grounded in
   `db/schema/ci.ts:41-52` and `service.ts:296-311` — the same bug class
   `manifest_path` was introduced to close. The namespace is frozen at first
@@ -473,15 +478,18 @@ Binding on the Development Plan, in the same spirit as SPEC-04's own section:
   one. Cosmetic and deliberate: re-deriving would strand the old namespace's
   files in the repository and break the pasted secret's name. Covered by AC-4,
   AC-26.
-- **E-5 Two exports racing onto the shared branch.** Grounded in
-  `octokit.ts`'s `commitFiles`, which parents off the existing
-  `devdigest/ci` ref when present and `force`-updates it. Sequential exports
-  layer correctly (a new tree over the parent's tree keeps unrelated files);
-  two genuinely concurrent exports can have the later force-update drop the
-  earlier commit's files, leaving an installation row whose files are not on
-  the branch. No lock exists today and none is added.
-  [NEEDS CLARIFICATION: whether a same-repo export lock is worth adding, or
-  whether "re-run the export" is the accepted remedy — see OQ-4]
+- **E-5 Two exports racing onto the same branch.** Grounded in `octokit.ts`'s
+  `commitFiles`, which parents off the existing branch ref when present and
+  `force`-updates it. Narrowed, post-ship: since each installation now has
+  its OWN branch (`ciBranchFor`), this can only happen between two
+  concurrent exports of the SAME agent (a double-submitted Install click,
+  guarded client-side but not server-side) — never between two different
+  agents any more. Sequential exports layer correctly (a new tree over the
+  parent's tree keeps unrelated files); two genuinely concurrent exports of
+  the same agent can have the later force-update drop the earlier commit's
+  files. No server-side lock exists today and none is added.
+  [NEEDS CLARIFICATION: whether a same-installation export lock is worth
+  adding, or whether "re-run the export" is the accepted remedy — see OQ-4]
 - **E-6 A namespace that is a Windows reserved device name or empty.**
   Grounded in `helpers.ts`'s `RESERVED_DEVICE_NAMES` / `SLUG_FALLBACK`. `CON`
   becomes `con-file`, an all-punctuation name becomes `untitled`; both are

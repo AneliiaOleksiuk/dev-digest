@@ -8,15 +8,25 @@
  * shape).
  *
  * Oracle: the spec's EARS acceptance criteria (AC-2, AC-4, AC-5, AC-6, AC-7,
- * AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-17, AC-26, AC-27,
+ * AC-8, AC-9, AC-11, AC-12, AC-13, AC-14, AC-15, AC-17, AC-26, AC-27,
  * AC-29, AC-37) and the plan's WI5 ("resolveLayout … existing installation →
  * reuse its own persisted namespace/manifestPath verbatim … no existing →
  * deriveNamespace uniformly, including the FIRST agent on a fresh repo")
  * derived BEFORE reading `service.ts`'s own implementation beyond exported
  * signatures. This module has ZERO prior test coverage — SPEC-04 baseline
- * behavior this file also exercises (shared branch/PR reuse, AC-9/AC-40's
- * "update keeps the token" and "no half-state" guarantees) is net-new
- * coverage too, not just the SPEC-05 delta.
+ * behavior this file also exercises (AC-9/AC-40's "update keeps the token"
+ * and "no half-state" guarantees) is net-new coverage too, not just the
+ * SPEC-05 delta.
+ *
+ * Per-agent branch/PR (post-shipping revision): each installation now
+ * commits to and opens ITS OWN branch/PR (`constants.ts`'s `ciBranchFor`) —
+ * the original SPEC-05 "one shared branch/PR per repo" decision (D-2) was
+ * replaced after real-world use showed a second agent's changes landing in
+ * a PR titled after a different, unrelated agent was confusing enough to be
+ * treated as a bug, not an accepted cosmetic cost. The old AC-10 ("ONE
+ * branch, ONE reused PR") is superseded by the two tests below it now
+ * asserts the opposite for two different agents, and confirms the
+ * SAME-agent-reuses-its-own-PR case still holds.
  *
  * PRECONDITION: `agent-runner/dist/index.js` must exist —
  * `cd agent-runner && pnpm build` — `generateFiles`'s `readRunnerBundle()`
@@ -382,23 +392,51 @@ d('SPEC-05 — multi-agent CI per repository: install-time namespace behavior', 
     await app.close();
   });
 
-  it('AC-10: two agents\' exports on one repo produce ONE branch and ONE reused pull request', async () => {
+  it('two agents\' exports on one repo each produce their OWN branch and OWN pull request, correctly named', async () => {
     const github = new MockGitHubClient();
     const app = await makeApp(github);
     const repo = freshRepo();
-    const agentA = await createAgent(app, 'Branch Share A');
-    const agentB = await createAgent(app, 'Branch Share B');
+    const agentA = await createAgent(app, 'Branch Split A');
+    const agentB = await createAgent(app, 'Branch Split B');
 
-    const resA = await install(app, agentA, repo);
-    const resB = await install(app, agentB, repo);
+    await install(app, agentA, repo);
+    await install(app, agentB, repo);
+
+    const branches = github.committed.map((c) => c.branch);
+    expect(new Set(branches).size).toBe(2);
+    expect(branches).toContain('devdigest/ci-branch-split-a');
+    expect(branches).toContain('devdigest/ci-branch-split-b');
+
+    // TWO independent PRs were opened — never reused across agents.
+    expect(github.openedPrs).toHaveLength(2);
+    expect(github.openedPrs.map((p) => p.head)).toEqual(
+      expect.arrayContaining(['devdigest/ci-branch-split-a', 'devdigest/ci-branch-split-b']),
+    );
+    expect(github.openedPrs.map((p) => p.title)).toEqual(
+      expect.arrayContaining([
+        'DevDigest CI review — Branch Split A',
+        'DevDigest CI review — Branch Split B',
+      ]),
+    );
+
+    await app.close();
+  });
+
+  it('re-exporting the SAME agent reuses ITS OWN pull request on ITS OWN branch', async () => {
+    const github = new MockGitHubClient();
+    const app = await makeApp(github);
+    const repo = freshRepo();
+    const agentId = await createAgent(app, 'Reuse Own Pr Agent');
+
+    const first = await install(app, agentId, repo);
+    const second = await install(app, agentId, repo);
 
     const branches = new Set(github.committed.map((c) => c.branch));
     expect(branches.size).toBe(1);
-    expect([...branches][0]).toBe('devdigest/ci');
+    expect([...branches][0]).toBe('devdigest/ci-reuse-own-pr-agent');
 
-    // Only ONE PR was ever opened — the second export reused it.
     expect(github.openedPrs).toHaveLength(1);
-    expect(resA.json().pr_url).toBe(resB.json().pr_url);
+    expect(first.json().pr_url).toBe(second.json().pr_url);
 
     await app.close();
   });

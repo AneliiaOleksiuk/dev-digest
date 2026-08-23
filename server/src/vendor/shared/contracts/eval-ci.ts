@@ -388,8 +388,15 @@ export const CiExportInput = z.object({
   base: z.string().default('main'),
   /** The only generated file the client may submit an edited version of (AC-6, AC-32). */
   workflow_override: z.string().nullish(),
-  /** Where the CI job POSTs its result artifact back to (Q-8). */
-  ingest_url: z.string().url(),
+  /** Where the CI job POSTs its result artifact back to (Q-8). `.trim()`
+   *  BEFORE `.url()` — the WHATWG URL parser Zod's `.url()` validates against
+   *  tolerates (silently strips) leading/trailing whitespace, so an
+   *  untrimmed value like a pasted " https://…" would pass validation here
+   *  but then get committed verbatim into the generated workflow's YAML,
+   *  where `curl` (a stricter parser) rejects it outright with "URL
+   *  rejected: Malformed input to a URL function" — silently breaking the
+   *  ingest POST for every future CI run on that installation. */
+  ingest_url: z.string().trim().url(),
   /**
    * SPEC-05 AC-11/AC-12: a different agent already installed on the same
    * repo is no longer a conflict — the field stays in the contract for

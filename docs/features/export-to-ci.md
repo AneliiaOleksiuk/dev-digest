@@ -254,14 +254,22 @@ so N agents can share a repository with none of them overwriting another.
   `.devdigest/agents/` can never appear to "contain" a sibling whose slug
   merely starts with the same text. The only path every installation is
   *allowed* to share is the runner bundle itself.
-- **The shared branch and PR are unchanged (D-2).** Every installation on a
-  repository — legacy or namespaced, however many — still commits to the
-  single `devdigest/ci` branch and reuses the single open pull request from
-  it when one exists. That PR's title is set once, from whichever agent was
-  installed first, and is **never retitled** by a later agent's export — a
-  known, accepted limitation (E-3): the PR body and file diff make each
-  agent's files legible, and silently retitling a human's already-open PR
-  would be worse than a stale title.
+- **Each installation gets its own branch and its own PR (post-ship revision
+  of D-2).** SPEC-05 originally shipped with every installation on a
+  repository — legacy or namespaced, however many — sharing the single
+  `devdigest/ci` branch and reusing one open pull request. In real use, a
+  second agent's own export landing inside a PR titled after a different,
+  unrelated agent (that PR's title was set once, from whichever agent was
+  installed first, and never retitled) proved confusing enough to be
+  reported and treated as a bug, not an accepted cosmetic cost. Each
+  installation now commits to `ciBranchFor(namespace)` — the bare
+  `devdigest/ci` for a legacy installation (AC-14 still allows only one
+  legacy installation per repository, so nothing to separate there), or
+  `devdigest/ci-<namespace>` for a namespaced one — and opens/reuses **that
+  branch's own** PR via `findOpenPr`'s branch-scoped lookup, titled from ITS
+  OWN agent's name. Re-exporting ("Update CI config") the SAME agent still
+  correctly reuses that installation's own already-open PR; only a
+  DIFFERENT agent's export no longer can.
 - **The runner bundle stays one shared file** (`.devdigest/runner/index.js`)
   for the whole repository, not one copy per namespace — every installed
   agent's workflow runs the exact same bundle, whichever version happened
@@ -352,7 +360,7 @@ workflows both reach the one shared runner bundle.
 
 ```mermaid
 flowchart TD
-  subgraph repo["target repo — branch devdigest/ci"]
+  subgraph repo["target repo — after both agents' own PRs merge to main"]
     subgraph wf[".github/workflows/"]
       W1["devdigest-review-security-reviewer.yml<br/>name: devdigest-review-security-reviewer<br/>env.DEVDIGEST_DIR: .devdigest/security-reviewer<br/>secrets.DEVDIGEST_INGEST_TOKEN_SECURITY_REVIEWER"]
       W2["devdigest-review-api-contract.yml<br/>name: devdigest-review-api-contract<br/>env.DEVDIGEST_DIR: .devdigest/api-contract<br/>secrets.DEVDIGEST_INGEST_TOKEN_API_CONTRACT"]
@@ -478,7 +486,7 @@ sequenceDiagram
     W->>API: POST export-ci
     API->>API: re-validate workflow override server-side
     API->>API: mint token, store sha256(token) only
-    API->>GH: commitFiles(devdigest/ci) + open/reuse PR
+    API->>GH: commitFiles(this installation's own branch) + open/reuse its own PR
     API->>DB: persist installation (token hash, workflow/agent version)
     API-->>W: PR url + plaintext token, shown once
     Note over U,GH: user pastes OPENROUTER_API_KEY + DEVDIGEST_INGEST_TOKEN, merges PR
@@ -573,12 +581,11 @@ sequenceDiagram
   agent may derive a different suffix if another agent has since claimed
   the candidate on that repo. Pre-existing zip-path shape, widened by
   namespacing rather than newly introduced.
-- **The shared pull request's title names only the first agent ever
-  installed on a repository** (E-3, decision D-2) — every later agent's
-  files land in that same reused PR without retitling it. Accepted, not a
-  bug: the PR body and file diff make each agent's contribution legible,
-  and silently retitling a human's already-open PR would be worse than a
-  stale title.
+- ~~The shared pull request's title names only the first agent ever
+  installed on a repository~~ — **fixed, post-ship** (formerly E-3/D-2). Each
+  installation now opens its own PR on its own branch, titled from its own
+  agent's name — see "Each installation gets its own branch and its own PR"
+  above.
 - **The shared runner bundle carries no version marker** (SPEC-05's OQ-1,
   open by decision). `.devdigest/runner/index.js` is one file for the whole
   repository; exporting any agent ships whatever bundle version is on the

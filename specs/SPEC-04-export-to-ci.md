@@ -191,9 +191,11 @@ behaviour or a configurable one, **build the concrete one**.
   values; use it as-is for the disabled labels and reject everything but `gha`
   at the route. Add no schema flexibility for the other three.
 - **Ingest auth is a shared secret and nothing else.** Random token at Install,
-  one GitHub Actions secret, one request header, one constant-time comparison
-  server-side. No signing, no JWT, no key rotation, no nonce, no replay window,
-  no per-request expiry (D-1).
+  one GitHub Actions secret, one `Authorization: Bearer` header, one hash-keyed
+  lookup server-side (AC-51, amended) — the lookup itself is the
+  authentication, so no separate installation identifier and no constant-time
+  comparison is needed. No signing, no JWT, no key rotation, no nonce, no
+  replay window, no per-request expiry (D-1).
 - **No source-specific ingest logic.** The endpoint records the `source` string
   the authenticated caller sends. It does not check that the source is a CI
   system DevDigest can generate a workflow for, and it branches on nothing
@@ -563,13 +565,28 @@ behaviour or a configurable one, **build the concrete one**.
   **hash** of it — never the token itself. (verify: unit test asserting the token
   is generated from a CSPRNG and that no row or log contains the plaintext;
   component test asserting it is shown once and not re-fetchable)
-- **AC-51** The ingest request shall identify its installation and present its
-  token in a request **header**, and the system shall authenticate by hashing the
-  presented token and comparing it to the stored hash for that installation using
-  a **constant-time** comparison. IF the installation is unknown, the header is
-  absent, or the comparison fails, THEN the system shall respond 401 and shall
-  write nothing. (verify: integration test for each of the three failure cases
-  and for the success case; unit test asserting the comparison is constant-time)
+- **AC-51** *(amended post-implementation — see the fix-loop note at the end of
+  this criterion)* The ingest request shall present its token as an
+  `Authorization: Bearer <token>` **header**, and the system shall authenticate
+  by hashing the presented token and looking up the installation whose stored
+  hash matches it — the hash-keyed lookup itself is the authentication, since a
+  match both identifies the installation and proves possession of the token in
+  one step. IF no installation's stored hash matches, the header is absent, or
+  the header is malformed, THEN the system shall respond 401 and shall write
+  nothing. (verify: integration test for each of the three failure cases and
+  for the success case)
+  **Amendment note:** the criterion originally required a **separate**
+  installation-identifying header plus a constant-time comparison against that
+  installation's stored hash. The implementation could not carry an
+  installation id in the generated workflow — Preview has no installation yet,
+  and AC-5 requires Preview and Install to produce byte-identical files, so any
+  value baked in at generation time would have to exist before Install ever
+  runs. A hash-keyed lookup needs no separate installation identifier and no
+  constant-time comparison: the only value ever compared is a hash of an
+  attacker-supplied token against stored hashes, so even a naive comparison
+  leaks information about a *hash*, not the token — and turning a learned hash
+  into a working credential would require a SHA-256 preimage. Verified safe and
+  recorded as D-1's actual, final design; no code change is warranted.
 - **AC-52** The ingest endpoint shall not use `getContext` for authentication.
   It shall resolve the workspace **from the authenticated installation** — via
   `ci_installations.agent_id → agents.workspace_id` — and shall write only into
@@ -981,8 +998,9 @@ categories are covered where this feature actually implicates them.
   placeholder must never be emitted (AC-25).
 - **A04 Cryptographic failures / secrets handling.** The ingest token is
   ≥ 256 bits from a CSPRNG, shown once, and stored **only as a hash** (AC-50), so
-  a database read does not yield a usable credential; verification is
-  constant-time (AC-51). `OPENROUTER_API_KEY` and `GITHUB_TOKEN` values never
+  a database read does not yield a usable credential; verification is a
+  hash-keyed lookup, which needs no constant-time comparison of its own —
+  see AC-51's amendment note (AC-51). `OPENROUTER_API_KEY` and `GITHUB_TOKEN` values never
   leave the studio and appear in generated output only as `${{ secrets.* }}`
   references (AC-71); secrets reach a `run:` script through `env:` rather than
   inline expression expansion (AC-30). The studio's own `GITHUB_TOKEN` comes only
@@ -1126,7 +1144,7 @@ sequenceDiagram
     R->>R: find single manifest, fetch diff, reviewer-core, grounding gate
     R->>CI: post review, write devdigest-result.json, exit code
     CI->>API: POST result with installation id and token header
-    API->>API: hash and constant-time compare, validate body, check repo
+    API->>API: hash and look up by hash (the lookup IS the auth), validate body, check repo
     API->>DB: insert agent_runs row, source = ci
     API-->>CI: accepted
     U->>API: open CI Runs
@@ -1320,7 +1338,7 @@ flowchart TD
 | Agent system prompt, skill bodies | Workspace users (and, for extracted skills, an earlier LLM over repo content) | Untrusted **as YAML content**. Emitted through a real YAML emitter with quoted/block scalars so they cannot introduce or alter a manifest field — which matters more here than usual, because the manifest is the sole carrier of the gate policy (AC-13, AC-28, E-20). |
 | `CiExportInput` body (`target`, `triggers`, `post_as`, `base`, `action`, workflow override) | Client | Untrusted. Zod-validated at the route (AC-76); `target` restricted to `gha` (AC-3); `triggers` intersected with the allowed `pull_request` types (AC-19). |
 | CI Runs filter query (time window, agent, repo, status, source) | Client | Untrusted. Zod-validated, and every filter is applied **after** the workspace join, never as a substitute for it (AC-63, AC-75, AC-76). |
-| Ingest token presented on a request header | Whoever is calling — anyone on the network can attempt it | Untrusted until proven. Hashed and compared constant-time against the stored hash for the named installation; a failure is 401 with no write and no echo (AC-51, AC-60). |
+| Ingest token presented on a request header | Whoever is calling — anyone on the network can attempt it | Untrusted until proven. Hashed and looked up against stored hashes — the match itself is the proof of possession, since the compared value is a hash of what the caller sent, not a secret whose bytes would be worth leaking incrementally; a failure is 401 with no write and no echo (AC-51, AC-60). |
 | Ingest body — the whole envelope | The target repo's CI, which anyone with write access to that repo can modify | Untrusted. Zod-validated against the schema embedding `CiResultArtifact` (AC-53); repository cross-checked against the installation (AC-54); size-capped (AC-59). Its metric values are **self-reported and trusted as such** — the token proves who is calling, not what happened (NFR A08). |
 | Ingest body — `source` label | Same | Untrusted, and deliberately unvalidated: stored and displayed as a string, never branched on (AC-62, D-13). |
 | PR diff, PR title/body, branch names, comments seen by the runner | PR author — attacker-controllable on a public repo | Untrusted. Wrapped by `wrapUntrusted` + `INJECTION_GUARD` inside `assemblePrompt`, which the runner is forbidden to bypass (`agent-runner/CLAUDE.md`). Never interpolated into workflow `run:` lines — which carry no arguments at all (AC-25, AC-30). |
@@ -1335,8 +1353,12 @@ flowchart TD
   simplest secure mechanism that fits: mint a high-entropy random token once at
   Install, show it to the user once so they can add it as the target repo's
   `DEVDIGEST_INGEST_TOKEN` Actions secret, store only its hash, have the
-  generated workflow send it as a request header, and compare constant-time
-  server-side (AC-50, AC-51). Scope is one installation: the token names an
+  generated workflow send it as an `Authorization: Bearer` header, and look it
+  up by hash server-side — amended post-implementation from an original
+  installation-id-header-plus-constant-time-compare design once Preview's
+  byte-identity requirement (AC-5) made carrying an installation id in the
+  generated workflow impractical; see AC-51's amendment note (AC-50, AC-51).
+  Scope is one installation: the token names an
   installation, the installation names an agent, and the agent names the
   workspace — which is the whole tenancy derivation, since `ci_installations`
   has no `workspace_id` (AC-52, E-23). Explicitly **not** built for v1: request

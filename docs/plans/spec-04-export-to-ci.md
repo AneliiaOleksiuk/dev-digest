@@ -144,7 +144,7 @@ tab render.
 - **Security is threaded through the work items, not appended as a late pass.**
   The Spec already ran OWASP Top 10:2025 (A01 unauthenticated cross-tenant
   write on ingest, A02 the generated workflow *is* a security configuration,
-  A03 action pinning, A04 the token's CSPRNG/hash/constant-time handling, A05
+  A03 action pinning, A04 the token's CSPRNG/hash/hash-keyed-lookup handling, A05
   YAML + workflow + path injection, A06 the trust model, A08 the ingest
   boundary, A09 logging, A10 fail-closed). Every work item touching one of
   those surfaces names the `security` skill.
@@ -775,10 +775,15 @@ repository. It is the phase to review most carefully between commits.*
 - Satisfies: AC-38, AC-52, AC-55, AC-56, AC-57, AC-65, AC-75; E-23, E-24.
 - Content — every method that takes a `workspaceId` **joins through
   `agents.workspace_id`**, because `ci_installations` has no tenancy column
-  (E-23). A method that reads an installation by id alone must not exist; the
-  ingest path's single exception is `findInstallationById` used **only** after
-  the token check, and it returns the resolved `workspaceId` with the row so the
-  caller cannot forget it (AC-52).
+  (E-23). A method that reads an installation by a caller-supplied identifier
+  alone must not exist; the ingest path's single exception resolves the
+  installation from the *authenticated* token instead and returns the resolved
+  `workspaceId` with the row so the caller cannot forget it (AC-52). **Amended
+  in fix-loop iteration 1**: the original method here was `findInstallationById`
+  (by installation id, read after a separate token check) — superseded by
+  `findInstallationByTokenHash` once WI14's ingest auth design changed to a
+  hash-keyed lookup (see WI14's amendment note); `findInstallationById` was
+  removed as dead code.
   - `listInstallationsForAgent(workspaceId, agentId)` — with each row's last-run
     summary (AC-43).
   - `findInstallationByAgentAndRepo(workspaceId, agentId, repo)` (AC-38).
@@ -787,7 +792,8 @@ repository. It is the phase to review most carefully between commits.*
   - `upsertInstallation(...)` — keyed on the `(agentId, repo)` unique index;
     **never overwrites `tokenHash` on update** (AC-38, UX-12).
   - `deleteInstallation(workspaceId, id)` (Q-6).
-  - `findInstallationById(id)` → row + resolved `workspaceId` (ingest only).
+  - `findInstallationByTokenHash(hash)` → row + resolved `workspaceId`, backed
+    by a plain index on `token_hash` (ingest only; amended, see above).
   - `insertCiRun(row)` — `source: 'ci'`, relying on the
     `(ciInstallationId, actionsRunId)` unique index for idempotency; a conflict
     is a **no-op success**, not an error (AC-57, E-16).
@@ -871,22 +877,35 @@ repository. It is the phase to review most carefully between commits.*
 
 **WI14. Ingest — one authenticated endpoint, fail-closed.**
 
+> **Post-implementation amendment (fix-loop iteration 1, see SPEC-04's AC-51
+> amendment note):** this work item originally called for a separate
+> installation-id header plus a `timingSafeEqual` comparison. That design
+> shipped broken — the generated workflow (WI8) had no way to carry an
+> installation id, since Preview must produce byte-identical output to Install
+> (AC-5) and no installation exists yet at Preview time — so the ingest
+> endpoint's two custom headers never matched anything the workflow actually
+> sent. The fixed, final design below authenticates via a single
+> `Authorization: Bearer <token>` header and a hash-keyed lookup, which needs
+> neither a separate installation identifier nor a constant-time comparison
+> (the only value ever compared is a hash of an attacker-supplied token, and a
+> match is itself the proof of possession).
+
 - Files: `server/src/modules/ci/routes.ts`, `server/src/modules/ci/service.ts`.
 - Applicable skills: `security` (A01 the product's first unauthenticated-shaped
-  write, A04 constant-time comparison, A08 integrity at the trust boundary, A09
-  logging, A10 fail-closed), `fastify-best-practices`, `zod`.
-- Satisfies: AC-49, AC-51, AC-52, AC-53, AC-54, AC-55, AC-56, AC-57, AC-58,
-  AC-59, AC-60, AC-62; D-1, D-13; E-11, E-15, E-16, E-18, E-23.
+  write, A04 CSPRNG token + hash-keyed lookup, A08 integrity at the trust
+  boundary, A09 logging, A10 fail-closed), `fastify-best-practices`, `zod`.
+- Satisfies: AC-49, AC-51 (amended), AC-52, AC-53, AC-54, AC-55, AC-56, AC-57,
+  AC-58, AC-59, AC-60, AC-62; D-1 (amended), D-13; E-11, E-15, E-16, E-18, E-23.
 - Content — `POST /ci/ingest`, and it is the **only** result-accepting route in
   the module (AC-49). No file upload, no polling, no second path. The order in
   the Spec's own flowchart is binding:
   1. `{ rateLimit: INGEST_RATE_LIMIT }` (AC-59, E-18) and the body size cap
      under `app.ts`'s 1 MB `bodyLimit` (AC-59).
-  2. Read the installation id and the token from **request headers**
-     (`x-devdigest-installation` and `x-devdigest-token`). Hash the presented
-     token with `sha256` and compare against the stored hash with
-     `node:crypto`'s `timingSafeEqual` over equal-length digest buffers
-     (AC-51). Unknown installation, absent header, or mismatch → **401, write
+  2. Read a single `Authorization: Bearer <token>` **header**. Hash the
+     presented token with `sha256` and look up the installation whose stored
+     hash matches — the lookup itself is the authentication, since a match
+     both identifies the installation and proves possession of the token.
+     Absent header, malformed header, or no matching hash → **401, write
      nothing**, and the response body carries neither the token nor the hash
      (AC-51, AC-60).
   3. **`getContext` is not called on this route** (AC-52). Tenancy is derived
@@ -1270,11 +1289,19 @@ Direct binaries, per root `INSIGHTS.md`'s `ERR_PNPM_ABORTED_…` note; the
    Spec expresses AC-19–AC-31 as twelve *generator invariants* — exactly the
    kind of property a cheap unit test over emitted YAML pins forever and a code
    review pins only until the next edit. AC-32's four named attack strings, the
-   constant-time comparison, the fail-closed ingest ordering and the AC-71
+   hash-keyed ingest lookup (AC-51, amended in fix-loop iteration 1), the
+   fail-closed ingest ordering and the AC-71
    secret-scan are all likewise assertions, not designs. This pass ships them as
    **construction plus stated manual reads**. Recommendation 2 (single-source
    constants shared by generator and validator) is the main structural
    mitigation, and it is load-bearing precisely because no test backstops it.
+   **This prediction materialized once, exactly as described**: the ingest
+   endpoint's original header contract and the generated workflow's headers
+   were never expressed as a shared constant (the one pair Recommendation 2
+   was not applied to), and they silently disagreed — plan-verifier's Phase 1
+   audit caught it, fixed in fix-loop iteration 1 (WI14's amendment note). The
+   fix itself introduced no new shared constant either; Phase 2's re-review
+   flagged this as a standing structural risk, not fully closed.
    **This is the plan's largest known gap and it is deliberate** — it must be
    re-raised, not quietly retired, when the feature is next touched.
 2. **`agent-runner/dist/index.js` does not exist on a fresh clone** and is
@@ -1325,6 +1352,35 @@ Direct binaries, per root `INSIGHTS.md`'s `ERR_PNPM_ABORTED_…` note; the
     latency targets). Neither blocks a work item — Q-1 is answered as "warn,
     never map" and Q-7 as "no SLO, two concrete rate limits" — but both remain
     genuine gaps a later iteration should close.
+13. **Migration `0022` (fix-loop iteration 1) has no default/backfill for
+    `ci_installations.manifest_path`.** Recorded by the fix-loop re-verification,
+    not fixed there: `ADD COLUMN manifest_path text NOT NULL` with no default
+    fails against a non-empty `ci_installations` table. This is safe for anyone
+    pulling this branch fresh (`0021` creates the table and `0022` adds the
+    column in the same `pnpm db:migrate` run against an empty table), and only
+    breaks a developer who checked out this branch **before** fix-loop
+    iteration 1's commit **and** had already performed a real Install. The
+    correct fix (add nullable → backfill → `SET NOT NULL` as three statements)
+    would require hand-editing a generated migration, which root `AGENTS.md`
+    forbids — so the accepted remedy is a release note, not a code change: *"if
+    you installed a CI export on this branch before the ingest-auth fix, run
+    `delete from ci_installations;` before migrating."*
+14. **Preview and Install can disagree on the manifest's file path** (AC-5) for
+    a renamed or previously-replaced installation. Fix-loop iteration 1 made
+    the manifest path a stable, persisted property of the installation
+    (`ci_installations.manifest_path`) to fix AC-39's real bug — but only
+    `install()` passes that stable path into `generateFiles`; the Preview route
+    still re-derives it from the agent's *current* name every time
+    (`server/src/modules/ci/routes.ts`'s preview handler,
+    `server/src/modules/ci/service.ts`'s `generateFiles`). The committed file's
+    **contents** are identical either way; only the displayed **path label**
+    can differ from what Install will actually commit, for an agent that was
+    renamed or was the winning side of an AC-39 replace. plan-verifier's
+    Phase 2 re-review flagged this as small and non-blocking, and it was not
+    sent to a second fix-loop iteration. Fix direction, when picked up: have
+    the Preview route look up an existing installation for the (agent, repo)
+    pair and pass its `manifestPath` into `generateFiles`, the same way
+    `install()` does.
 
 ## Explicitly out of scope
 
@@ -1387,16 +1443,23 @@ decision to make once the feature is verified).
 this section was written, no SPEC-04 feature code existed.)*
 
 1. **Is the shared-secret ingest of D-1 implemented fail-closed?** Read WI14's
-   seven-step ordering against the Spec's own flowchart. Every branch — absent
-   header, unknown installation, hash mismatch, oversized body, schema failure,
-   repo mismatch — must return **before** any write, and no caught error may
-   fall through to an insert. Check specifically that `getContext` is *not* on
-   that route (AC-52) and that tenancy comes only from
+   seven-step ordering against the Spec's own flowchart — note WI14's
+   amendment note (fix-loop iteration 1): the auth mechanism changed from a
+   separate installation-id header + `timingSafeEqual` compare to a single
+   `Authorization: Bearer` header authenticated by a hash-keyed lookup, after
+   the original design shipped unreachable (Preview's byte-identity guarantee,
+   AC-5, ruled out carrying an installation id in the generated workflow).
+   Every branch — absent/malformed header, no matching hash, oversized body,
+   schema failure, repo mismatch — must return **before** any write, and no
+   caught error may fall through to an insert. Check specifically that
+   `getContext` is *not* on that route (AC-52) and that tenancy comes only from
    `ci_installations.agent_id → agents.workspace_id` — with no `workspace_id`
    column on the table, that join is the *entire* authorization for the first
    unauthenticated-shaped write in this product (E-23). Also check that the
-   token is hashed before comparison, compared with `timingSafeEqual`, and never
-   echoed in a 401 or a 200 body (AC-51, AC-60).
+   hash-keyed lookup reasoning holds (a match is proof of possession because
+   the compared value is a hash of the caller's own input, not a secret worth
+   timing an early-exit against) and that the response never echoes the token
+   or hash in a 401 or a 200 body (AC-51, AC-60).
 2. **Are the workflow-generator invariants of AC-19–AC-31 enforceable, given
    that this pass writes no tests?** This is the sharpest question about this
    plan. The Spec expected each invariant to be a unit test over emitted YAML;

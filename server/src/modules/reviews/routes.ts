@@ -28,7 +28,7 @@ function intentLogSink(log: FastifyBaseLogger): IntentLogSink {
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
  *   POST   /findings/:id/(accept|dismiss|learn)        → finding actions
- *   POST   /findings/:id/eval-case                      → turn a finding into an eval case
+ *   (POST  /findings/:id/eval-case is owned by modules/eval/routes.ts, not here)
  *   POST   /pulls/:id/intent                           → force re-classify a PR's intent
  *   GET    /pulls/:id/intent                            → persisted intent, or `null`
  *   POST   /pulls/:id/multi-agent-run                   → L07: run an explicit agent subset as one batch
@@ -194,13 +194,16 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     });
   }
 
-  // ---- "Turn into eval case" — registered SEPARATELY: not a
-  // FindingActionKind, so it does NOT go through the FINDING_ACTIONS loop
-  // above / the accept-dismiss-learn switch in findings.ts.
-  app.post('/findings/:id/eval-case', { schema: { params: IdParams } }, async (req) => {
-    const { workspaceId } = await getContext(container, req);
-    return service.createEvalCaseFromFinding(workspaceId, req.params.id);
-  });
+  // ---- "Turn into eval case" is NOT registered here. `modules/eval/routes.ts`
+  // owns `POST /findings/:id/eval-case` (merged in from L06-Evals, main) — its
+  // `createFromFinding` is the fuller-featured implementation (derives the
+  // eval expectation from the finding's own accept/dismiss verdict, refuses
+  // with 422 on an undecided finding rather than guessing) and was built with
+  // explicit awareness of this exact route ("registered here, not
+  // modules/reviews, per this repo's route-prefix-doesn't-imply-module-
+  // ownership precedent" — see its own routes.ts doc comment). SPEC-04's own
+  // `eval-case.ts` service in this module is superseded by it, not a
+  // duplicate to keep registered alongside it — see server/INSIGHTS.md.
 
   // ---- Multi-agent batch review (L07, SPEC-04) ----------------------------
   // Tight per-route limit, at least as strict as POST /pulls/:id/review

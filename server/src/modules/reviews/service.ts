@@ -7,7 +7,6 @@ import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
 import { IntentService } from './intent-service.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
-import { createEvalCaseFromFinding } from './eval-case.js';
 import { MultiAgentService } from './multi-agent-service.js';
 import { MultiAgentReadService } from './multi-agent-read.js';
 import { reviewToDto } from './helpers.js';
@@ -167,15 +166,6 @@ export class ReviewService {
     action: FindingActionKind,
   ): Promise<{ finding?: ReviewDtoFinding; memory_id?: string }> {
     return actOnFindingImpl(this.repo, this.agents, workspaceId, findingId, action);
-  }
-
-  /** "Turn into eval case" — registered SEPARATELY from the accept/dismiss/
-   *  learn switch (it is not a `FindingActionKind`). */
-  async createEvalCaseFromFinding(
-    workspaceId: string,
-    findingId: string,
-  ): Promise<{ eval_case_id: string }> {
-    return createEvalCaseFromFinding(this.repo, this.container, workspaceId, findingId);
   }
 
   // ===========================================================================

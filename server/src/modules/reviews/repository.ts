@@ -25,12 +25,8 @@ import * as pullRepo from './repository/pull.repo.js';
 import * as knowledgeRepo from './repository/knowledge.repo.js';
 import type { MemoryKind, MemoryScope, MemorySource } from '@devdigest/shared';
 import type { MultiAgentRunRow, AgentRunRow } from './repository/run.repo.js';
-import type {
-  MemoryRow,
-  EvalCaseRow,
-  EvalCaseOwnerKind,
-} from './repository/knowledge.repo.js';
-export type { MultiAgentRunRow, AgentRunRow, MemoryRow, EvalCaseRow, EvalCaseOwnerKind };
+import type { MemoryRow } from './repository/knowledge.repo.js';
+export type { MultiAgentRunRow, AgentRunRow, MemoryRow };
 
 export class ReviewRepository {
   constructor(private db: Db) {}
@@ -221,27 +217,6 @@ export class ReviewRepository {
    *  `knowledge.repo.ts`'s `findMemoryByLearnedFinding` for the contract. */
   findMemoryByLearnedFinding(workspaceId: string, findingId: string): Promise<MemoryRow | undefined> {
     return knowledgeRepo.findMemoryByLearnedFinding(this.db, workspaceId, findingId);
-  }
-
-  findEvalCaseByOwner(
-    workspaceId: string,
-    ownerKind: EvalCaseOwnerKind,
-    ownerId: string,
-  ): Promise<EvalCaseRow | undefined> {
-    return knowledgeRepo.findEvalCaseByOwner(this.db, workspaceId, ownerKind, ownerId);
-  }
-
-  insertEvalCase(values: {
-    workspaceId: string;
-    ownerKind: EvalCaseOwnerKind;
-    ownerId: string;
-    name: string;
-    inputDiff: string | null;
-    inputFiles: unknown;
-    inputMeta: unknown;
-    expectedOutput: unknown;
-  }): Promise<EvalCaseRow> {
-    return knowledgeRepo.insertEvalCase(this.db, values);
   }
 
   completeAgentRun(

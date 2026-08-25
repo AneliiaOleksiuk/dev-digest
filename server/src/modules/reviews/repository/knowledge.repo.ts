@@ -11,8 +11,6 @@ import type { MemoryKind, MemoryScope, MemorySource } from '@devdigest/shared';
  */
 
 export type MemoryRow = typeof t.memory.$inferSelect;
-export type EvalCaseRow = typeof t.evalCases.$inferSelect;
-export type EvalCaseOwnerKind = 'skill' | 'agent' | 'finding';
 
 /** Postgres `unique_violation` (23505) — the `postgres` driver surfaces this
  *  as `.code` on the thrown error. Used to turn a DB-level uniqueness
@@ -93,67 +91,6 @@ export async function findMemoryByLearnedFinding(
   return row;
 }
 
-// ---- eval_cases (Turn into eval case) --------------------------------------
-
-/** Idempotency lookup: one eval case per (workspace, owner_kind, owner_id) —
- *  calling the action twice on the same finding returns the existing case. */
-export async function findEvalCaseByOwner(
-  db: Db,
-  workspaceId: string,
-  ownerKind: EvalCaseOwnerKind,
-  ownerId: string,
-): Promise<EvalCaseRow | undefined> {
-  const [row] = await db
-    .select()
-    .from(t.evalCases)
-    .where(
-      and(
-        eq(t.evalCases.workspaceId, workspaceId),
-        eq(t.evalCases.ownerKind, ownerKind),
-        eq(t.evalCases.ownerId, ownerId),
-      ),
-    );
-  return row;
-}
-
-/** Insert one `eval_cases` row. On a race (two concurrent "Turn into eval
- *  case" calls for the same owner), the losing insert hits
- *  `eval_cases_ws_owner_uq` and this function re-fetches + returns the row
- *  the winner just committed, instead of throwing/duplicating — same pattern
- *  as `insertMemory` above. */
-export async function insertEvalCase(
-  db: Db,
-  values: {
-    workspaceId: string;
-    ownerKind: EvalCaseOwnerKind;
-    ownerId: string;
-    name: string;
-    inputDiff: string | null;
-    inputFiles: unknown;
-    inputMeta: unknown;
-    expectedOutput: unknown;
-  },
-): Promise<EvalCaseRow> {
-  try {
-    const [row] = await db
-      .insert(t.evalCases)
-      .values({
-        workspaceId: values.workspaceId,
-        ownerKind: values.ownerKind,
-        ownerId: values.ownerId,
-        name: values.name,
-        inputDiff: values.inputDiff,
-        inputFiles: values.inputFiles as object | undefined,
-        inputMeta: values.inputMeta as object | undefined,
-        expectedOutput: values.expectedOutput as object | undefined,
-      })
-      .returning();
-    return row!;
-  } catch (err) {
-    if (isUniqueViolation(err)) {
-      const existing = await findEvalCaseByOwner(db, values.workspaceId, values.ownerKind, values.ownerId);
-      if (existing) return existing;
-    }
-    throw err;
-  }
-}
+/* eval_cases (Turn into eval case) helpers removed 2026-08-23 (main merge) —
+   `modules/eval/service.ts`'s `createFromFinding` is the surviving
+   implementation for POST /findings/:id/eval-case; see server/INSIGHTS.md. */

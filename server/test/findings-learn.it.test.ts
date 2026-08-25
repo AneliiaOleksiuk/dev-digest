@@ -11,13 +11,14 @@ import type { Embedder, Review } from '@devdigest/shared';
 
 /**
  * L07 (SPEC-04) — integration tests for the `Learn → memory`
- * (`findings.ts`'s `learn` action) and `Turn into eval case`
- * (`eval-case.ts`) service logic
+ * (`findings.ts`'s `learn` action) service logic
  * (docs/plans/spec-04-multi-agent-review.md WI8).
  *
- * Oracle derived from specs/SPEC-04-multi-agent-review.md AC-36..AC-40,
- * AC-42, AC-44 and NFR-7's ownership check, BEFORE reading `findings.ts`'s
- * learn path / `eval-case.ts` in depth.
+ * Oracle derived from specs/SPEC-04-multi-agent-review.md AC-36..AC-40 and
+ * NFR-7's ownership check, BEFORE reading `findings.ts`'s learn path in
+ * depth. "Turn into eval case" coverage (originally AC-42/AC-44 here) moved
+ * out when `POST /findings/:id/eval-case` was superseded by
+ * `modules/eval`'s implementation — see the removal note at this file's end.
  */
 
 const hasDocker = await dockerAvailable();
@@ -285,71 +286,11 @@ d('Learn → memory / Turn into eval case (Testcontainers pg)', () => {
     await app.close();
   });
 
-  it('AC-42: turning a finding into an eval case creates one eval_cases row (ownerKind=finding, ownerId=finding id) with the finding\'s own severity/category/file/line/suggestion as expectedOutput', async () => {
-    const app = await appWith();
-    const { findingId } = await makeFinding(app);
-
-    const res = await app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.eval_case_id).toBeTruthy();
-
-    const [row] = await pg.handle.db.select().from(t.evalCases).where(eq(t.evalCases.id, body.eval_case_id));
-    expect(row!.ownerKind).toBe('finding');
-    expect(row!.ownerId).toBe(findingId);
-    expect(row!.name).toContain('Hardcoded Stripe secret key');
-    const expected = row!.expectedOutput as { severity: string; category: string; file: string; start_line: number };
-    expect(expected.severity).toBe('CRITICAL');
-    expect(expected.category).toBe('security');
-    expect(expected.file).toBe('src/config.ts');
-    expect(expected.start_line).toBe(11);
-
-    await app.close();
-  });
-
-  it('AC-44: turning the same finding into an eval case twice (sequential) returns the SAME existing case, not a duplicate', async () => {
-    const app = await appWith();
-    const { findingId } = await makeFinding(app);
-
-    const first = (await app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` })).json();
-    const second = (await app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` })).json();
-    expect(second.eval_case_id).toBe(first.eval_case_id);
-
-    const rows = await pg.handle.db
-      .select()
-      .from(t.evalCases)
-      .where(eq(t.evalCases.ownerId, findingId));
-    expect(rows).toHaveLength(1);
-
-    await app.close();
-  });
-
-  it('AC-44 (concurrent race): two genuinely concurrent "turn into eval case" calls leave exactly one row — exercises insertEvalCase\'s unique-violation catch-and-refetch path', async () => {
-    const app = await appWith();
-    const { findingId } = await makeFinding(app);
-
-    const [a, b] = await Promise.all([
-      app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` }),
-      app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` }),
-    ]);
-    expect(a.json().eval_case_id).toBe(b.json().eval_case_id);
-
-    const rows = await pg.handle.db.select().from(t.evalCases).where(eq(t.evalCases.ownerId, findingId));
-    expect(rows).toHaveLength(1);
-
-    await app.close();
-  });
-
-  it("ownership guard: turning a finding from ANOTHER workspace's PR into an eval case is rejected (404) and creates no row", async () => {
-    const app = await appWith();
-    const [otherWs] = await pg.handle.db.insert(t.workspaces).values({ name: 'eval-other-ws' }).returning();
-    const findingId = await insertForeignFinding(pg.handle.db, otherWs!.id);
-
-    const res = await app.inject({ method: 'POST', url: `/findings/${findingId}/eval-case` });
-    expect(res.statusCode).toBe(404);
-    const rows = await pg.handle.db.select().from(t.evalCases).where(eq(t.evalCases.ownerId, findingId));
-    expect(rows).toHaveLength(0);
-
-    await app.close();
-  });
+  // AC-42/AC-44 "Turn into eval case" coverage removed 2026-08-23 (main
+  // merge): POST /findings/:id/eval-case is now owned by
+  // `modules/eval/service.ts`'s `createFromFinding` (fuller-featured —
+  // requires the finding to already be accepted/dismissed, owns the case by
+  // agent rather than by finding). This module's own `eval-case.ts` was
+  // deleted as a duplicate; see server/INSIGHTS.md. Coverage for the
+  // surviving endpoint lives in `modules/eval`'s own test suite.
 });

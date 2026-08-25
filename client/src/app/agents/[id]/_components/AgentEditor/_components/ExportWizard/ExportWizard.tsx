@@ -125,6 +125,8 @@ export function ExportWizard({
   };
 
   const doZip = () => {
+    // Same double-submit guard as `doInstall` above.
+    if (zip.isPending) return;
     const input = buildExportInput(currentState());
     zip.mutate(
       { agentId: agent.id, input },

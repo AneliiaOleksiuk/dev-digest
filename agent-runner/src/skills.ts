@@ -14,8 +14,13 @@ export function loadSkillBodies(
   slugs: readonly string[],
   readFile: typeof readFileSync = readFileSync,
 ): string[] {
+  const skillsDir = path.resolve(devdigestDir, 'skills');
   return slugs.map((slug) => {
-    const skillPath = path.join(devdigestDir, 'skills', `${slug}.md`);
+    const skillPath = path.resolve(skillsDir, `${slug}.md`);
+    const relative = path.relative(skillsDir, skillPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new RunnerError(`Skill slug '${slug}' resolves outside the skills directory`);
+    }
     try {
       return readFile(skillPath, 'utf8') as unknown as string;
     } catch (err) {

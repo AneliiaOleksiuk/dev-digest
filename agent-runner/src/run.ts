@@ -96,16 +96,18 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
     // 2. Resolve CI context (PR number/title/body/repo) from env + event payload.
     const ctx = resolvePrContext(deps.env, readFile);
 
+    // GITHUB_TOKEN is required regardless of `postAs`: it authenticates the
+    // diff fetch below (step 3), not just the post-back step.
     const githubToken = deps.env.GITHUB_TOKEN;
-    if (deps.postAs !== 'none' && !githubToken) {
-      throw new RunnerError(`GITHUB_TOKEN is required to post as '${deps.postAs}'`);
+    if (!githubToken) {
+      throw new RunnerError('GITHUB_TOKEN is required to fetch the PR diff');
     }
 
     // 3. Assemble the diff from the CI context. Strip DevDigest's own exported
     //    artifacts (`.devdigest/**`, the generated workflow) BEFORE parse: the
     //    minified runner bundle would otherwise fail the whole review with a
     //    GitHub 422 "diff too large", and reviewing our own config is noise.
-    const rawDiff = await fetchDiffImpl(ctx, githubToken ?? '', fetchImpl);
+    const rawDiff = await fetchDiffImpl(ctx, githubToken, fetchImpl);
     const diff = parseUnifiedDiff(stripIgnoredFiles(rawDiff));
 
     // 4. Run the SAME engine the studio uses. `reviewPullRequest` internally
@@ -150,9 +152,9 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
 
     // 7. Post per `post_as` (AC-24).
     if (deps.postAs === 'github_review') {
-      await postGithubReview(ctx, githubToken as string, payload, fetchImpl);
+      await postGithubReview(ctx, githubToken, payload, fetchImpl);
     } else if (deps.postAs === 'pr_comment') {
-      await postPrComment(ctx, githubToken as string, payload.body, fetchImpl);
+      await postPrComment(ctx, githubToken, payload.body, fetchImpl);
     }
     // 'none' → post nothing (exit-code only).
 

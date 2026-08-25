@@ -18,6 +18,7 @@
  * real world and maps the result onto `process.exitCode`.
  */
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { runCi, type PostAs } from './run.js';
@@ -65,7 +66,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
 const isDirectRun =
   typeof process !== 'undefined' &&
   process.argv[1] != null &&
-  import.meta.url === `file://${process.argv[1]}`;
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectRun) {
   main().then(

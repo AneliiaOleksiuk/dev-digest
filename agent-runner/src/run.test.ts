@@ -298,6 +298,26 @@ describe('runCi (T8 agent-runner orchestrator)', () => {
     expect(result.gateTriggered).toBe(false);
   });
 
+  it('fails clearly when GITHUB_TOKEN is missing even for post_as="none", since the diff fetch always needs it', async () => {
+    const stub = makeStubLlm(ALL_HALLUCINATED_REVIEW);
+    const { fetchImpl, calls } = makeFetchRecorder();
+    const result = await runCi(
+      baseDeps({
+        llm: stub.llm,
+        env: { GITHUB_REPOSITORY: 'acme/widgets', GITHUB_EVENT_PATH: path.join(dir, 'event.json') },
+        fetchDiff: async () => FIXTURE_DIFF_RAW,
+        fetchImpl,
+        postAs: 'none',
+      }),
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.artifact).toBeNull();
+    expect(result.error).toMatch(/GITHUB_TOKEN is required/);
+    expect(stub.capturedMessages).toHaveLength(0); // never reached the LLM
+    expect(calls).toHaveLength(0); // never reached GitHub
+  });
+
   it('AC-26: the written devdigest-result.json passes CiResultArtifact.safeParse', async () => {
     const stub = makeStubLlm(GROUNDED_PLUS_HALLUCINATED_REVIEW);
     const result = await runCi(

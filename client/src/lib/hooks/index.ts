@@ -12,4 +12,5 @@ export * from "./blast";
 export * from "./context";
 export * from "./onboarding";
 export * from "./brief";
+export * from "./multi-agent";
 export * from "./eval";

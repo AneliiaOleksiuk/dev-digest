@@ -20,6 +20,7 @@ const VersionParams = z.object({
  * A2 — agents module (owner A2).
  *   GET    /agents                  → list (workspace-scoped)
  *   GET    /agents/:id              → one agent
+ *   GET    /agents/stats            → L07: per-agent cost/duration estimate (batched)
  *   POST   /agents                  → create
  *   PUT    /agents/:id              → update / toggle enabled (versions config)
  *   GET    /agents/:id/versions     → config history (newest first)
@@ -81,6 +82,15 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     const agent = await service.get(workspaceId, req.params.id);
     if (!agent) throw new NotFoundError('Agent not found');
     return agent;
+  });
+
+  // L07 (SPEC-04): one batched cost/duration estimate per workspace agent.
+  // `/agents/stats` vs `/agents/:id` is NOT a routing conflict — Fastify's
+  // radix router prefers the static segment over the `:id` param regardless
+  // of registration order.
+  app.get('/agents/stats', async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.stats(workspaceId);
   });
 
   app.post('/agents', { schema: { body: CreateAgentBody } }, async (req, reply) => {

@@ -1199,6 +1199,338 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   changed from "element not found" to "multiple elements found," proving the
   group+file now mount correctly).
 
+- 2026-08-22/23: Multi-Agent Review (SPEC-04/L07) client G3 — new
+  `repos/[repoId]/multi-agent/` route (`MultiAgentPageView` orchestrates
+  `?pr=`/`?run=` URL state → `ConfigureRunView` (subset picker, pure
+  `computeSelectionEstimate`/`agentEstimateFor` helpers — sums cost, takes
+  MAX duration, per WI11) or `MultiAgentResultsView` (Columns/Tabs toggle +
+  `FindingGroupsSection` + `DisagreementSection`, always below either
+  layout)); new `lib/hooks/multi-agent.ts`
+  (`useAgentStats`/`useStartMultiAgentRun`/`useMultiAgentRun`/
+  `useTurnIntoEvalCase` — the last two endpoints, `GET /agents/stats` and
+  `POST /findings/:id/eval-case`, were built against G2's FIXED contract
+  before G2's server routes existed, per the concurrent multi-agent split);
+  added a `multi-agent` entry to `vendor/ui/nav.ts`'s WORKSPACE group (5th
+  use of the sanctioned do-not-touch exception, icon `Users`, `gKey: "m"`)
+  + a matching `SHORTCUTS` row — `activeKeyFor`/`shell.json`'s
+  `nav["multi-agent"]` label were ALREADY pre-wired for this route before
+  this session (same "pre-authored code anticipates the UX" pattern this
+  file already documents), only the `NAV` array entry itself was missing.
+  **Cross-route component reuse works via the `@/` alias despite bracket
+  folder names**: `RunTraceDrawer` and `FindingCard` (both under
+  `pulls/[number]/_components/`) are imported from the sibling
+  `multi-agent/` route as `@/app/repos/[repoId]/pulls/[number]/_components/
+  <Name>` — TypeScript/webpack resolve `[repoId]`/`[number]` as ordinary
+  literal path segments, no dynamic-route/glob semantics apply to a static
+  import specifier. Exactly ONE `openRunId` state + ONE `<RunTraceDrawer>`
+  mount lives in `MultiAgentResultsView` (not per-column) — Columns'
+  `AgentColumnCard` and Tabs' `AgentTabsView` both just call the SAME
+  `onOpenTrace` callback passed down.
+  **`AgentColumn` (observability.ts, G1-owned) has no dedicated `error`
+  field** — unlike `RunSummary` (`trace.ts`), which does. `AgentColumnCard`
+  treats `column.summary` as the error text when `status === 'failed'`
+  (the field the server presumably repurposes on failure); flagged below
+  for G1/a follow-up rather than guessed at silently, since I can't edit
+  the do-not-touch contract file to add a real `error` field myself.
+  **Reused `usePrReviews(prId)` (unmodified) as the enrichment source for
+  BOTH the Tabs view's per-agent findings (filtered by `review.run_id`) and
+  `FindingGroupsSection`'s per-member `FindingCard`s (looked up by finding
+  `id` in a flat `Map`)** — `AgentColumnFinding`/`FindingGroupMember` (the
+  lightweight projections `MultiAgentRun` actually carries) don't have every
+  field `FindingCard` needs (no `accepted_at`/`dismissed_at`/full
+  `category`/`file`/lines for members), but the SAME PR's `ReviewRecord[]`
+  from the ordinary reviews endpoint already has full `FindingRecord`s for
+  every run in the batch (each multi-agent run is an ordinary `agent_runs`
+  row) — no server change needed, and accept/dismiss done anywhere
+  (Tabs, a finding group) invalidates `["reviews", prId]` the normal way, so
+  every other view showing the same finding id updates for free.
+  `FindingGroupsSection/helpers.ts`'s `memberFindingRecord` falls back to
+  reconstructing a projection-only record (accept/dismiss defaulted to
+  unset) only for the rare case the reviews cache hasn't caught up yet.
+  **"Show only conflicts" (WI13) toggle semantics had to be inferred, not
+  read off a server contract** — `MultiAgentRun.conflicts` is, by its OWN
+  doc comment, already filtered to genuine disagreements server-side (some
+  agent flagged it and another didn't, OR severities diverge), so a
+  client-side toggle can't mean "hide agreement rows" (there are none in
+  this array). Implemented as: OFF (default) shows every row the server
+  sent, including pure "some flagged it, others just didn't cover it" rows
+  (`did not flag` is a first-class verdict, shown by default); ON narrows
+  to `isSeverityDivergent` rows only — where the agents that DID flag it
+  actively disagree on severity. Confirm this reading against G2's actual
+  `conflicts[]` semantics once the server side lands; the pure helper
+  (`DisagreementSection/helpers.ts`) is isolated and cheap to change if the
+  real intent differs.
+  **`Toggle` (`vendor/ui/primitives/Toggle.tsx`) takes `on`, not
+  `checked`** — easy to guess wrong by analogy with `Checkbox`'s `checked`
+  prop; caught by `tsc`, not by a runtime surprise, but worth remembering
+  since this is the first place in the codebase this session that reached
+  for `Toggle` instead of `Checkbox`.
+  Verified: `tsc --noEmit` clean; full Vitest green (51 files / 280 tests,
+  up from 51/... — 15 new self-check test files this session, one per
+  colocated component/helpers pair, per this feature's plan explicitly
+  requiring them). `smoke.test.tsx` (`/showcase`) still passes. No live
+  browser click-through — G2 (server routes) and G4 (agent roster seed
+  data) were running concurrently in the same working tree and hadn't
+  landed yet, so there was nothing running to click through against.
+  **Flagged, not resolved here**: (1) `AgentColumn`'s missing `error` field
+  (above); (2) the "Show only conflicts" semantics need reconciling against
+  G2's actual server-side `conflicts[]` computation once it lands; (3) no
+  `nav.test.ts` assertion was added for the new `multi-agent` NAV entry
+  (`onboarding-tour`'s precedent test file) — out of this session's file
+  scope (`client/src/components/app-shell/nav.test.ts` was not in the
+  assigned exclusive scope), left for a follow-up/test-writer pass.
+
+- 2026-08-23: Multi-Agent Review (SPEC-04/L07) plan-verifier fix-loop
+  iteration 1, client side (companion to the same-day server fix pass) —
+  resolves all three items flagged above in the 2026-08-22/23 entry.
+  **(1) `GET /agents/stats` field-name mismatch (Fix A, blocking)**:
+  `lib/hooks/multi-agent.ts` was importing the WRONG shared contract —
+  `@devdigest/shared`'s `AgentStats` (`runs`/`avg_latency_ms`/accept-rate/
+  trend/…) is `GET /agents/:id/stats`'s richer per-agent-DETAIL shape, a
+  different endpoint entirely; the actual `GET /agents/stats` response is
+  the server's local, unvendored `AgentCostEstimate`
+  (`server/src/modules/agents/helpers.ts`:
+  `{agent_id, agent_name, avg_duration_ms, avg_cost_usd, sample_size}`).
+  Because `lib/api.ts`'s fetch wrapper does zero runtime validation
+  (`as T`), this never threw — every field silently read as `undefined`,
+  so `agentEstimateFor`'s null-check always tripped and EVERY agent showed
+  "no estimate yet" regardless of real history. Fixed by defining a local
+  `AgentCostEstimate` interface in `lib/hooks/multi-agent.ts` (mirroring
+  the server's shape field-for-field, exported for reuse) instead of
+  importing the mismatched vendor type, and updating every consumer
+  (`ConfigureRunView/helpers.ts`'s `agentEstimateFor`/
+  `computeSelectionEstimate`, `AgentPickerCard.tsx`) to read
+  `avg_duration_ms`/`sample_size` instead of `avg_latency_ms`/`runs`.
+  **Lesson: a vendored contract with the exact right-looking field names
+  for a DIFFERENT endpoint of the same resource is a worse trap than a
+  missing type** — `AgentStats` type-checked cleanly against every call
+  site because both interfaces exist and are structurally plausible;
+  `lib/api.ts`'s zero-runtime-validation `as T` cast means nothing catches
+  this until manual field-by-field comparison against the actual server
+  response. Always trace a hook's response type back to the server
+  handler/service that actually implements the route, not just to a
+  same-named export.
+  **(2) `AgentColumn.error` not rendered for `failed`/`cancelled` (Fix B,
+  Major)**: the server added a real `error: z.string().nullish()` field
+  (populated for `status === 'failed' | 'cancelled'` only); `AgentColumn`
+  had none before (see the 2026-08-22/23 entry's flag). `AgentColumnCard.tsx`
+  now branches on `status === 'failed' || status === 'cancelled'` (was
+  `'failed'` only) and reads `column.error` (was `column.summary`, which
+  the server no longer overloads for this — it only ever carries a genuine
+  review summary now).
+  **(3) "Show only conflicts" toggle didn't implement AC-30 (Fix C,
+  blocking)**: the 2026-08-22/23 entry's `isSeverityDivergent`-only ON
+  filter was too narrow — it never treated a silent/`'ignored'` take as a
+  conflict on its own, only severity divergence among non-ignored takes.
+  The server-side prerequisite for a correct OFF state also landed this
+  same fix pass: `conflicts[]` now emits EVERY shared location unfiltered
+  (previously pre-filtered server-side to only AC-30 matches, so OFF could
+  never actually show a non-conflicting row — there were none to show).
+  `DisagreementSection/helpers.ts` renamed `isSeverityDivergent` →
+  `isConflict` and implemented AC-30's real OR-definition: `hasSilentParticipant
+  (conflict) || hasSeverityDivergence(conflict)` — either alone is
+  sufficient, they are not required together. **Test fixture gotcha**: the
+  pre-existing `DisagreementSection.test.tsx` "toggle narrows" test used a
+  fixture with one flagged + one ignored take and asserted that toggling ON
+  HID it — that assertion was itself encoding the old, wrong semantics (a
+  silent participant now correctly counts as a conflict, so ON must KEEP
+  it). Replaced with two fixtures: the original (flagged + ignored) to
+  prove ON now keeps a silent-participant row, and a new all-agree fixture
+  (every agent flagged it, all same severity) to prove ON still correctly
+  excludes genuine non-conflicts. Same fixture-encoded-the-bug gotcha in
+  `AgentColumnCard.test.tsx`'s "status is never color-only" test — with
+  `error: null`, both the status chip AND the error box's status-key
+  fallback render the literal text "Cancelled", so `getByText` throws
+  "multiple elements found"; switched to `getAllByText(...).length >
+  0` since the test only cares that SOME text label renders, not the count.
+  Verified: `tsc --noEmit` clean; full Vitest green (51 files / 284 tests,
+  up from 51/280 — 4 new test cases across the three fixed helpers/
+  components, no new test files). `smoke.test.tsx` still passes.
+
+- 2026-08-23: Multi-Agent Review, user-driven design-parity + scope pass
+  (three separate user-reported mismatches against mockup screenshots, all
+  in `repos/[repoId]/multi-agent/` and `pulls/[number]/_components/
+  RunReviewDropdown/`).
+  **(1) `ConfigureRunView` rendered the FULL agent checkbox list (all
+  pre-checked) even before a PR was picked** — the mockup gates "2 Agents to
+  run" behind an `EmptyState` placeholder ("Pick a pull request first") until
+  `prId` is set; the old code only guarded the "Select all" button's
+  visibility, never the list itself, and the seeding `useEffect` for
+  `defaultSelectedAgentIds` ran regardless of `prId` too (harmless — it just
+  seeds state, the list wasn't rendered to show it). Fixed by wrapping the
+  step-2 body in `prId ? agents.map(...) : <EmptyState .../>`; the redundant
+  "Select a PR to begin." hint UNDER the PR selector was also dropped since
+  the new placeholder body says the same thing (`runs.json` `page.noRun.*`
+  keys are now fully dead — left alone, not this session's cleanup scope).
+  **(2) A SECOND mockup screenshot (checkbox agent-picker inside the PR
+  page's `Run Review` dropdown) directly contradicted `specs/
+  SPEC-04-multi-agent-review.md`'s own recorded boundary** ("Not a
+  replacement for `RunReviewDropdown`. Single-agent and 'run all' stay
+  exactly as they are.", AC-8). Confirmed with the user this was an
+  intentional override, not a missed requirement — do NOT silently implement
+  a mockup that contradicts a written spec boundary without flagging the
+  conflict first. Amended the spec in place (new AC-8a) rather than leaving
+  it contradicted by the shipped code — a spec is a decision record; an
+  overridden decision needs a new dated note, not silent drift between doc
+  and code.
+  **The vendored `Dropdown` primitive (`src/vendor/ui/kit/Dropdown.tsx`,
+  do-not-touch) cannot host this pattern at all** — every `DropdownItem`
+  click calls `onClose()` unconditionally after `onClick`, and its body only
+  accepts a flat `DropdownItemDef[]`, not arbitrary children, so a checkbox
+  section that must survive N clicks before one final submit has no home
+  inside it. `RunReviewDropdown.tsx` now builds its OWN small popover
+  (own `open` state + its own mousedown-outside-listener effect, copied
+  verbatim from `Dropdown.tsx`'s technique since it can't be imported/
+  extended) with hand-written `ActionRow` rows replicating `DropdownItem`'s
+  exact visual spec (padding `8px 10px`, `borderRadius:6`, hover
+  `var(--bg-hover)`) to stay pixel-identical to the primitive it replaced.
+  This is now this codebase's second local reimplementation of a
+  vendor-primitive-shaped popover for a case the vendored version can't
+  cover — see the existing `components/popover/Popover.tsx` entry above
+  (hover-triggered vs. this one's click-triggered-with-a-form-inside);
+  worth promoting BOTH into a real shared non-vendor primitive
+  (`components/dropdown-panel/`?) if a third case shows up.
+  New picker section defaults to every ENABLED agent (same default as
+  `ConfigureRunView`), has its own "Clear", and its primary button starts a
+  batch via `useStartMultiAgentRun` + navigates straight to
+  `/repos/:repoId/multi-agent?run=:id` — same destination `PrDetailHeader`'s
+  separate "Multi-Agent Review" button already used, just skipping the
+  configure screen. Old items ("Run all enabled agents", per-agent
+  single-run rows, "Configure agents…") are untouched, rendered below a
+  divider.
+  **(3) Per-agent accent color only covered 4 named personas** (Security/
+  Performance/Junior Mentor/Customer-Facing) + a special-cased Architecture
+  gray; every other agent (including two identically-named "Smoke Test
+  Agent!!" seed rows) rendered on the plain default border, and any NEW
+  agent created later would too. `agent-visuals.ts`'s `agentVisual` signature
+  changed from `(agentName)` to `(agentId, agentName)` (three call sites
+  updated: `AgentPickerCard`, `AgentColumnCard`, `AgentTabsView`'s tab bar) —
+  needed `agentId` specifically because two agents can share a display name,
+  and hashing the name would force them to the same color. Unmapped agents
+  (Architecture included — it keeps its `Layers` icon via a separate
+  `ICON_OVERRIDES` map but no longer gets a reserved color) now get one of 4
+  new hues via a stable FNV-1a hash of their id mod palette length; the
+  do-not-touch vendored token set (`vendor/ui/styles.css`) has no spare hues
+  left (already documented in this file's own prior comment history), so the
+  4 new colors are new theme-aware CSS vars (`--agent-aqua/yellow/magenta/
+  violet`) added to `client/src/app/globals.css` (NOT vendor — that file is
+  the app's own stylesheet, already used for `@font-face`/keyframes, and is
+  the correct place to layer app-specific tokens on top of do-not-touch
+  design-system tokens).
+  **Used the `dataviz` skill's `validate_palette.js` for a NON-chart,
+  per-entity identity-color use case** (card border + icon tint, not a chart
+  series) — first use of that validator outside an actual chart in this
+  codebase. Ran it against this app's real surfaces (`--surface #141414
+  --mode dark`, `--surface #fafafa --mode light`, not the skill's own
+  default reference surfaces) with candidate hex sets. Mixing the app's
+  EXISTING severity hexes (`--crit`/`--warn`/`--sugg`/`--ok`) with the
+  `dataviz` reference palette's same-named slots (blue/orange/green/red) at
+  8-wide FAILED hard (lightness band + CVD + normal-vision floor all failed
+  under `--pairs all`) — the two palettes were never validated together and
+  don't mix safely. Settled on keeping the 4 existing severity hexes
+  untouched and adding a SEPARATE, smaller 4-hue subset (aqua/yellow/
+  magenta/violet, `--pairs adjacent` PASS in both themes; `--pairs all`
+  fails one deutan pair at ΔE 1.6, accepted per the skill's own stated
+  exception since every card already pairs color with an icon + the agent's
+  name — color is never the sole identifier here). Light mode also carries a
+  contrast WARN (3 of the 4 hues sub-3:1 on `#fafafa`) mitigated the same
+  way. Lesson for next time: when reusing `dataviz`'s reference palette
+  alongside a design system's own PRE-EXISTING, differently-valued semantic
+  hex colors, validate the ACTUAL combined set you intend to ship, never
+  assume the reference palette's own documented adjacent-pair pass transfers
+  to a mixed set with different hex values at the same slots.
+  Verified: `tsc --noEmit` clean; full client Vitest green (52 files / 293
+  tests, up from 51/284 — 2 new test files: `agent-visuals.test.ts`,
+  updated `RunReviewDropdown.test.tsx` + `ConfigureRunView.test.tsx`). No
+  live browser click-through this session (same no-browser-automation gap
+  noted elsewhere in this file for past sessions, though `agent-browser` was
+  reportedly installed in 2026-08-02 — not re-verified working here).
+
+- 2026-08-23 (same day, follow-up): **per-agent hash-mod color assignment
+  (above) produced a visible bug the very first time the roster exceeded 4
+  unmapped agents — 3 of 6 unmapped agents (Architecture + both seeded
+  "Smoke Test Agent!!" rows) landed on the SAME violet by chance**, reported
+  by the user from a live screenshot. Independent `hash(id) % 4` per agent
+  is only *expected* to spread evenly; for any given small set of ids it can
+  (and did) cluster — pigeonhole guarantees nothing about the actual split.
+  **Fixed by switching from independent hashing to ROUND-ROBIN over the
+  whole roster**: `agent-visuals.ts`'s public API changed from a per-agent
+  `agentVisual(id, name)` to `agentVisuals(agents[]): Map<id, AgentVisual>`
+  (call once per screen with its full agent list) + `agentVisualFrom(map,
+  id)` (safe lookup with a fallback, never throws on a miss). Internally:
+  named personas resolve first, then the REMAINING unmapped agents are
+  sorted by id (stable regardless of API fetch order) and assigned
+  `AUTO_PALETTE[index % 4]` by their position in that sorted list — this
+  guarantees no auto color is used more than `⌈n/4⌉` times for whatever
+  roster size is passed in, which independent hashing cannot guarantee at
+  any n. **This requires the full roster at the assignment call site, not
+  just the one agent being rendered** — threaded through as a new required
+  `visual: AgentVisual` prop on `AgentPickerCard` and `AgentColumnCard`
+  (computed once via `useMemo` in their respective parents,
+  `ConfigureRunView` and `MultiAgentResultsView`, from data those parents
+  already had — `agents` and `run.columns`), while `AgentTabsView` and
+  `RunReviewDropdown` compute the map internally since they already receive
+  the whole roster as their own prop. **General lesson: per-item
+  independent hashing into a small fixed palette is the wrong tool whenever
+  the caller can see the whole collection at once and low-cardinality
+  "spread evenly" is the actual requirement** — reach for a stable-sorted
+  round-robin/index assignment instead; hashing only becomes necessary when
+  you must color a single item with no visibility into its siblings (not the
+  case for any of Multi-Agent Review's rosters, all of which are small and
+  fully in hand at render time). Verified: `tsc --noEmit` clean; full client
+  Vitest green (52 files / 295 tests, up from 52/293 — `agent-visuals.test.ts`
+  rewritten against the new API including a fairness assertion: 6 unmapped
+  agents into 4 slots, no slot used more than twice).
+
+- 2026-08-23 (same day, second follow-up): **the round-robin fix (above)
+  eliminated the exact-duplicate bug but the underlying 4-hue AUTO_PALETTE
+  was ALSO independently broken — a user screenshot showed General
+  Reviewer/Test Quality Reviewer/API Contract Reviewer/Architecture each
+  visually reading as the SAME color as an unrelated NAMED persona**
+  (General ≈ Performance's orange, Test Quality ≈ Junior Mentor's blue, API
+  Contract/Architecture ≈ Customer-Facing's green) — a hue-collision bug,
+  not a distribution bug, so round-robin alone couldn't fix it. Root cause:
+  the 4 auto hues (aqua/yellow/magenta/violet) were lifted directly from
+  `dataviz`'s reference 8-hue categorical palette's "other 4" slots, which
+  are only validated as safe *relative to that palette's own* blue/orange/
+  green/red hex values — this app's `--crit`/`--warn`/`--sugg`/`--ok` are
+  DIFFERENT hex values at those same hue families, so the "safe" spacing
+  didn't transfer. **Root-caused with the actual validator, not eyeballing**:
+  ran `validate_palette.js` with THIS app's real reserved four
+  (`#ef4444,#f59e0b,#3b82f6,#10b981`) plus each auto-candidate, `--pairs
+  all`, against the real surfaces — confirmed aqua/yellow both hard-FAIL the
+  "normal-vision floor ≥15" gate against their nearest reserved neighbor
+  (not just the softer 6-8 CVD warn band the icon+label mitigation already
+  covers). Systematically hue-mapped this app's 4 reserved colors onto the
+  0-360° wheel (red≈0°, warn≈38°, ok≈160°, sugg≈217°) to find open gaps,
+  and learned the empirical lesson the hard way: **hue-angle distance on
+  paper does NOT predict OKLab ΔE distance** — a "yellow-green"/lime
+  candidate placed dead-center in the visually-spacious 122°-wide warn→ok
+  gap still hard-failed against BOTH neighbors (yellow-green is a known weak
+  spot in human hue discrimination), and a cyan candidate centered in the
+  57°-wide ok→sugg gap failed against sugg specifically. **Only the wide
+  143°-wide sugg→red arc had room for genuinely safe colors, and only for
+  TWO** (`#7c3aed` violet, `#b3159c` magenta/dark; `#6d28d9`/`#8a1177`
+  light) — every 3rd/4th candidate tried in that same arc (indigo, brighter
+  pink, deeper rose) collided with violet or magenta once packed in tighter.
+  **AUTO_PALETTE is now 2 entries, not 4** (`agent-visuals.ts`,
+  `globals.css`'s `--agent-violet`/`--agent-magenta` — `--agent-aqua`/
+  `--agent-yellow` deleted). To compensate for fewer colors, added a
+  SEPARATE `AUTO_ICONS` round-robin (8 icons — Cpu/Wrench/Search/
+  FlaskConical/Boxes/Target/Bug/Database, all previously-unused in this
+  file) at a DIFFERENT modulus than the 2-color palette, confirmed by the
+  user as the preferred tradeoff over "free up a reserved color" or "fewer
+  slots, more collisions" — two agents can share a color but not an icon
+  until the roster exceeds 8 unmapped agents. **General lesson: when
+  reusing ANY reference categorical palette (this app's own past attempt
+  included) alongside a design system's PRE-EXISTING, independently-chosen
+  hex values for the "taken" hue families, always validate the actual
+  combined 8-ish-color set with `--pairs all` against the real surfaces
+  before shipping — a reference palette's internal hue math offers zero
+  guarantee once even one of its slots is swapped for an unrelated hex.**
+  Verified: `tsc --noEmit` clean; full client Vitest green (52 files / 296
+  tests, up from 52/295 — one new assertion: 6 unmapped agents get 6
+  distinct icons even though only 2 distinct colors exist among them).
 - 2026-08-21: L06 Eval Pipeline client side (Phase D,
   `docs/plans/eval-pipeline.md` WI9-WI13; server Phases A-C already shipped).
   New `lib/hooks/eval.ts` (the plan's 12 named hooks plus `useEvalBatch`/

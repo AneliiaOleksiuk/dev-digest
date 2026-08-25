@@ -336,6 +336,70 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   consequences. Worth this shape for any future feature with a similarly
   strict "some outcomes must produce zero DB writes" requirement.
 
+- **Extending a Zod contract with a REQUIRED new field is the expensive move
+  when that contract's test fixtures live in a do-not-touch tree you can't
+  fix yourself (2026-08-23, SPEC-04 fix-loop iteration 1).** Adding
+  `AgentColumn.error: z.string().nullable()` (both vendor
+  `contracts/observability.ts` copies) broke `cd client && tsc --noEmit`
+  with `TS2741`/`TS2719` on multiple hand-built `AgentColumn` object literals
+  in test fixtures under `client/src/app/repos/[repoId]/multi-agent/**` —
+  exactly this fix-loop's explicit do-not-touch tree (a parallel client
+  fix-loop agent + test-writer were working there concurrently). Fixed by
+  using `.nullish()` instead of `.nullable()` — already an established
+  convention in this SAME file for a field that legitimately isn't present
+  on every row (`AgentColumnFinding.kind`, `FindingGroupMember.suggestion`) —
+  which made every pre-existing hand-built `AgentColumn` literal typecheck
+  again with zero client-side edits, since the field became optional rather
+  than required. `multi-agent-read.ts` still always explicitly sets it to a
+  real string or `null` (server behavior unaffected) — only the TYPE became
+  more permissive. Before assuming a nullable-string field on a shared
+  contract must be `.nullable()` (required), check whether `.nullish()` is
+  already a precedented pattern in that same file when test fixtures you
+  can't touch are a real constraint.
+- **`deriveConflicts` (`multi-agent-derive.ts`) used to pre-filter its
+  emitted array down to AC-30 "genuine conflict" entries only — this makes
+  a REQUIRED "OFF = show every shared location" toggle state impossible to
+  ever implement client-side**, since non-conflicting locations never leave
+  the server (fixed 2026-08-23, SPEC-04 fix-loop iteration 1: now emits
+  every location in the per-location index unconditionally; no contract
+  change needed, since every `Conflict.takes[]` entry already carries
+  severity-or-`'ignored'` per participating agent, everything a consumer
+  needs to compute AC-30 locally). General lesson: a "derive X for display"
+  function that ALSO decides what counts as noteworthy is doing two jobs —
+  when a caller needs both "everything" and "the interesting subset," split
+  those two decisions instead of baking the filter into the deriver.
+- **A one-line addition to an ALREADY-drifted hand-mirrored vendor file
+  (server vs. client `contracts/knowledge.ts`, drift documented 2026-08-14:
+  server has `AgentVersionConfig`/`AgentVersion`, client doesn't; shorter
+  `Provider`/`CiFailOn` comments on the client side) cannot be verified with
+  a plain `git diff --no-index` on the whole file — that will never be
+  empty here.** Verify with a diff-of-diffs instead (2026-08-23): capture
+  `git diff --no-index` between the two files BEFORE your edit, capture it
+  again AFTER, and confirm the only change between the two captures is your
+  new hunk (for a single-token widening like `EvalOwnerKind` gaining
+  `'finding'`, that's literally just the git blob-index line changing).
+  Proves you introduced zero NEW drift without requiring the pre-existing
+  drift to vanish — same technique the 2026-08-14 onboarding-contracts
+  session used, worth citing by name next time this file needs touching.
+- **A plain (non-partial) unique index on a nullable Drizzle column is the
+  right tool for "idempotency key that not every row has" — no
+  partial/WHERE-clause index needed (2026-08-23, `memory.learnedFindingId`,
+  Learn-action idempotency fix).** Postgres treats NULLs as pairwise-distinct
+  under a standard unique index, so rows that never set the column (manual
+  memory entries, non-Learn-originated rows) never collide with each other
+  or with a real learned-finding id. This repo's schema files have zero
+  existing precedent for a partial/`WHERE`-clause unique index — don't reach
+  for one reflexively when the plain form already gives correct semantics.
+  Paired with a DB-level TOCTOU fix for `eval_cases` too (plain uniqueIndex
+  on `(workspace_id, owner_kind, owner_id)`) — both `insertMemory`/
+  `insertEvalCase` (`repository/knowledge.repo.ts`) now try/catch the
+  resulting unique-violation and re-fetch+return the existing row on a race,
+  turning the constraint into a REAL idempotency guarantee (concurrent
+  double-submit safe) instead of a crash-on-race. The old
+  `finding:<uuid>`-embedded-in-`sources[].context` token-scanning approach
+  (`findMemoryByToken`) was deleted outright, not kept as a fallback — the
+  new dedicated column is strictly better and the old approach had no
+  remaining callers.
 - **`onion-architecture`'s `rules/dependency-rule.md` table says `service.ts`
   must never import `platform/container.ts`, but the real, already-shipped
   precedent contradicts the table and IS the pattern to follow
@@ -507,6 +571,18 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   second `status()` call anyway (this one already gates the fetch/reset that
   follows it).
 
+- **The `postgres` npm driver (`db/client.ts`'s `createDb`) surfaces a
+  Postgres `unique_violation` as `err.code === '23505'` on the thrown
+  error** (2026-08-23, SPEC-04 fix-loop iteration 1 — no prior code in this
+  repo checked a Postgres error code before this session, confirmed by
+  grep). Used to turn a DB-level unique index into a real concurrent-race
+  idempotency guarantee: `insertMemory`/`insertEvalCase`
+  (`modules/reviews/repository/knowledge.repo.ts`) try/catch the insert,
+  check `err.code === '23505'`, and re-fetch+return the row the OTHER
+  concurrent request just committed, instead of letting the constraint
+  violation bubble up as a raw 500. If a future feature needs the same
+  "DB constraint as idempotency guarantee, not just a crash-preventer"
+  shape, this is the exact error-code check to reuse.
 - **pgvector column dimension mismatch after embedding model change silently
   returns zero rows (2026-08-20).** When switching embedding models (e.g.,
   OpenAI `text-embedding-3-small` 1536-dim → a different provider's 3072-dim),
@@ -1197,6 +1273,40 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   (`test-writer`'s job next) not attempted beyond the pre-existing suites
   passing.
 
+- 2026-08-23: SPEC-04 Multi-Agent Review `plan-verifier` fix-loop iteration 1
+  — server-side + shared-contract findings only (a parallel client fix-loop
+  agent handled `client/src/app/repos/[repoId]/multi-agent/**`, a separate
+  test-writer runs after both land). Five fixes: (1) `AgentColumn.error`
+  added to both vendor `observability.ts` copies (as `.nullish()`, not
+  `.nullable()` — see Codebase Patterns for why), and `multi-agent-read.ts`
+  no longer overloads `summary` with error text; (2) `deriveConflicts`
+  (`multi-agent-derive.ts`) no longer pre-filters to AC-30 "genuine
+  conflicts" only — emits every shared location, unfiltered, so the client's
+  AC-31 "show all" toggle state has data to render; (3) `EvalOwnerKind`
+  widened to include `'finding'` in both vendor `knowledge.ts` copies
+  (diff-of-diffs verification method, see Codebase Patterns); (4) DB-level
+  uniqueness for two TOCTOU-racy idempotency checks — `eval_cases` gained a
+  uniqueIndex on `(workspace_id, owner_kind, owner_id)`, `memory` gained a
+  new `learned_finding_id` uuid column + uniqueIndex, migration
+  `0020_aberrant_captain_cross.sql` (both artifacts committed alongside the
+  journal/snapshot in the same change, per the 2026-08-14 lesson on that);
+  (5) `AgentsService.stats()`'s N+1 (`GET /agents/stats`) replaced with one
+  `avgStatsForAgents` query grouped by `(agent_id, model)` in
+  `run.repo.ts`, keyed by an `agentId IN (...)` list. `pnpm db:migrate` was
+  deliberately NOT run (per this fix-loop's instructions) — only
+  Testcontainers-backed `.it.test.ts` runs (which call `runMigrations`
+  against their own ephemeral container) exercised the new migration.
+  Verified: `cd server && tsc --noEmit` clean (only the pre-existing
+  `reviewer-core`/`openai` errors, confirmed via `git status` on those exact
+  files); `cd client && tsc --noEmit` clean (confirms the `.nullish()`
+  choice above actually fixed the ripple, not just avoided investigating
+  it); full unit suite 319/325 (6 failures = the documented
+  `indexer-pipeline.test.ts` Windows flake); full `.it.test.ts` suite 78/80
+  (2 failures = the documented pre-existing `project-context-run.it.test.ts`
+  AC-22/AC-26 `trace-builder.ts` gap) — both failure sets confirmed
+  untouched via `git status` before concluding they're pre-existing, not
+  caused by this session.
+
 ## Open Questions
 
 - Why does `depgraph.buildEdges` leave `file_edges` empty for the demo
@@ -1345,6 +1455,180 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   the 8 predicted failures above, all traced to the one fixture gap, not
   fixed here per this fix-loop's own "test-writer's job next" convention.
 
+- 2026-08-23: SPEC-04 Multi-Agent Review — G1 (Schema + contracts) of a
+  4-group multi-agent plan (`docs/plans/spec-04-multi-agent-review.md`),
+  a **blocking prerequisite** for G2 (server orchestration)/G3 (client UI),
+  which build against the shapes landed here. `agent_runs` gained a nullable
+  `multi_agent_run_id` FK (`onDelete: 'set null'`, matching the sibling
+  `agentId`/`prId` FK pattern on the same table — NOT cascade, so deleting a
+  batch parent never deletes its child runs' data) plus an index
+  (`agent_runs_multi_agent_run_id_idx`) since every batch read selects
+  children by parent id; required converting `agentRuns`'s `pgTable` call from
+  the 2-arg form to the 3-arg `(table, columns, extra)` form other schema
+  files already use for indexes (see `repos.ts` for the established pattern).
+  `eval_cases.owner_kind` gained `'finding'` — confirmed live via
+  `pnpm db:generate` that a Drizzle `text(col, {enum:[...]})` produces **zero
+  SQL** for an enum-member addition (it's TS-level only, no CHECK
+  constraint) — the generated migration `0019_soft_spirit.sql` touches only
+  `agent_runs` (ADD COLUMN + FK + CREATE INDEX), confirming the plan's own
+  "Facts verified while planning" note. `observability.ts` (both hand-mirrored
+  copies) extended: `AgentColumn.status` gained `'cancelled'`; new
+  `FindingGroupMember` (verbatim per-agent finding fields: `id`, `run_id`,
+  `agent_id`, `agent_name`, `severity`, `title`, `rationale`, `suggestion`,
+  `confidence` — AC-24 forbids paraphrase/merge, so this is a straight
+  projection of `Finding`, not a rewrite) and `FindingGroup` (`file` +
+  `normalized_file` + line range + `category` + `members`); `MultiAgentRun`
+  gained `groups: z.array(FindingGroup)` and `total_cost_partial: z.boolean()
+  .default(false)` (OQ-1's "badge as partial" default — a run with a null
+  `cost_usd` sets this true rather than silently under-reporting the sum).
+  **The "extending a Zod contract ripples into hand-built object literals"
+  pattern this file documents repeatedly (`PrIntentRecord`/`risk_areas`,
+  `first_tasks`/`tasks`, etc.) did NOT apply here** — grepped both `server/src`
+  and `client/src` (app code and tests) for `MultiAgentRun`/`AgentColumn` and
+  found zero consumers anywhere outside the contract file itself; these are
+  brand-new L07 types with no existing callers, so G2/G3 are each contract's
+  *first* real consumer, not a ripple-fix. Confirmed both vendor copies
+  byte-identical via `git diff --no-index` (empty) and that both shapes
+  actually parse (`AgentColumn` with `status: 'cancelled'`, `MultiAgentRun`
+  with a non-empty `groups` array and `total_cost_partial` correctly
+  defaulting to `false` when omitted) via a throwaway `tsx` script run from
+  inside `server/` (deleted after). `server`/`client` `tsc --noEmit` both
+  clean (server's only errors are the pre-existing, unrelated
+  `reviewer-core`-has-no-`node_modules` / `openai`-type-inference errors,
+  confirmed present identically on a `git stash` of this session's changes).
+  Neither package's `node_modules` existed at session start — `pnpm install`
+  was required in both before any build tooling could run.
+
+- 2026-08-23: SPEC-04 Multi-Agent Review — G4 (Agent roster) of the same
+  4-group plan, concurrent with G2/G3. Added three new built-in reviewer
+  personas — Junior Mentor, Customer-Facing, Architecture — to
+  `server/src/db/seed-prompts.ts` and `seedAgents` in `server/src/db/seed.ts`
+  (six built-ins total now), each hand-mirrored into a new
+  `docs/agent-prompts/{junior-mentor,customer-facing,architecture}.md`.
+  Confirmed byte-identity between each TS template-literal body and its `.md`
+  mirror programmatically (a throwaway Node script that extracts the
+  template-literal content between the unescaped opening/closing backticks,
+  un-escapes `` \` ``, and string-compares against the `.md` file with its
+  trailing newline stripped) rather than eyeballing — worth reusing that
+  script shape for any future prompt mirror instead of a manual diff, since a
+  single missed `\`` escape is easy to miss by eye. **Idempotency of
+  `seedAgents`'s name-lookup-then-insert guard was verified LIVE, not just by
+  code reading**: Docker/Postgres was already up this session, so
+  `DATABASE_URL=postgres://devdigest:devdigest@localhost:5432/devdigest
+  ./node_modules/.bin/tsx src/db/seed.ts` (no `.env` file exists in this
+  checkout — `DATABASE_URL` must be passed explicitly, from `.env.example`'s
+  default) was run twice in a row; a direct `count(*) group by name` query
+  against `agents` showed exactly 1 row per name both times (8 total in this
+  workspace — the 6 new/original built-ins plus 2 pre-existing course-lesson
+  agents from earlier sessions, `API Contract Reviewer` and
+  `Test Quality Reviewer`), confirming no duplicate rows on re-seed.
+  `server` `tsc --noEmit` showed zero new errors from this work item — the
+  same pre-existing `reviewer-core`-has-no-`node_modules` errors documented
+  in the entry above (unrelated files, confirmed by content not appearing in
+  `seed-prompts.ts`/`seed.ts`).
+
+- 2026-08-23: SPEC-04 Multi-Agent Review — G2 (Server orchestration,
+  derivation, routes) of the same 4-group plan, concurrent with G3 (client)/
+  G4 (agent roster). `run-executor.ts` was NOT touched (hard boundary).
+  New: `multi-agent-service.ts` (orchestration — validates the agent-id set
+  against the caller's workspace BEFORE any row is created, IDOR guard;
+  creates one `multi_agent_runs` parent + N `agent_runs` children; fans out
+  via `p-queue(concurrency:3)` calling `executor.executeRuns(...)` ONCE PER
+  AGENT with a single-element `jobs` array — the hard rule from the plan),
+  `multi-agent-derive.ts` (pure — union-find near-duplicate grouping with the
+  ±3-line/≤20-line-span expansion rule, plus per-location conflict
+  derivation), `multi-agent-read.ts` (batch read assembling `MultiAgentRun`,
+  wall-clock `total_duration_ms`, `total_cost_partial`), `eval-case.ts`
+  ("Turn into eval case"), `repository/knowledge.repo.ts` (memory + eval_cases
+  writes/lookups). Extended: `diff-loader.ts` (bounded `Map`-based
+  memoization keyed `${pull.id}:${pull.headSha}`, + `resetDiffCache()`),
+  `findings.ts` (`'learn'` case added to the accept/dismiss switch),
+  `run.repo.ts`/`review.repo.ts`/`repository.ts` (new methods per WI4),
+  `routes.ts` (both modules), `agents/service.ts` (`stats()` using
+  `container.reviewRepo.avgStatsForAgentModel` — a legitimate cross-cutting
+  DI read, same pattern `ReviewService` already uses for
+  `container.agentsRepo`).
+
+  **Why `diff-loader.ts` needed memoization, concretely**: the plan's hard
+  rule (call `executeRuns` once per agent, single-element `jobs` array, to
+  keep `RunLogger`'s per-run buffer private) means an N-agent batch calls
+  `loadDiff` N times for the SAME PR. Without the cache each of those would
+  independently hit `container.git.diff`; the `Map<string, Promise<UnifiedDiff>>`
+  keyed by `${pull.id}:${pull.headSha}` collapses all N into exactly one real
+  load (concurrent callers share the SAME in-flight promise, not just
+  sequential ones) — verify this by asserting the mock git client's `.diff`
+  call count is 1 after an N-agent batch, not asserting cache internals.
+
+  **Ordering, not locking, for the shared intent classification**:
+  `MultiAgentService.executeBatch` calls `loadDiff` + ONE
+  `intentService.getOrClassify` and AWAITS it before starting the p-queue
+  fan-out. This is best-effort (wrapped in try/catch, degrades silently) —
+  its only purpose is to get the `pr_intent` row PERSISTED before the N
+  per-agent `executeRuns` calls each independently call `getOrClassify` again
+  internally; `IntentService`'s own head-sha cache check then makes every one
+  of those N calls a cheap DB-read cache hit instead of N racing LLM calls.
+  If this pre-call itself fails, correctness is unaffected — each per-agent
+  call just falls back to its own independent best-effort classify, exactly
+  like the single-agent path already does.
+
+  **`AgentColumn` (contracts/observability.ts, shipped by G1) has NO
+  dedicated error-text field** — confirmed by re-reading the actual shipped
+  file, not trusting the plan's paraphrase (which said "Columns carry...the
+  persisted error text"). `vendor/shared/**` is this work item's explicit
+  do-not-touch, so rather than silently dropping a failed/cancelled run's
+  `agent_runs.error` text, `multi-agent-read.ts`'s column-mapping folds it
+  into `summary` ONLY when the column has no real review summary (the normal
+  case for a failed run, which never reaches `insertReview`). This is a
+  pragmatic workaround, not a fix — **flagging for whoever owns
+  `contracts/observability.ts` next: `AgentColumn` should probably grow a
+  proper `error: string | null` field** so a future consumer doesn't have to
+  guess whether a non-null `summary` on a failed column is a real review
+  summary or a smuggled error string.
+
+  **`EvalOwnerKind`/`EvalCase.owner_kind` in `contracts/knowledge.ts` is
+  STILL `z.enum(['skill', 'agent'])`** — only the DB column
+  (`db/schema/eval.ts`'s `eval_cases.owner_kind` text enum) was widened to
+  include `'finding'` by G1; the shared Zod contract was not. Since no route
+  in this codebase validates its OUTGOING body against `EvalCase.parse()`
+  (confirmed by grep — every GET/POST here returns a plain object, no
+  response-schema enforcement), `eval-case.ts`/`knowledge.repo.ts` return a
+  locally-typed `{ eval_case_id: string }` / `EvalCaseRow` rather than
+  routing through the (currently too-narrow) shared `EvalCase` type — this
+  works today but is the same kind of gap as the `AgentColumn.error` one
+  above: **`EvalOwnerKind` should eventually gain `'finding'` too**, in
+  vendor/shared, by whoever's scope that is.
+
+  **`arch:check`'s regex is anchored to the exact basename `service.ts`/
+  `routes.ts`/`helpers.ts`, not a suffix match** — `multi-agent-service.ts`,
+  `multi-agent-read.ts`, `multi-agent-derive.ts`, and `eval-case.ts` are all
+  invisible to every one of the four dependency-cruiser rules (confirmed by
+  reading `.dependency-cruiser.cjs`'s `path: '^src/modules/[^/]+/service\\.ts$'`
+  literally — `[^/]+/service\.ts$` requires the path segment right after the
+  module folder to be the literal string `service.ts`, so a same-folder file
+  with a different basename never matches, regardless of what it imports).
+  `modules/reviews`/`modules/agents` are ALSO both in `PRE_EXISTING_MODULES`
+  already, so none of this session's touched files were EVER going to be
+  checked by tooling either way — every "no service file imports Drizzle/
+  schema directly" claim in this entry was verified by manual read, not by a
+  green `pnpm arch:check` (which does report clean, unsurprisingly, given
+  both gaps stack).
+
+  Verified: `cd server && ./node_modules/.bin/tsc --noEmit` clean (only the
+  pre-existing `reviewer-core`/`openai`-type-inference errors, confirmed via
+  `git status` on those exact files showing no session changes);
+  `pnpm arch:check` clean (214 modules, 770 deps, 0 violations — see caveat
+  above about what that does and doesn't prove here); full unit suite green
+  (319/325, the 6 failures all the documented `indexer-pipeline.test.ts`
+  Windows flake, confirmed untouched via `git status`); full `.it.test.ts`
+  suite green (78/80, the 2 failures both the documented pre-existing
+  `project-context-run.it.test.ts` AC-22/AC-28 `trace-builder.ts` gap,
+  confirmed untouched via `git status`) — Docker's first `docker info` call
+  this session timed out at the helper's 5s limit (reported "Docker not
+  available", all 78 DB-dependent tests skipped) on a cold Docker Desktop
+  daemon; a second run immediately after (daemon now warm) picked up all of
+  them correctly — if `dockerAvailable()` reports false on the FIRST
+  integration run of a session, retry once before concluding Docker really
+  isn't reachable.
 - 2026-08-20: L06-Evals Phase A (`docs/plans/eval-pipeline.md` WI1/WI2, on
   `L06-Evals-homework`) — contracts + schema only, no module code yet.
   `EvalExpectation`/`EvalExpectationEntry` (versioned, `match_scope: 'range'
@@ -1464,3 +1748,32 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Errors & Fixes entry above, which THIS check surfaced). Both throwaway
   files deleted before this session's Implementation Report; test-writer
   owns the real, committed integration coverage next.
+
+- **Two independently-built features can both register the SAME route with
+  no compile-time warning — Fastify only catches it at boot (2026-08-23,
+  merging `emdash/l07-multi-agents-xeu40` into `main`).** SPEC-04's own
+  minimal `eval-case.ts` (`modules/reviews`) and L06-Evals' `modules/eval`
+  both shipped `POST /findings/:id/eval-case` — text merge is silent about
+  this class of conflict (different files, no line overlap), it only
+  surfaces as `FastifyError: Method 'POST' already declared for route ...`
+  when the merged app actually boots, which a pure `tsc --noEmit` pass does
+  NOT catch (both route registrations typecheck fine in isolation). Always
+  boot the merged app (or run a route-registration smoke test) after
+  resolving a merge that touches `routes.ts` in more than one module, not
+  just typecheck + unit tests. Resolved by keeping `modules/eval`'s
+  `createFromFinding` (the fuller-featured implementation — derives the
+  eval expectation from the finding's own accept/dismiss verdict, refuses
+  422 on an undecided finding, owns the case by `agent`, not `finding`) and
+  deleting SPEC-04's `eval-case.ts` + its now-dead
+  `insertEvalCase`/`findEvalCaseByOwner` repository methods entirely, along
+  with the obsolete AC-42/AC-44 test scenarios in
+  `test/findings-learn.it.test.ts` that asserted the deleted
+  implementation's behavior (a cross-workspace finding now 422s via
+  `modules/eval`'s "not decided yet" check before it ever reaches an
+  ownership check with a 422-shaped body-only finding, not the 404 the old
+  code returned). The `eval_cases.owner_kind = 'finding'` enum member and
+  its scoped partial unique index (`eval_cases_ws_owner_uq`) were left in
+  the schema even though nothing writes that value anymore post-merge —
+  removing them would have meant another migration under time pressure for
+  zero behavioral gain; a harmless unused enum literal is a smaller risk
+  than more schema surgery mid-merge.

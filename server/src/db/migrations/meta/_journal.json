@@ -148,6 +148,13 @@
       "when": 1787254295737,
       "tag": "0020_early_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787486932835,
+      "tag": "0021_glamorous_the_stranger",
+      "breakpoints": true
     }
   ]
 }

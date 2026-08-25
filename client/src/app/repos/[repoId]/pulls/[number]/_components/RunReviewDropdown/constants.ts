@@ -1,4 +1,5 @@
 /** Constants for RunReviewDropdown. */
 
-/** Dropdown menu width (px). */
-export const DROPDOWN_WIDTH = 250;
+/** Panel width (px) — wider than a plain item list to fit the "pick agents to
+ *  run" checkbox section (name + duration hint) comfortably. */
+export const DROPDOWN_WIDTH = 300;

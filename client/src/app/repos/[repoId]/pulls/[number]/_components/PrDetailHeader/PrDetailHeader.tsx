@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Icon, Avatar, Badge, Button, Tabs } from "@devdigest/ui";
 import { RunReviewDropdown } from "../RunReviewDropdown";
 import { s } from "./styles";
@@ -28,9 +29,22 @@ export function PrDetailHeader({
   onRunStart,
   onRunsStarted,
 }: PrDetailHeaderProps) {
+  const params = useParams<{ repoId: string }>();
+  const router = useRouter();
+
   const handleRunStart = useCallback(() => {
     onRunStart();
   }, [onRunStart]);
+
+  // Entry point into the Multi-Agent Review configure screen (SPEC-04 WI14),
+  // landing with the CURRENT PR pre-selected — same screen + same resulting
+  // state as the sidebar nav item, just pre-filled. Sits ALONGSIDE
+  // RunReviewDropdown (its own "run all enabled agents now" flow), never
+  // replacing it.
+  const handleOpenMultiAgent = useCallback(() => {
+    if (!prId) return;
+    router.push(`/repos/${params.repoId}/multi-agent?pr=${prId}`);
+  }, [router, params.repoId, prId]);
 
   const handleRunsStarted = useCallback(() => {
     onRunsStarted();
@@ -89,6 +103,11 @@ export function PrDetailHeader({
           >
             View on GitHub
           </Button>
+          {prId && (
+            <Button kind="secondary" size="sm" icon="Users" onClick={handleOpenMultiAgent}>
+              Multi-Agent Review
+            </Button>
+          )}
           {prId && (
             <RunReviewDropdown
               prId={prId}

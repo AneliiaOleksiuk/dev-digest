@@ -1,8 +1,11 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, avg, count, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
 import { rollupSeverities } from '../../pulls/status.js';
+
+export type MultiAgentRunRow = typeof t.multiAgentRuns.$inferSelect;
+export type AgentRunRow = typeof t.agentRuns.$inferSelect;
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -145,7 +148,9 @@ export async function reapStaleRunningRuns(db: Db): Promise<number> {
 
 // ---- observability: agent_runs + run_traces -------------------------------
 
-/** Create an agent_runs row in `running` state; returns its id (= the runId). */
+/** Create an agent_runs row in `running` state; returns its id (= the runId).
+ *  `multiAgentRunId` is set only for a child run of a multi-agent batch
+ *  (L07) — omitted/undefined for a normal single-agent run. */
 export async function createAgentRun(
   db: Db,
   values: {
@@ -154,6 +159,7 @@ export async function createAgentRun(
     prId: string;
     provider: string | null;
     model: string | null;
+    multiAgentRunId?: string | null;
   },
 ): Promise<string> {
   const [row] = await db
@@ -164,11 +170,105 @@ export async function createAgentRun(
       prId: values.prId,
       provider: values.provider,
       model: values.model,
+      multiAgentRunId: values.multiAgentRunId ?? null,
       status: 'running',
       source: 'local',
     })
     .returning({ id: t.agentRuns.id });
   return row!.id;
+}
+
+// ---- multi-agent batches (L07, SPEC-04) ------------------------------------
+
+/** Create the ONE `multi_agent_runs` parent row for a batch. Children are
+ *  separate `agent_runs` rows carrying `multiAgentRunId` (created via
+ *  `createAgentRun` above). */
+export async function createMultiAgentRun(
+  db: Db,
+  values: { workspaceId: string; prId: string },
+): Promise<string> {
+  const [row] = await db
+    .insert(t.multiAgentRuns)
+    .values({ workspaceId: values.workspaceId, prId: values.prId })
+    .returning({ id: t.multiAgentRuns.id });
+  return row!.id;
+}
+
+/** Workspace-scoped parent lookup — a foreign-workspace id (or unknown id)
+ *  returns undefined so the route can 404 without leaking existence. */
+export async function getMultiAgentRun(
+  db: Db,
+  workspaceId: string,
+  id: string,
+): Promise<MultiAgentRunRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(t.multiAgentRuns)
+    .where(and(eq(t.multiAgentRuns.workspaceId, workspaceId), eq(t.multiAgentRuns.id, id)));
+  return row;
+}
+
+/** Every child `agent_runs` row of a batch, joined with the agent's CURRENT
+ *  name (the run's own `provider`/`model` are used for display, NOT a fresh
+ *  join to `agents` — they're captured at run-creation time and must reflect
+ *  what actually ran, even if the agent's config changed since). */
+export async function listChildRuns(
+  db: Db,
+  workspaceId: string,
+  multiAgentRunId: string,
+): Promise<{ run: AgentRunRow; agentName: string | null }[]> {
+  return db
+    .select({ run: t.agentRuns, agentName: t.agents.name })
+    .from(t.agentRuns)
+    .leftJoin(t.agents, eq(t.agents.id, t.agentRuns.agentId))
+    .where(
+      and(eq(t.agentRuns.workspaceId, workspaceId), eq(t.agentRuns.multiAgentRunId, multiAgentRunId)),
+    );
+}
+
+/**
+ * Per-agent avg duration + avg cost for EVERY agent in `agentIds`, in ONE
+ * query (fix-loop iteration 1 — was an N+1: one `avg()` round trip per agent
+ * behind `GET /agents/stats`). Grouped by `(agent_id, model)` rather than
+ * filtered to a single model up front, since different agents in the same
+ * batch can have different CURRENT models (OQ-6) — the caller matches each
+ * agent's own current `model` against this result to exclude runs against a
+ * since-changed model, the same semantics the old per-agent query enforced
+ * via its `eq(model, ...)` WHERE clause. Only `status='done'` runs count
+ * (failed/cancelled runs have no meaningful cost/duration signal).
+ */
+export async function avgStatsForAgents(
+  db: Db,
+  workspaceId: string,
+  agentIds: string[],
+): Promise<
+  { agentId: string; model: string | null; avgDurationMs: number | null; avgCostUsd: number | null; sampleSize: number }[]
+> {
+  if (agentIds.length === 0) return [];
+  const rows = await db
+    .select({
+      agentId: t.agentRuns.agentId,
+      model: t.agentRuns.model,
+      avgDurationMs: avg(t.agentRuns.durationMs),
+      avgCostUsd: avg(t.agentRuns.costUsd),
+      sampleSize: count(),
+    })
+    .from(t.agentRuns)
+    .where(
+      and(
+        eq(t.agentRuns.workspaceId, workspaceId),
+        inArray(t.agentRuns.agentId, agentIds),
+        eq(t.agentRuns.status, 'done'),
+      ),
+    )
+    .groupBy(t.agentRuns.agentId, t.agentRuns.model);
+  return rows.map((r) => ({
+    agentId: r.agentId!,
+    model: r.model,
+    avgDurationMs: r.sampleSize > 0 && r.avgDurationMs != null ? Number(r.avgDurationMs) : null,
+    avgCostUsd: r.sampleSize > 0 && r.avgCostUsd != null ? Number(r.avgCostUsd) : null,
+    sampleSize: r.sampleSize,
+  }));
 }
 
 export async function completeAgentRun(

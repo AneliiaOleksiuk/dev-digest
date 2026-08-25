@@ -41,6 +41,23 @@ export function toAgentVersionDto(row: AgentVersionRow): AgentVersion {
   };
 }
 
+/**
+ * L07 (SPEC-04) — one workspace agent's cost/duration estimate for
+ * `GET /agents/stats`, scoped to its CURRENT model (OQ-6). Deliberately NOT
+ * the shared `AgentStats` contract (`contracts/observability.ts`) — that
+ * shape (accept-rate, findings-by-severity, trend, …) is a richer, separate
+ * per-agent-detail feature this work item doesn't build; this is a small,
+ * server-local response used to power a pre-run cost/duration estimate
+ * (e.g. in the multi-agent-run picker), not vendored/shared yet.
+ */
+export interface AgentCostEstimate {
+  agent_id: string;
+  agent_name: string;
+  avg_duration_ms: number | null;
+  avg_cost_usd: number | null;
+  sample_size: number;
+}
+
 /** Fields whose change bumps the agent's config version (anything but `enabled`). */
 export interface ConfigChangePatch {
   name?: string;

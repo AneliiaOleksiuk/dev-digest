@@ -2,7 +2,7 @@
 
 Spec: [`specs/SPEC-05-multi-agent-ci-per-repo.md`](../../specs/SPEC-05-multi-agent-ci-per-repo.md)
 Extends: SPEC-04 ([`docs/features/export-to-ci.md`](../features/export-to-ci.md),
-[`docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md`](../adr/0007-ci-ingest-bearer-token-hash-lookup.md))
+[`docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md`](../adr/0010-ci-ingest-bearer-token-hash-lookup.md))
 Baseline commit: `9b047ad` (clean working tree; `specs/SPEC-05-*.md` untracked, to
 land with this plan's own SDD-stage commit).
 
@@ -436,7 +436,7 @@ Notes for whoever writes the tests:
   lands.
 - **`server/INSIGHTS.md:766`'s surrounding prose is stale.** It describes the
   ingest path re-hashing to a raw Buffer and comparing with `timingSafeEqual`; the
-  shipped code (`service.ts:493-521`, commit `26ad30b`, ADR-0007) uses a
+  shipped code (`service.ts:493-521`, commit `26ad30b`, ADR-0010) uses a
   hash-**keyed lookup** with no comparison at all. The hex-encoding fact itself is
   still correct and still load-bearing for fixture rows. `implementer` should
   correct that entry at session end (`engineering-insights` skill) — this plan

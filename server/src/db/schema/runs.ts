@@ -25,6 +25,10 @@ export const agentRuns = pgTable(
       .references(() => workspaces.id, { onDelete: 'cascade' }),
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
     prId: uuid('pr_id').references(() => pullRequests.id, { onDelete: 'set null' }),
+    /** Set when this run is one child of a multi-agent batch (L07); null for a normal single-agent run. */
+    multiAgentRunId: uuid('multi_agent_run_id').references(() => multiAgentRuns.id, {
+      onDelete: 'set null',
+    }),
     ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
     provider: text('provider'),
     model: text('model'),
@@ -74,6 +78,7 @@ export const agentRuns = pgTable(
       t.source,
       t.ranAt,
     ),
+    multiAgentRunIdx: index('agent_runs_multi_agent_run_id_idx').on(t.multiAgentRunId),
   }),
 );
 

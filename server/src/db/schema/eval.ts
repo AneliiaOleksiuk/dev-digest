@@ -1,5 +1,16 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, doublePrecision, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  boolean,
+  jsonb,
+  timestamp,
+  doublePrecision,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
 
@@ -16,7 +27,7 @@ export const evalCases = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
-    ownerKind: text('owner_kind', { enum: ['skill', 'agent'] }).notNull(),
+    ownerKind: text('owner_kind', { enum: ['skill', 'agent', 'finding'] }).notNull(),
     ownerId: uuid('owner_id').notNull(),
     name: text('name').notNull(),
     inputDiff: text('input_diff'),
@@ -27,6 +38,15 @@ export const evalCases = pgTable(
   },
   (t) => ({
     workspaceOwnerIdx: index('eval_cases_workspace_owner_idx').on(t.workspaceId, t.ownerId),
+    // "Turn into eval case" idempotency (L07, SPEC-04) — a DB-level guarantee
+    // against a concurrent double-submit racing past the app-level
+    // SELECT-then-INSERT check in `eval-case.ts`. Scoped to owner_kind='finding'
+    // only: pre-existing skill/agent eval fixtures legitimately have multiple
+    // cases per (workspace, owner_kind, owner_id) (confirmed against real data —
+    // an unscoped constraint fails migration on this repo's own dev database).
+    uq: uniqueIndex('eval_cases_ws_owner_uq')
+      .on(t.workspaceId, t.ownerKind, t.ownerId)
+      .where(sql`${t.ownerKind} = 'finding'`),
   }),
 );
 

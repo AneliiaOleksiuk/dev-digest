@@ -101,7 +101,10 @@ export function usePulls(repoId: string | null | undefined) {
   return useQuery({
     queryKey: ["pulls", repoId],
     queryFn: () => api.get<PrMeta[]>(`/repos/${repoId}/pulls`),
-    enabled: !!repoId,
+    // "_" is resolveHref's placeholder for an unresolved :repoId (nav.ts) when
+    // no repo is active yet — truthy, so it slips past a bare `!!repoId` check
+    // and fires a doomed request during the brief useRepoNotFound loading race.
+    enabled: !!repoId && repoId !== "_",
     // Auto-refresh PR statuses: re-sync from GitHub every 60s while the page is
     // open, and whenever the window regains focus.
     refetchInterval: 60_000,

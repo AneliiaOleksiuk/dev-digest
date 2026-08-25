@@ -84,7 +84,7 @@ export const EvalRun = z.object({
 });
 export type EvalRun = z.infer<typeof EvalRun>;
 
-export const EvalOwnerKind = z.enum(['skill', 'agent']);
+export const EvalOwnerKind = z.enum(['skill', 'agent', 'finding']);
 export type EvalOwnerKind = z.infer<typeof EvalOwnerKind>;
 
 export const EvalCase = z.object({

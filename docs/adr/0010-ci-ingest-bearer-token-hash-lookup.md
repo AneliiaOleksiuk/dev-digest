@@ -1,4 +1,4 @@
-# ADR 0007: CI ingest authenticates via a single Bearer token hashed into a lookup key, not a separate installation-id header with a constant-time compare
+# ADR 0010: CI ingest authenticates via a single Bearer token hashed into a lookup key, not a separate installation-id header with a constant-time compare
 
 - **Status:** Accepted (supersedes an in-flight design that shipped broken
   and was fixed before merge)

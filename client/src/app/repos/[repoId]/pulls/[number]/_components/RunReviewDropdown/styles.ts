@@ -1,6 +1,84 @@
 import type { CSSProperties } from "react";
 
-/** Co-located styles for RunReviewDropdown. This component renders only library
-   primitives (Button/Dropdown) and has no inline styles; the map is kept for
-   convention parity and future use. */
-export const s = {} satisfies Record<string, CSSProperties>;
+/** Co-located styles for RunReviewDropdown. The panel/row styles mirror the
+ *  vendored `Dropdown` primitive's own look 1:1 (border, radius, shadow,
+ *  padding, hover) since this component doesn't build on that primitive. */
+export const s = {
+  panel: (width: number): CSSProperties => ({
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    right: 0,
+    width,
+    maxHeight: "min(560px, calc(100vh - 120px))",
+    overflowY: "auto",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 9,
+    boxShadow: "var(--shadow-modal)",
+    padding: 6,
+    zIndex: 40,
+    animation: "ddpop .12s ease",
+  }),
+  divider: { height: 1, background: "var(--border)", margin: "6px 0" } as CSSProperties,
+  mergedWarning: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 10px",
+    fontSize: 13,
+    color: "var(--text-secondary)",
+  } as CSSProperties,
+  actionRow: (hovered: boolean, muted?: boolean): CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "none",
+    background: hovered ? "var(--bg-hover)" : "transparent",
+    color: muted ? "var(--text-secondary)" : "var(--text-primary)",
+    fontSize: 14,
+    fontWeight: 500,
+    textAlign: "left",
+    cursor: "pointer",
+  }),
+  actionRowHint: { fontSize: 12, color: "var(--text-muted)", flexShrink: 0 } as CSSProperties,
+  pickerHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "6px 10px 4px",
+  } as CSSProperties,
+  pickerLabel: {
+    fontSize: 11.5,
+    fontWeight: 700,
+    letterSpacing: "0.03em",
+    color: "var(--text-muted)",
+    textTransform: "uppercase",
+  } as CSSProperties,
+  pickerList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    maxHeight: 220,
+    overflowY: "auto",
+  } as CSSProperties,
+  pickerRow: { padding: "5px 10px" } as CSSProperties,
+  pickerRowLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "space-between",
+  } as CSSProperties,
+  pickerRowName: {
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "var(--text-primary)",
+  } as CSSProperties,
+} satisfies Record<string, CSSProperties | ((...args: never[]) => CSSProperties)>;

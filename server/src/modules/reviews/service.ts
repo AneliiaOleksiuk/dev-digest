@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { FindingActionKind, RunEventKind, RunTrace } from '@devdigest/shared';
+import type { FindingActionKind, MultiAgentRun, RunEventKind, RunTrace } from '@devdigest/shared';
 import { AppError, NotFoundError } from '../../platform/errors.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
@@ -7,6 +7,8 @@ import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
 import { IntentService } from './intent-service.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
+import { MultiAgentService } from './multi-agent-service.js';
+import { MultiAgentReadService } from './multi-agent-read.js';
 import { reviewToDto } from './helpers.js';
 
 // Re-export DTO types + converters for backward-compatible imports from
@@ -34,12 +36,19 @@ export class ReviewService {
    *  importing `ReviewRepository`/`IntentService` (and therefore any DB/
    *  adapter type) directly; the thin-handler contract stays intact. */
   readonly intent: IntentService;
+  /** Multi-agent batch orchestration (L07, SPEC-04) — create + fan out. */
+  readonly multiAgent: MultiAgentService;
+  /** Multi-agent batch read (L07, SPEC-04) — assemble the response for an
+   *  already-created batch, deriving groups/conflicts at read time. */
+  readonly multiAgentRead: MultiAgentReadService;
 
   constructor(private container: Container) {
     this.repo = new ReviewRepository(container.db);
     this.agents = container.agentsRepo;
     this.executor = new ReviewRunExecutor(container, this.repo, this.agents);
     this.intent = new IntentService(this.repo, container);
+    this.multiAgent = new MultiAgentService(container, this.repo, this.agents);
+    this.multiAgentRead = new MultiAgentReadService(this.repo);
   }
 
   // ===========================================================================
@@ -155,8 +164,8 @@ export class ReviewService {
     workspaceId: string,
     findingId: string,
     action: FindingActionKind,
-  ): Promise<{ finding: ReviewDtoFinding }> {
-    return actOnFindingImpl(this.repo, workspaceId, findingId, action);
+  ): Promise<{ finding?: ReviewDtoFinding; memory_id?: string }> {
+    return actOnFindingImpl(this.repo, this.agents, workspaceId, findingId, action);
   }
 
   // ===========================================================================

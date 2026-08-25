@@ -1,7 +1,7 @@
 /**
  * `POST /ci/ingest` — SPEC-05 (`specs/SPEC-05-multi-agent-ci-per-repo.md`)
  * AC-34/AC-35/AC-36, exercised through the REAL route with a real Postgres.
- * SPEC-04's own ingest mechanism (`docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md`)
+ * SPEC-04's own ingest mechanism (`docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md`)
  * has ZERO prior test coverage — this file is the first, so it covers the
  * SPEC-04 baseline (Bearer-token hash-keyed lookup, repo-equality check,
  * idempotency) that SPEC-05's multi-installation-per-repo behavior sits on

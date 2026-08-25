@@ -19,7 +19,7 @@ E (CI Runs page, navigation, final sweep, `fac5cdb`) — plus one fix-loop
 iteration (`26ad30b`) and a post-implementation amendment to the spec itself
 (`b2117f5`) that this document reflects as the **shipped** design. HTTP/
 contract lookup: [`docs/reference/ci-api.md`](../reference/ci-api.md).
-Ingest-auth decision: [ADR 0007](../adr/0007-ci-ingest-bearer-token-hash-lookup.md).
+Ingest-auth decision: [ADR 0010](../adr/0010-ci-ingest-bearer-token-hash-lookup.md).
 
 **Extended by SPEC-05** (multiple review agents on one repository in CI) —
 [`docs/plans/spec-05-multi-agent-ci-per-repo.md`](../plans/spec-05-multi-agent-ci-per-repo.md)
@@ -443,7 +443,7 @@ never emitted, so the ingest path could never authenticate in production.
 with the single-`Authorization`-header, hash-keyed-lookup design described
 above, and the Spec's AC-51/D-1 were amended post-implementation
 (`b2117f5`) to describe the design that actually shipped. See
-[ADR 0007](../adr/0007-ci-ingest-bearer-token-hash-lookup.md) for the full
+[ADR 0010](../adr/0010-ci-ingest-bearer-token-hash-lookup.md) for the full
 before/after and why the hash-keyed lookup needs no constant-time comparison
 to be safe.
 

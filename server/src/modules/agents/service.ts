@@ -9,7 +9,7 @@ import type {
   ReviewStrategy,
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
-import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { toAgentDto, toAgentVersionDto, type AgentCostEstimate } from './helpers.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -197,6 +197,41 @@ export class AgentsService {
     const resolvedOrder = order ?? existing.length;
     await this.repo.linkSkill(agentId, skillId, resolvedOrder);
     return this.skillLinks(agentId);
+  }
+
+  /**
+   * L07 (SPEC-04) — one batched call: every workspace agent's cost/duration
+   * estimate, scoped to its CURRENT model (OQ-6). `agent_runs` is owned by
+   * the reviews domain (`ReviewRepository`/`run.repo.ts`), not this module —
+   * reached via `container.reviewRepo`, the SAME sanctioned cross-cutting DI
+   * accessor `ReviewService` itself uses for `container.agentsRepo`
+   * (`platform/container.ts`'s "Shared repositories for cross-cutting
+   * entities" comment), not a raw `db`/schema import.
+   *
+   * ONE query for every agent (fix-loop iteration 1 — was an N+1: one
+   * `avg()` round trip per agent). `avgStatsForAgents` groups by
+   * `(agent_id, model)` across every model an agent has EVER run under, so
+   * each agent's row is matched against its own CURRENT `model` here rather
+   * than the query being pre-filtered per agent.
+   */
+  async stats(workspaceId: string): Promise<AgentCostEstimate[]> {
+    const agents = await this.repo.list(workspaceId);
+    if (agents.length === 0) return [];
+    const rows = await this.container.reviewRepo.avgStatsForAgents(
+      workspaceId,
+      agents.map((a) => a.id),
+    );
+    const byAgentAndModel = new Map(rows.map((r) => [`${r.agentId}::${r.model}`, r]));
+    return agents.map((agent) => {
+      const row = byAgentAndModel.get(`${agent.id}::${agent.model}`);
+      return {
+        agent_id: agent.id,
+        agent_name: agent.name,
+        avg_duration_ms: row?.avgDurationMs ?? null,
+        avg_cost_usd: row?.avgCostUsd ?? null,
+        sample_size: row?.sampleSize ?? 0,
+      };
+    });
   }
 
   /**

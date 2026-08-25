@@ -7,6 +7,9 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  JUNIOR_MENTOR_PROMPT,
+  CUSTOMER_FACING_PROMPT,
+  ARCHITECTURE_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -19,8 +22,9 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, and the three built-in agents (General + Security +
- * Performance), all on the default openrouter/deepseek-v4-flash provider+model.
+ * with a few findings, and the six built-in agents (General + Security +
+ * Performance + Junior Mentor + Customer-Facing + Architecture), all on the
+ * default openrouter/deepseek-v4-flash provider+model.
  *
  * Course lessons populate the other tables (skills, conventions, memory, eval,
  * …) once their features are built — they start empty here.
@@ -176,7 +180,7 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     ]);
   }
 
-  // ---- built-in agents (the three starter presets) ----
+  // ---- built-in agents (the six starter presets) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -208,6 +212,39 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       provider: DEFAULT_PROVIDER,
       model: DEFAULT_MODEL,
       systemPrompt: PERFORMANCE_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'Junior Mentor',
+      description: 'Teaches readability, naming, and test-coverage gaps — never blocks merge.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: JUNIOR_MENTOR_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'Customer-Facing',
+      description: 'Flags breaking response-shape changes and DX regressions for API consumers.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: CUSTOMER_FACING_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'Architecture',
+      description: 'Reviews layering, module boundaries, and design consistency, not line-level bugs.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: ARCHITECTURE_REVIEWER_PROMPT,
       enabled: true,
       version: 1,
       createdBy: userId,

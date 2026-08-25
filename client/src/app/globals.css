@@ -4,6 +4,30 @@
    web fonts. */
 @import "../vendor/ui/styles.css";
 
+/* Extra categorical hues for per-agent identity color (Multi-Agent Review).
+   Only TWO — not four — survive rigorous validation: `--crit`/`--warn`/
+   `--sugg`/`--ok` (vendored, do-not-touch) already occupy red/orange/blue/
+   green, and `dataviz`'s validate_palette.js (run against this app's real
+   surfaces) showed every candidate hue tried in the warn↔ok and ok↔sugg
+   gaps fails the hard "normal-vision floor ≥15" gate against its nearest
+   reserved neighbor — not just a soft CVD warning, a real "looks identical
+   to a person with ordinary color vision" fail (confirmed in practice: an
+   earlier 4-hue attempt made General Reviewer/Test Quality Reviewer read as
+   the same orange/blue as Performance Reviewer/Junior Mentor). Violet and
+   magenta are the only two hues that pass all-pairs against the reserved
+   four in both themes (one CVD 6-8 WARN band each, accepted per the
+   skill's own exception since every card pairs color with an icon + the
+   agent's name — see agent-visuals.ts, which also varies the ICON per
+   unmapped agent so two agents sharing a color still look different). */
+:root {
+  --agent-violet: #7c3aed;
+  --agent-magenta: #b3159c;
+}
+[data-theme="light"] {
+  --agent-violet: #6d28d9;
+  --agent-magenta: #8a1177;
+}
+
 @font-face {
   font-family: "Inter";
   font-style: normal;

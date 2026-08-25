@@ -1,6 +1,6 @@
 {
-  "id": "a164f893-a55b-48c4-8116-b177f2b303da",
-  "prevId": "0c2b8f54-dda6-4256-a788-8e45938571df",
+  "id": "e0359e90-bf0e-4691-8a8b-8ce5f7add7b9",
+  "prevId": "fbd08281-cada-4dad-b879-0eeecf2e1911",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1747,6 +1747,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "learned_finding_id": {
+          "name": "learned_finding_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1780,6 +1786,21 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "memory_learned_finding_uq": {
+          "name": "memory_learned_finding_uq",
+          "columns": [
+            {
+              "expression": "learned_finding_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2861,6 +2882,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "eval_cases_ws_owner_uq": {
+          "name": "eval_cases_ws_owner_uq",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"eval_cases\".\"owner_kind\" = 'finding'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3092,6 +3141,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "namespace": {
+          "name": "namespace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -3266,6 +3321,12 @@
         },
         "pr_id": {
           "name": "pr_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "multi_agent_run_id": {
+          "name": "multi_agent_run_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -3465,6 +3526,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agent_runs_multi_agent_run_id_idx": {
+          "name": "agent_runs_multi_agent_run_id_idx",
+          "columns": [
+            {
+              "expression": "multi_agent_run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3500,6 +3576,19 @@
           "tableTo": "pull_requests",
           "columnsFrom": [
             "pr_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "agent_runs_multi_agent_run_id_multi_agent_runs_id_fk": {
+          "name": "agent_runs_multi_agent_run_id_multi_agent_runs_id_fk",
+          "tableFrom": "agent_runs",
+          "tableTo": "multi_agent_runs",
+          "columnsFrom": [
+            "multi_agent_run_id"
           ],
           "columnsTo": [
             "id"

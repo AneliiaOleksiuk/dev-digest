@@ -1,1 +1,0 @@
-ALTER TABLE "ci_installations" ADD COLUMN "namespace" text;

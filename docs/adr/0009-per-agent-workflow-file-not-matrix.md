@@ -59,7 +59,7 @@ serving more than one agent.
   `post_as: 'none'` specifically to stay read-only — would silently run
   with `pull-requests: write` it never asked for and structurally cannot
   avoid while sharing the file. That is exactly the failure mode SPEC-04's
-  least-privilege design (and [ADR 0007](0007-ci-ingest-bearer-token-hash-lookup.md)'s
+  least-privilege design (and [ADR 0010](0010-ci-ingest-bearer-token-hash-lookup.md)'s
   neighboring blast-radius reasoning) exists to prevent.
 - **The obvious alternative — job-level permissions per agent in one shared
   file — reopens a surface this module already closed on purpose.** GitHub

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Severity } from './findings.js';
+import { Severity, FindingCategory } from './findings.js';
 
 /**
  * A5 — Observability / Multi-agent contracts (L07).
@@ -8,6 +8,8 @@ import { Severity } from './findings.js';
  * sit alongside A2's `review-api.ts`:
  *   - MultiAgentRun        the response of POST /pulls/:id/multi-agent-run
  *   - AgentColumn          one agent's column in the multi-agent view
+ *   - FindingGroup         near-duplicate findings across runs of one batch,
+ *                          derived at read time (AC-22..AC-25), never persisted
  *   - Conflict / ConflictTake  where agents disagree on the same file:line
  *   - AgentStats           per-agent quality aggregates (GET /agents/:id/stats)
  *   - CuratorResult        the cross-session memory curator outcome
@@ -38,15 +40,59 @@ export const AgentColumn = z.object({
   agent_name: z.string(),
   provider: z.string().nullable(),
   model: z.string().nullable(),
-  status: z.enum(['done', 'failed', 'running']),
+  status: z.enum(['done', 'failed', 'running', 'cancelled']),
   verdict: z.string().nullable(),
   score: z.number().int().nullable(),
   summary: z.string().nullable(),
+  /** Failure/cancellation reason (`agent_runs.error`), populated only when
+   *  `status` is `'failed'` or `'cancelled'` — never a substitute for
+   *  `summary`, which only ever carries a genuine review summary. Nullish
+   *  (not just nullable), matching this file's convention for a field that
+   *  legitimately isn't present on every row (cf. `AgentColumnFinding.kind`,
+   *  `FindingGroupMember.suggestion`) — keeps every pre-existing hand-built
+   *  `AgentColumn` object literal (fixtures/tests) valid without the field. */
+  error: z.string().nullish(),
   duration_ms: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
   findings: z.array(AgentColumnFinding),
 });
 export type AgentColumn = z.infer<typeof AgentColumn>;
+
+/**
+ * One agent's own finding inside a `FindingGroup`. Fields are copied
+ * VERBATIM from the underlying `Finding` row (AC-24 forbids paraphrase or
+ * merge) — this is a read projection, not a rewrite.
+ */
+export const FindingGroupMember = z.object({
+  id: z.string(),
+  run_id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string(),
+  severity: Severity,
+  title: z.string(),
+  rationale: z.string(),
+  suggestion: z.string().nullish(),
+  confidence: z.number().min(0).max(1),
+});
+export type FindingGroupMember = z.infer<typeof FindingGroupMember>;
+
+/**
+ * Near-duplicate findings from different runs of the same batch, grouped by
+ * (normalized) file + category + overlapping line range (AC-22). Derived from
+ * persisted findings at read time; never stored, never mutates/merges the
+ * underlying `findings` rows (AC-23). A finding flagged by only one agent
+ * still appears, as a group of one (AC-25).
+ */
+export const FindingGroup = z.object({
+  file: z.string(),
+  /** `file` after path normalization (E-12), used only for the grouping match. */
+  normalized_file: z.string(),
+  start_line: z.number().int(),
+  end_line: z.number().int(),
+  category: FindingCategory,
+  members: z.array(FindingGroupMember),
+});
+export type FindingGroup = z.infer<typeof FindingGroup>;
 
 /** One agent's stance on a contended file:line. */
 export const ConflictTake = z.object({
@@ -80,7 +126,15 @@ export const MultiAgentRun = z.object({
   agent_count: z.number().int(),
   total_duration_ms: z.number().int(),
   total_cost_usd: z.number().nullable(),
+  /**
+   * True when at least one participating run has a null `cost_usd`, so
+   * `total_cost_usd` is an under-count rather than a complete sum (AC-15,
+   * OQ-1 — badge as partial rather than suppress).
+   */
+  total_cost_partial: z.boolean().default(false),
   columns: z.array(AgentColumn),
+  /** Near-duplicate findings across runs, grouped for display (AC-22..AC-25). */
+  groups: z.array(FindingGroup),
   conflicts: z.array(Conflict),
 });
 export type MultiAgentRun = z.infer<typeof MultiAgentRun>;

@@ -112,7 +112,7 @@ statement itself cannot rewrite the column even if it did."
   installation's files (AC-8), the shared PR is never retitled out from
   under the user (E-3, [ADR 0009](0009-per-agent-workflow-file-not-matrix.md)'s
   companion decision), and a token is never rotated without an explicit
-  delete-and-re-export (ADR 0007). "Freeze, and let the user delete and
+  delete-and-re-export (ADR 0010). "Freeze, and let the user delete and
   re-export the installation themselves if they want the new layout" keeps
   every mutation of a legacy installation an explicit, visible act by the
   person who owns the repository.
@@ -129,7 +129,7 @@ statement itself cannot rewrite the column even if it did."
   directory" rule is satisfied per namespace, unchanged from AC-15).
 - **The only way to move a legacy installation onto a namespace is delete
   and re-export** — an explicit act by the user, functionally identical to
-  the existing delete-and-re-export remedy ADR 0007 documents for token
+  the existing delete-and-re-export remedy ADR 0010 documents for token
   rotation. This leaves the legacy `.devdigest/agents/`,
   `.devdigest/skills/`, `.devdigest/memory.jsonl` and
   `.github/workflows/devdigest-review.yml` files sitting in the

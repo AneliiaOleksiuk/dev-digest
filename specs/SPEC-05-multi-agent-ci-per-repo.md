@@ -423,7 +423,7 @@ Binding on the Development Plan, in the same spirit as SPEC-04's own section:
   `Authorization: Bearer <token>` header, a hash-keyed lookup that is itself
   the authentication, tenancy resolved only from the authenticated
   installation (SPEC-04 AC-49–AC-52, `service.ts:487-521`,
-  `docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md`). A token shall
+  `docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md`). A token shall
   resolve to exactly one installation, and therefore to exactly one agent,
   even when several installations share a repository. (verify: integration
   test asserting agent A's token can never write a run attributed to agent B)
@@ -663,7 +663,7 @@ namespace.
 | Acceptance criteria D (workflow) | `workflow.ts:54-192`, `workflow-validate.ts:50-129`, `constants.ts:27-103`, `agent-runner/src/index.ts:30-50` |
 | Acceptance criteria E (secrets) | User decision D-4; `helpers.ts`'s slug charset; `ci.json:100-130`; SPEC-04 AC-50/AC-71 |
 | Acceptance criteria F (client) | `ExportWizard.tsx:70,113-114`, `helpers.ts:39,54`, `InstallStep.tsx:45`, `repository.ts`'s `CiRunListRow`, SPEC-04 AC-61/AC-63 |
-| Acceptance criteria G (ingest/scope) | `service.ts:487-569`, `repository.ts` module docblock, `docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md` |
+| Acceptance criteria G (ingest/scope) | `service.ts:487-569`, `repository.ts` module docblock, `docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md` |
 | Edge cases | `agent-runner/src/manifest.ts:25-46`, `octokit.ts`'s `commitFiles`, `service.ts:296-311,367-380,600-602`, `helpers.ts`'s reserved-name/fallback branches, `bundle.ts` |
 | Non-functional requirements | `security` skill (OWASP A01/A04/A05/A06/A08/A09/A10) + `constants.ts:110-118`, `repository.ts` tenancy docblock, `service.ts:421-431,536-568` |
 | Module interaction / API contracts | `routes.ts`, `service.ts`, `db/schema/ci.ts`, `vendor/shared/contracts/eval-ci.ts:311-417`, `agent-runner/src/index.ts:31` |

@@ -99,6 +99,13 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
   contract lookup.
 - [docs/adr/0005-composite-key-brief-persistence.md](docs/adr/0005-composite-key-brief-persistence.md)
   — composite-key persistence + in-process concurrency-guard decision for PR Brief.
+- [docs/features/multi-agent-review.md](docs/features/multi-agent-review.md) —
+  Multi-Agent Review with live statuses (configure → concurrent fan-out →
+  Columns/Tabs results, plus derived finding groups and where-agents-disagree).
+- [docs/reference/multi-agent-api.md](docs/reference/multi-agent-api.md) —
+  Multi-Agent Review HTTP + contract lookup.
+- [docs/adr/0007-concurrency-without-modifying-run-executor.md](docs/adr/0007-concurrency-without-modifying-run-executor.md)
+  — concurrency-via-N-single-element-`executeRuns`-calls decision, `run-executor.ts` untouched.
 - [docs/adr/0006-eval-batches-stored-aggregate.md](docs/adr/0006-eval-batches-stored-aggregate.md)
   — why `eval_batches` stores its aggregate as an immutable snapshot instead
   of deriving it from `eval_runs` on every read.
@@ -114,7 +121,7 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
   per-agent ingest secret).
 - [docs/reference/ci-api.md](docs/reference/ci-api.md) — Export to CI HTTP +
   contract lookup.
-- [docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md](docs/adr/0007-ci-ingest-bearer-token-hash-lookup.md)
+- [docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md](docs/adr/0010-ci-ingest-bearer-token-hash-lookup.md)
   — why CI ingest authenticates via a Bearer token hashed into a lookup key,
   not a separate installation-id header + constant-time compare.
 - [docs/adr/0008-legacy-ci-installations-frozen-forever.md](docs/adr/0008-legacy-ci-installations-frozen-forever.md)

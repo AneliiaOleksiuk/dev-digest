@@ -29,6 +29,7 @@ test-results/
 
 # emdash worktree config (local)
 .emdash.json
+.claude/settings.local.json
 
 # skill-creator's own scratch benchmark/iteration runs (evals/ has the tracked harness instead)
 .claude/skills/*-workspace/

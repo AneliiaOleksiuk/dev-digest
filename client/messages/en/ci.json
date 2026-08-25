@@ -1,7 +1,7 @@
 {
   "runs": {
     "emptyTitle": "No CI runs yet",
-    "emptyBody": "Once you export an agent to CI, every automated review shows up here.",
+    "emptyBody": "Runs show up here once a CI job can actually reach this studio — the target repo needs OPENROUTER_API_KEY, GITHUB_TOKEN and this agent's own ingest secret (shown on its CI tab) set as Actions secrets, and this studio's ingest URL must be reachable from GitHub's runners. A repo missing any of those reviews every PR and reports nothing.",
     "title": "CI Runs",
     "subtitle": "Agent reviews executed inside CI · not local runs",
     "autoRefresh": "auto-refresh on",
@@ -11,16 +11,25 @@
       "last7Days": "Last 7 days",
       "allAgents": "All agents",
       "allRepos": "All repos",
-      "allStatuses": "All statuses"
+      "allStatuses": "All statuses",
+      "allSources": "All sources"
     },
     "table": {
       "timestamp": "Timestamp",
       "pullRequest": "Pull request",
+      "agent": "Agent",
       "source": "Source",
+      "duration": "Duration",
       "findings": "Findings",
       "cost": "Cost",
       "status": "Status"
     },
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "suggestion": "Suggestion"
+    },
+    "notMeasured": "Not measured",
     "view": "View",
     "status": {
       "succeeded": "Succeeded",
@@ -54,25 +63,73 @@
       "cliDesc": "devdigest review --pr"
     },
     "recommended": "recommended",
+    "targetDisabledReason": "Not available yet — only GitHub Actions is generated in this release.",
     "repoLabel": "Target repository",
     "repoHint": "owner/name — the repo to add the workflow to",
     "repoPlaceholder": "acme/payments-api",
+    "repoInvalid": "Must look exactly like owner/name — letters, digits, - . _ only, one slash.",
+    "repoUpdateNote": "Updating the existing installation for {repo}.",
     "filesToCreate": "FILES TO CREATE",
     "generating": "Generating…",
     "editable": "editable",
+    "selectFilePrompt": "Select a file to view its contents.",
+    "runnerFileNote": "Not shown here — the real bundle is embedded server-side at Install; it is never uploaded or downloaded through the wizard.",
+    "memoryFileNote": "Reserved placeholder — nothing currently reads this file.",
+    "workflowEditHint": "Plain text. Hand-edit if this repo needs something different — no structured form, no as-you-type validation, no diff view. DevDigest re-validates it server-side before committing.",
+    "previewFailed": "Could not generate a preview",
     "triggerLabel": "Trigger",
+    "triggersLabel": "Trigger on",
+    "triggers": {
+      "opened": "Opened",
+      "openedCost": "Runs once, when the PR is opened.",
+      "synchronize": "New commits (synchronize)",
+      "synchronizeCost": "Runs on every push to an open PR — the most frequent trigger.",
+      "reopened": "Reopened",
+      "reopenedCost": "Runs when a closed PR is reopened."
+    },
     "postResultsLabel": "Post results as",
     "postAs": {
       "githubReview": "GitHub review",
       "prComment": "PR comment",
       "none": "None (exit code only)"
     },
-    "blockMergeTitle": "Block merge on findings",
-    "blockMergeDesc": "Requires a GitHub App — not available with PAT in local mode",
+    "blockMergeDesc": "DevDigest turns the check red on a matching finding, via the agent's Fail CI on setting. Making red actually block a merge is a required status check in the target repo's branch protection — configured by the repo owner, in GitHub, by hand. No GitHub App is involved either way.",
+    "ingestUrlLabel": "Ingest URL",
+    "ingestUrlHint": "Where the CI job POSTs its result back to this studio.",
+    "ingestUrlLocalhostWarning": "This points at localhost — a GitHub Actions runner cannot reach it. Use a publicly reachable URL for this studio before installing.",
+    "secretsPanel": {
+      "title": "Secrets expected",
+      "disclaimer": "DevDigest cannot read, set or verify a repository secret. This is a checklist for you to complete in the repo's GitHub settings, not a live check.",
+      "openrouterName": "OPENROUTER_API_KEY",
+      "openrouterStatus": "You add this",
+      "githubTokenName": "GITHUB_TOKEN",
+      "githubTokenStatus": "Auto-provided by GitHub Actions",
+      "ingestTokenName": "{secretName}",
+      "ingestTokenStatus": "DevDigest generates this at Install — you paste it in"
+    },
+    "providerNotice": "This agent's studio provider is {provider}, but the CI runner always calls OpenRouter — the model string \"{model}\" will be sent to OpenRouter verbatim.",
     "installCardTitle": "Open a PR with these files",
     "installCardBody": "DevDigest opens a PR in {repo} titled “Add DevDigest CI review” with the {count} generated files.",
     "ownerRepo": "owner/repo",
-    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs."
+    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs.",
+    "zipCardTitle": "Copy files as a zip",
+    "zipCardBody": "Download the generated files and add them to the repo yourself. This path makes no GitHub write.",
+    "zipCardNoToken": "No ingest token is issued on this path — CI Runs won't show results for this repo until you install via the pull-request path instead.",
+    "downloadZip": "Download zip",
+    "zipDownloading": "Preparing zip…",
+    "zipDownloaded": "Downloaded devdigest-ci.zip",
+    "setupDocsLink": "Setup documentation",
+    "installFailed": "Install failed",
+    "prReady": "Pull request ready",
+    "viewPr": "View pull request",
+    "close": "Close",
+    "tokenBlock": {
+      "title": "DevDigest ingest token",
+      "warning": "Shown once — copy it now and paste it into the repo's Actions secrets as {secretName}. It cannot be shown again after this dialog closes.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "close": "I've copied it — Close"
+    }
   },
   "ciTab": {
     "heading": "Continuous Integration",
@@ -82,7 +139,27 @@
     "update": "Update CI",
     "noRepo": "Connect a repository first",
     "empty": "Not deployed to CI yet. Use “Publish to CI” to open a PR that adds the workflow + agent config.",
-    "installed": "installed {date}"
+    "installed": "installed {date}",
+    "ingestSecretLabel": "Ingest secret: {secretName}",
+    "emptyTitle": "Not deployed to CI yet",
+    "emptyBody": "Export this agent to run automatically on pull requests via GitHub Actions.",
+    "addToCi": "+ Add to CI",
+    "installedCount": "Deployed to {count} repositories",
+    "neverRan": "Never ran",
+    "ranAgo": "{time} ago",
+    "failOnLabel": "Fail CI on",
+    "failOnNote": "Affects CI only after the manifest is re-exported — this value reaches CI through the committed manifest, never live.",
+    "failOnSave": "Save",
+    "failOnSaved": "Saved",
+    "updateConfig": "Update CI config",
+    "updating": "Updating…",
+    "tokenPreservedNote": "Your existing ingest token is preserved — no need to update the repo's secret.",
+    "driftBanner": "Running an older configuration: this repo has v{installedVersion}, the agent is now v{currentVersion}.",
+    "removeInstallation": "Remove installation",
+    "removeConfirmTitle": "Remove this installation?",
+    "removeConfirmBody": "The committed workflow in {repo} keeps running — its reports will start being rejected (401) once removed, until you install again or delete the workflow file yourself.",
+    "removeConfirmAction": "Remove",
+    "cancel": "Cancel"
   },
   "publishDialog": {
     "title": "Publish to CI",

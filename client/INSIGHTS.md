@@ -342,7 +342,62 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   same. When a plan/spec names the file's own stated convention, follow
   that over whichever sibling hook file happens to be open.
 
+- **`src/vendor/ui/ExportWizardSteps.tsx` and `AutoTriggerStatus.tsx` were
+  pre-existing, barrel-exported, and completely unused until the Export to
+  CI wizard (2026-08-23, SPEC-04 Phase D, WI20)** — the same "pre-authored
+  scaffolding anticipates the intended UI" pattern this file already
+  documents for `messages/en/*.json` (see the Skills/Conventions/Agents
+  entries above), just for a *vendor component* this time instead of i18n
+  copy. `ExportWizardSteps` is exactly the numbered horizontal step
+  indicator AC-1 needed (`{step, labels}` props, done/active/pending
+  states) — used as-is with zero changes for the wizard's Target → Preview
+  → Configure → Install progress bar. Worth grepping `src/vendor/ui/*.tsx`
+  (not just `messages/`) for an unused, feature-shaped component before
+  building a new one from scratch when a route name in a plan matches an
+  existing vendor file's name closely.
+- **One shared `WizardState` + one `buildExportInput(state)` function feeding
+  Preview/Install/Zip is what makes AC-1 ("Back restores a hand-edited
+  workflow") and UX-1 ("Configure changes re-sync Preview") both true
+  without separate reconciliation code (2026-08-23, ExportWizard).** All
+  wizard state (`repo`, `triggers`, `postAs`, `ingestUrl`,
+  `workflowOverride`, `files`) lives in the top-level `ExportWizard.tsx`,
+  never per-step local state — `step` is the only thing that changes on
+  Back/Continue, so nothing ever remounts and nothing needs an explicit
+  "restore" path. Toggling a trigger or changing `post_as` on Configure
+  calls the exact same `buildExportInput` used by Preview/Install, passed
+  via an `overrides` param (not read from the just-set state, which would
+  be stale inside the same event handler) — this is the general shape for
+  "a wizard step's edit must be reflected consistently by every other step
+  that also submits a request," not something specific to CI export.
+
 ## Tool & Library Notes
+
+- **`src/lib/api.ts`'s `apiFetch` always calls `res.json()` — a binary
+  response (e.g. `POST /agents/:id/export-ci/zip`'s `application/zip`)
+  needs a second function, not a special-cased branch inside `apiFetch`
+  (2026-08-23, SPEC-04 Phase D).** Added `apiFetchBlob`/`api.postBlob` as a
+  sibling to `apiFetch`/`api.post` in `api.ts` itself — same error-handling
+  shape (network failure → `ApiError` with `status: 0`, non-2xx → parse a
+  JSON error body if present), just `res.blob()` instead of `res.json()` on
+  success. Keeps the "no ad-hoc `fetch` in a component" rule intact for any
+  future binary-response endpoint instead of reaching for `fetch` directly
+  in the hook.
+- **On this shared dev machine, whatever process already owns `:3001` may
+  belong to a DIFFERENT worktree, not this one (2026-08-23).** Before
+  trusting a `curl http://localhost:3001/...` result as "this worktree's
+  API," check the owning process's actual command line —
+  `Get-NetTCPConnection -LocalPort 3001 -State Listen | select
+  OwningProcess` then `Get-CimInstance Win32_Process -Filter
+  "ProcessId=<pid>" | select CommandLine` — since a stale/other-worktree
+  server answers real HTTP 200s on unrelated routes and only reveals itself
+  as wrong via a 404 on a route your own worktree's code just added. This
+  session's `:3001` was a `D:\htdocs\devDigest\server` process pre-dating
+  the `ci` module (confirmed via `/ci/runs` 404-ing there while `/eval-
+  dashboard` 200'd). Fix: start your OWN instance on a different `API_PORT`
+  (env var, `server/src/platform/config.ts`) against the same shared
+  Postgres container rather than restarting/killing a process you don't
+  own — verified this way for CI export's Preview/Zip routes, then killed
+  only the throwaway instance afterward.
 
 - **`gridTemplateColumns: "repeat(auto-fit, minmax(<px>, 1fr))"` is this
   codebase's way to get a "2 columns on desktop, stacks under N px" layout
@@ -1671,3 +1726,70 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   (pins that the "Turn into eval case" confirmation follows the mutation's
   own response, not a client-side re-derivation from `accepted_at`/
   `dismissed_at`).
+
+- 2026-08-23: Export to CI, Phase D client build (`docs/plans/spec-04-export-to-ci.md`
+  WI17-WI20; Phases A-C were server-only, already committed). New
+  `lib/hooks/ci.ts` (`useCiPreview` a mutation, never a query — AC-46;
+  `useCiExport`, `useCiExportZip`, `useAgentCiInstallations`, `useCiRuns`,
+  `useDeleteCiInstallation`) + CI contract re-exports in `lib/types.ts`. New
+  agent-editor `CiTab` (`AgentEditor/_components/CiTab/`) — installation
+  list with last-run/never-ran + drift banner, `Fail CI on` wired through
+  the existing `useUpdateAgent`, Update/Remove — and the four-step
+  `ExportWizard` (`_components/ExportWizard/`, Target → Preview → Configure
+  → Install) reachable from it. Corrected `ci.json`'s
+  `exportWizard.blockMergeDesc` (no longer claims a GitHub App is needed to
+  block merges) and `runs.emptyBody` (now points at the connection/secrets
+  requirement, not "just export it"); added every new key WI17 named,
+  touched no other existing key. See Codebase Patterns / Tool & Library
+  Notes above for the vendored `ExportWizardSteps` reuse, the shared
+  `WizardState`/`buildExportInput` design, the new `api.postBlob`, and the
+  shared-machine `:3001` port-ownership gotcha this session hit while
+  live-verifying Preview/Zip against a throwaway server instance on
+  `:3011`. Did not attempt a real Install (GitHub PR write) — no
+  `GITHUB_TOKEN` configured for the throwaway instance, same precedent as
+  Phase C's own session (`server/INSIGHTS.md` 2026-08-23 entry). No new
+  tests authored this pass (explicit user decision, `test-writer` runs
+  separately); `tsc --noEmit` clean and the full existing Vitest suite (45
+  files / 276 tests, including `AgentEditor.test.tsx`) passed unchanged.
+
+- 2026-08-23: Export to CI, Phase E — final phase (`docs/plans/spec-04-export-to-ci.md`
+  WI21-WI23). New `/ci-runs` page (`app/ci-runs/page.tsx` +
+  `_components/CiRunsView/`): one `useCiRuns({ since_days })` fetch per
+  page, scoped server-side only by the time-window filter; the other four
+  filters (agent/repo/status/source) narrow that SAME result set
+  client-side (`helpers.ts` `applyFilters`) rather than issuing a second
+  server round-trip per filter change — the agent/repo/source dropdown
+  option lists are also derived from that one fetched set
+  (`distinctAgentOptions`/`distinctRepoOptions`/`distinctSourceOptions`),
+  so picking one filter never shrinks another filter's own option list.
+  Findings column has three explicit states (`findingsDisplay`:
+  `"split"` when any of critical/warning/suggestion is non-null,
+  `"total"` falling back to `findings_count` when all three are null,
+  `"unknown"` rendering a dash when even the total is null) — this is the
+  concrete shape of AC-64/AC-66's "never render a 0 for a severity you
+  don't know" rule; a null field is OMITTED from the split render, never
+  coerced to 0. `source` renders `run.source` verbatim with zero validation
+  against `CiTarget` (D-13) — confirmed by reading the contract
+  (`CiRun.source: z.string().nullable()`, no enum) and writing
+  `sourceLabel()` as a straight passthrough with no branch on the value.
+  Nav entry added to `vendor/ui/nav.ts` (`key: "ci-runs"`, SKILLS LAB
+  group, `gKey: "i"` — confirmed free by reading the live `SHORTCUTS`
+  array first, not by trusting the plan's claim) — this is the one
+  sanctioned do-not-touch exception for this plan, purely additive, no
+  neighboring entry touched. Hit the exact SAME shared-machine port
+  gotcha the Phase D entry above documents: both `:3000` and `:3001` on
+  this machine belong to a `D:\htdocs\devDigest` checkout, not this
+  worktree (confirmed via `wmic process ... get CommandLine`), so a
+  live-against-`pnpm dev` check for `/ci-runs` was not attempted this
+  session — verified instead via `tsc --noEmit` (clean) and the full
+  existing Vitest suite (45 files / 276 tests, including `nav.test.ts`'s
+  9 tests and `smoke.test.tsx`) passing unchanged. No new tests authored
+  this pass (explicit scope: no `test-writer` stage). Also ran the
+  server-side WI23 sweep from this same session: `tsc --noEmit` and
+  `depcruise` both clean on `server/`; `git diff --no-index` between the
+  two `eval-ci.ts` vendor mirrors printed nothing; a literal
+  `grep -rn "process.env" server/src/modules/ci/` still matches 2 lines,
+  but both are doc-comments (one describing the GENERATED CI runner's own
+  env usage, one asserting `service.ts` itself has zero such reads) —
+  not actual code, and pre-existing from Phases C/D, not from this
+  session's changes.

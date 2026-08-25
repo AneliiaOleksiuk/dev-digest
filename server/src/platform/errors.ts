@@ -38,6 +38,16 @@ export class ConflictError extends AppError {
   }
 }
 
+/** Failed/missing bearer-style credential on a non-session-authenticated
+ *  route (currently only `POST /ci/ingest`, SPEC-04 AC-51) — 401, and the
+ *  message must never carry the presented token, its hash, or any other
+ *  secret material (A09). */
+export class UnauthorizedError extends AppError {
+  constructor(message = 'Unauthorized', details?: unknown) {
+    super('unauthorized', message, 401, details);
+  }
+}
+
 export class ExternalServiceError extends AppError {
   constructor(message: string, details?: unknown) {
     super('external_service_error', message, 502, details);

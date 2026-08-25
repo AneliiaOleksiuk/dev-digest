@@ -6,11 +6,13 @@ import {
   jsonb,
   timestamp,
   doublePrecision,
+  uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { agents } from './agents';
 import { pullRequests } from './pulls';
+import { ciInstallations } from './ci';
 
 // ============================================================ Observability
 
@@ -44,8 +46,38 @@ export const agentRuns = pgTable(
     score: integer('score'),
     /** Findings that tripped the agent's gate (severity ≥ ciFailOn). */
     blockers: integer('blockers'),
+    // CI linkage (AC-56, AC-58, AC-66) — all nullable: a local run has none
+    // of them, and a failed CI run has no metrics. `prId` stays nullable and
+    // untouched (AC-56, E-25) — a CI run reviews an external repo's PR, not
+    // necessarily one imported into `pull_requests`.
+    ciInstallationId: uuid('ci_installation_id').references(() => ciInstallations.id, {
+      onDelete: 'set null',
+    }),
+    repo: text('repo'),
+    externalPrNumber: integer('external_pr_number'),
+    headSha: text('head_sha'),
+    actionsRunId: text('actions_run_id'),
+    jobUrl: text('job_url'),
+    sourceLabel: text('source_label'),
+    critical: integer('critical'),
+    warning: integer('warning'),
+    suggestion: integer('suggestion'),
   },
   (t) => ({
+    // AC-57 dedupe. Both columns are NULL for every local run, and Postgres
+    // treats NULLs as distinct for uniqueness purposes, so this constraint
+    // does not collide with (or affect) any pre-existing local row.
+    ciInstallationActionsRunUq: uniqueIndex('agent_runs_ci_installation_actions_run_uq').on(
+      t.ciInstallationId,
+      t.actionsRunId,
+    ),
+    // CI Runs list is a workspace-scoped scan filtered to source='ci', ordered
+    // by time (AC-65, NFR Performance).
+    workspaceSourceRanAtIdx: index('agent_runs_workspace_source_ran_at_idx').on(
+      t.workspaceId,
+      t.source,
+      t.ranAt,
+    ),
     multiAgentRunIdx: index('agent_runs_multi_agent_run_id_idx').on(t.multiAgentRunId),
   }),
 );

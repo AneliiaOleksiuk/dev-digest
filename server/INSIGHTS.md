@@ -482,6 +482,65 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   unlike the `project_context_docs`/`risk_areas` ripples documented
   elsewhere in this file.
 
+- **`modules/ci/service.ts`'s shared `generateFiles()` ALWAYS writes the
+  Preview-only placeholder for the runner bundle entry — Install and the zip
+  export MUST re-swap it for the real bytes themselves, or the shipped
+  `.devdigest/runner/index.js` is a ~150-byte comment string, not the runner
+  (2026-08-23, SPEC-04 Phase C, WI13).** `generateFiles()` (Phase B) reads
+  `readRunnerBundle()` only to get a byte count for `previewPlaceholder(n)`
+  and discards the real content — correct for Preview (Q-3: real bytes never
+  cross to the client) but silently wrong if reused as-is for Install/zip,
+  since the plan's own WI13 text ("zip... including the real bundle bytes")
+  is the only place this requirement is stated; the phase's numbered
+  step-list does not call it out as its own step. Fixed with a small
+  post-processing method, `CiService.withRealBundle(files)`, that re-reads
+  the bundle and replaces the `RUNNER_PATH` entry's `contents`/
+  `preview_omitted` — called from both `install()` and `exportZip()`, never
+  from `generateFiles()` itself, so Preview's "placeholder only" guarantee
+  holds by construction. Verified live: `POST .../export-ci/zip`'s returned
+  zip had `.devdigest/runner/index.js` at 1,596,253 bytes (the real
+  `ncc`-bundled `agent-runner/dist/index.js`), not the placeholder string.
+  Re-reading the bundle a second time (once in `generateFiles`, once in
+  `withRealBundle`) is a deliberate, cheap tradeoff over widening
+  `generateFiles`'s signature — it's a local disk read, and Preview's
+  already-reviewed (Phase B) behavior stays untouched.
+
+- **AC-39's "never produce a target tree containing two manifests" cannot be
+  satisfied by actual git-level file DELETION through the existing
+  `commitFiles({path, contents})` port — only by overwriting a path in place
+  (2026-08-23, SPEC-04 Phase C, WI13, flagged for human review).** GitHub's
+  Git Data API needs a tree entry with `sha: null` to remove a path; `CommitFile`
+  (`vendor/shared/adapters.ts`) has no field to express that, and Phase C's
+  own constraints (D-10/AC-80 "no new adapter method"; WI13's file scope is
+  `service.ts`/`routes.ts` only, never `adapters/github/octokit.ts`) rule out
+  adding one. Resolved by exploiting `agent-runner/src/manifest.ts`'s
+  `findManifestPath`, which refuses on file COUNT under `.devdigest/agents/`,
+  never on filename: on a confirmed `replace_existing` conflict,
+  `CiService.avoidDoubleManifest` looks up the CONFLICTING installation's own
+  agent (guaranteed to still exist — `ci_installations.agent_id` is `ON
+  DELETE CASCADE`, so a conflicting row can't outlive its agent), re-derives
+  that agent's manifest path via the same `slugify()` used at generation
+  time, and rewrites the NEW agent's manifest file entry to that exact path
+  before committing — one file, one path, no deletion needed. Tradeoff: the
+  new agent's manifest ships under a filename that no longer matches its own
+  slug in this one replace-conflict case. A real fix needs a GitHub adapter
+  change (a `CommitFile` deletion signal) in a future phase, not a Phase C
+  workaround.
+
+- **`POST /ci/ingest` deliberately does NOT declare `schema: { body:
+  CiIngestInput }`, breaking this repo's usual "every route validates its
+  body via the zod type provider" convention — and that is the correct call
+  here, not an oversight (2026-08-23, SPEC-04 Phase C, WI14).** Fastify runs
+  schema-body validation BEFORE the route handler; this route's binding
+  order (Spec's flowchart, AC-51/AC-53) requires the header credential check
+  to run and fail closed (401, writes nothing) BEFORE the body is ever
+  parsed against a schema — an unauthenticated caller must learn nothing
+  about whether their body would even have been well-formed. `CiService
+  .ingest()` does the zod `.safeParse()` itself, manually, AFTER the
+  constant-time token check succeeds. If a future session is tempted to "fix"
+  this route to match the usual convention, re-read AC-51/AC-53's ordering
+  first — the deviation is the fix, not the bug.
+
 ## Tool & Library Notes
 
 - **This repo has no ESLint config anywhere** — not in `server/`, `client/`,
@@ -763,6 +822,50 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `.it.test.ts` suite (or a throwaway ad hoc one against `startPg()`) is a
   strictly stronger correctness check than unit tests alone for anything
   touching `repository.drizzle.ts`.
+
+- **CORRECTED 2026-08-23 (SPEC-05 session) — the entry below, as originally
+  written during SPEC-04 Phase C, describes a `constantTimeEqual`
+  compare-then-fetch mechanism that a LATER same-day fix-loop iteration
+  (`fix(ci): fix-loop iteration 1 — ingest handshake…`) already replaced
+  before this repo's history moves on to SPEC-05. `modules/ci/service.ts`
+  contains no `constantTimeEqual` and no `timingSafeEqual` call at all as of
+  SPEC-05 — `POST /ci/ingest` now authenticates via a HASH-KEYED DB LOOKUP
+  (`findInstallationByTokenHash`, `WHERE token_hash = $1`): the lookup
+  itself is the authentication (a hash match proves possession of the
+  token), so there is no explicit buffer-vs-buffer comparison to guard with
+  `timingSafeEqual` in the first place — see `service.ts`'s `ingest()`
+  method docstring for the full reasoning (an indexed-column equality check
+  has no attacker-observable early-exit signal to time, unlike a
+  byte-by-byte comparison). The `RangeError`-on-length-mismatch gotcha below
+  is still true of `node:crypto`'s `timingSafeEqual` in general — keep it in
+  mind for any FUTURE call site that does compare two buffers directly — but
+  it no longer describes this module's actual ingest-auth code path. Left
+  the original entry in place, struck through in spirit rather than deleted,
+  so a reader mid-history (e.g. reading Phase C's own commit) isn't
+  confused; do not restore its `modules/ci/service.ts`-specific framing.
+- **`node:crypto`'s `timingSafeEqual` THROWS `RangeError` on a length
+  mismatch instead of returning `false` — always rule out length first.**
+  (General `node:crypto` gotcha; the `modules/ci/service.ts`-specific framing
+  this entry originally carried is stale — see the correction immediately
+  above.) The naive "constant-time compare" implementation
+  (`a.length === b.length && timingSafeEqual(a, b)`, short-circuit `&&`) is
+  only as safe as the attacker's ability to control an operand's length —
+  fine when both sides are fixed-length digests from a source the attacker
+  doesn't control, NOT fine when an attacker can control either operand's
+  length. Don't reuse this shape for a comparison where an attacker CAN
+  control both operands' length without re-deriving whether the
+  short-circuit is still safe there.
+- **`ci_installations.token_hash` is stored as a lowercase HEX string (via
+  `createHash('sha256').update(token,'utf8').digest('hex')`), not the raw
+  32-byte digest** (2026-08-23, SPEC-04 Phase C) — the ingest path re-hashes
+  the presented token to a raw `Buffer` via `.digest()` (no encoding arg)
+  and must `Buffer.from(storedHex, 'hex')` the stored column value before
+  `timingSafeEqual` can compare them; comparing a hex STRING against a raw
+  digest Buffer would always fail even on the correct token. If a future
+  session inserts a test fixture row directly via SQL (as this session did,
+  to exercise the ingest endpoint's auth paths without needing a real
+  `GITHUB_TOKEN`), the `token_hash` column value must be the hex digest
+  string, not base64 and not the raw bytes.
 
 ## Recurring Errors & Fixes
 
@@ -1748,6 +1851,358 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   Errors & Fixes entry above, which THIS check surfaced). Both throwaway
   files deleted before this session's Implementation Report; test-writer
   owns the real, committed integration coverage next.
+
+- 2026-08-23: Phase A of `docs/plans/spec-04-export-to-ci.md` (WI1-WI4,
+  contracts/schema/deps, zero runtime behavior) — a couple of
+  environment-level findings worth keeping. **(1) A `const` used inside
+  another `z.object({...})` at module-eval time must be declared BEFORE
+  the object that references it, or it's a TDZ `ReferenceError` at import
+  time, not a type error** — `CiInstallation.last_run.status: CiRunStatus`
+  needed `CiRunStatus` moved from its old position (after `CiInstallation`/
+  `CiExport`) to right after `CiTarget`, near the top of the CI section in
+  both vendored `eval-ci.ts` copies. `tsc --noEmit` does NOT catch this
+  ordering bug — it only shows up as a real runtime crash the first time
+  the module is imported, since TypeScript's structural typing doesn't care
+  about declaration order for `const`, only real JS TDZ semantics do.
+  Similarly, `CiIngestInput` (which references `CiResultArtifact`) had to be
+  placed AFTER `CiResultArtifact`'s own declaration, not just anywhere
+  convenient in the "Export-to-CI" section. **(2) This is a brand-new git
+  worktree with no `node_modules` anywhere (server/client/reviewer-core all
+  needed a fresh `pnpm install`/`npm install` before `tsc --noEmit` would
+  even resolve imports)** — a `tsc` failure whose errors are entirely inside
+  `../reviewer-core/src/**` (module-not-found for `openai`/`zod`) when you
+  haven't touched that package is very likely this, not a real regression;
+  confirm via `ls reviewer-core/node_modules` before debugging further.
+  **(3) `cd server && pnpm add yaml jszip` did NOT hit the documented
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` this session** — ran cleanly
+  first try once `node_modules` already existed from the fresh install
+  above; the abort is a lockfile/node_modules-drift-triggered reinstall
+  prompt, not something that fires on every `pnpm add` in this environment.
+  **(4) The shared `devdigest-postgres` Docker container's
+  `__drizzle_migrations.id` is a plain serial counter, one row per applied
+  file in journal order — an `id` that looks alarmingly high (e.g. `21`)
+  right after a fresh `drizzle-kit generate` is almost certainly just "the
+  Nth pre-existing committed migration," not evidence of some other
+  worktree/branch having raced ahead on the same container.** Cross-checked
+  by comparing `ls server/src/db/migrations/*.sql` (21 files, 0000-0020)
+  against `id`s in the table before generating anything — same count,
+  confirming no anomaly — before trusting a `pnpm db:migrate` run against
+  this always-on, cross-worktree-shared container. Worth remembering that
+  this container genuinely IS shared state across every worktree on this
+  machine, though: a real drift (two different worktrees both minting a
+  numerically-colliding-but-content-different `0021_*.sql` against the same
+  DB) would look exactly like this at first glance and needs the same
+  "diff the file count against the row count" sanity check to rule out
+  before applying, not just eyeballing the id.
+
+- 2026-08-23: SPEC-04 Phase C (`docs/plans/spec-04-export-to-ci.md` WI12-16,
+  Install/ingest/read APIs — the most security-sensitive phase of this
+  feature). `repository.ts`/`repository.drizzle.ts` gained the full CI
+  installation + CI run CRUD (every `workspaceId`-taking method joins through
+  `agents.workspace_id`, since `ci_installations` has no tenancy column of
+  its own; `findInstallationById`/`insertCiRun` are the two documented
+  ingest-path exceptions). `service.ts` gained `install` (WI13 — token
+  minted only on create via `randomBytes(32)`/sha256, no half-state on a
+  post-commit PR failure, AC-39 conflict handling — see the new Codebase
+  Patterns entry above for why it overwrites rather than deletes),
+  `exportZip` (zero GitHub writes, zero DB writes, no token — flagged
+  interpretation per the plan), `ingest` (WI14 — header-authenticated,
+  constant-time token check, `getContext` never called, one explicit-column
+  insert idempotent on the DB unique index), `listRuns`/`listInstallations`
+  (WI15), `deleteInstallation` (WI16). `routes.ts` wires all of the above;
+  `POST /ci/ingest` deliberately skips the usual zod-schema-on-route
+  convention (see Codebase Patterns). Added `UnauthorizedError` (401) to
+  `platform/errors.ts`. No schema/migration changes — Phase A already added
+  every column this phase needed. `pnpm typecheck`/`pnpm arch:check` both
+  clean. Live-verified end to end against the real running app (Docker
+  Postgres was up): built `agent-runner/dist/index.js` fresh
+  (`cd agent-runner && pnpm build`) so Preview/zip could exercise the real
+  bundle-swap path; confirmed Preview unaffected (Phase B regression check);
+  confirmed the zip download's `.devdigest/runner/index.js` is the real
+  1.6MB bundle, not the ~150-byte placeholder; exercised Install's
+  validation-refusal paths (bad `target`, bad `repo` shape, a
+  `workflow_override` containing `pull_request_target` — all refused before
+  any GitHub call could happen); inserted a `ci_installations` row directly
+  via SQL (with a known token/hash pair) to exercise `POST /ci/ingest`
+  without a real `GITHUB_TOKEN` — confirmed 401 + zero rows written for
+  absent headers, an unknown installation id, a wrong token, and a
+  non-UUID-shaped installation id; confirmed a valid token succeeds (201)
+  and the persisted `agent_runs` row's `workspace_id` exactly matches the
+  installation's agent's own workspace (tenancy resolved purely from the
+  authenticated installation, never a session); confirmed idempotency (a
+  duplicate `actions_run_id` left exactly one row, with the ORIGINAL
+  `findings_count`, not the duplicate's fabricated one); confirmed a
+  repo-mismatch body is rejected; confirmed a failure-shaped body (`result:
+  null`) persists with every metric genuinely `null`, never invented zeros;
+  confirmed `GET /ci/runs`/`GET /agents/:id/ci-installations` render
+  correctly (agent name resolved via left join, `pr_title: null` denormalized
+  fallback, filters narrow correctly) and `DELETE /ci/installations/:id`
+  404s on a nonexistent id, 204/200s on a real one, sets
+  `agent_runs.ci_installation_id` null (not cascade-deleting the runs,
+  E-24), and a subsequent ingest against the deleted installation 401s. Did
+  NOT live-test Install's actual `commitFiles`/`openPullRequest` path (would
+  need a real `GITHUB_TOKEN` and a real target repo — out of scope for this
+  environment, and the session's own sandboxed shell classifier declined the
+  one attempt to try it against a placeholder repo). All test data (the SQL
+  fixture row, the two `agent_runs` rows) deleted before ending the session;
+  zero `process.env` reads and zero log calls carrying
+  token/hash/contents/systemPrompt/body confirmed by grep across
+  `modules/ci/*.ts`. No test authorship this session (explicit user
+  instruction for this pass, not just the usual "test-writer's job next").
+
+- **SPEC-04 fix-loop, iteration 1 (2026-08-23) — three `plan-verifier`
+  findings, each a durable lesson beyond this feature:**
+  1. **The ingest header-auth entry directly above this one documents
+     `POST /ci/ingest` as "header-authenticated" and even claims a live
+     verification — but the header names on each side were never
+     cross-checked against each other.** `workflow.ts`'s reporting step has
+     ALWAYS sent `Authorization: Bearer $INGEST_TOKEN`; `routes.ts`/
+     `service.ts` read `x-devdigest-installation` + `x-devdigest-token`,
+     which nothing ever emitted — so the whole push-based ingest path was
+     dead in production despite each half individually passing its own
+     phase's live check (the Phase C verification above tested the route
+     directly via a hand-crafted curl using the headers the ROUTE expected,
+     never against what the GENERATOR actually produces). Lesson: whenever a
+     credential/contract crosses a generator/consumer boundary (a workflow
+     you emit vs. an endpoint you also own), grep BOTH sides for the literal
+     header/field name before calling it done — "each half is independently
+     correct" is not the same claim as "the two halves agree", and a
+     same-repo generator+consumer pair is exactly the case where it's easy
+     to assume they were written to agree without checking. Fixed by
+     converging the SERVER on the single `Authorization: Bearer` header the
+     generator already emitted (simpler than threading an installation id
+     through the generator, which would have created a Preview/Install
+     byte-identity problem AC-5 doesn't otherwise have) — added
+     `findInstallationByTokenHash`, since the hash lookup itself is now the
+     whole authentication (no separate compare-then-fetch step, so no
+     `timingSafeEqual` needed: a hash-KEYED indexed lookup exposes no
+     byte-by-byte comparison timing signal the way a fetch-then-compare flow
+     does).
+  2. **A path/identifier derived from a MUTABLE field (`slugify(agent.name)`)
+     and re-derived on every operation, instead of being persisted once and
+     reused, is stable-looking on the first call and silently drifts on the
+     Nth.** `avoidDoubleManifest`'s replace-conflict handling rewrote the
+     manifest path correctly for exactly one export, but a later plain
+     re-export of that same (now-installed) agent took a different code
+     branch that never called it, re-deriving the path from the agent's
+     CURRENT name instead — leaving the old committed file behind (two
+     manifests, `agent-runner` refuses to start). General lesson for this
+     codebase: if a generated artifact's identity/path needs to survive
+     across multiple future operations on the same row, it belongs in a
+     persisted column set once at creation, not a function of a live,
+     editable field re-evaluated each time — "the same computation on the
+     same inputs is deterministic" is true but not the property that was
+     actually needed (the inputs, i.e. the agent's name, are exactly what
+     can change between calls).
+  3. **Never reuse a job step's EXIT-CODE-driving signal as an unrelated
+     status field, when that signal is deliberately overloaded to produce a
+     side effect.** `steps.review.outcome` is intentionally `failure`
+     whenever the deterministic gate wants to redden the GitHub check
+     (that's the entire mechanism `ci_fail_on` relies on) — reusing the same
+     value to decide the ingested `status` field conflated "did the review
+     complete" with "should the check be red", made a correctly-blocking
+     review indistinguishable from a pre-review crash, and made one of four
+     enum states (`no_findings`) permanently unreachable. Fix: derive
+     `status` from the ARTIFACT's own content (`findings_count` from
+     `devdigest-result.json`) and leave the exit-code-driven gate step
+     completely alone — two different questions, two different signals,
+     never merge them just because one script has both available in scope.
+  4. **Live-testing a worktree's OWN code against a shared dev Postgres:
+     check `netstat -ano` for which PID actually owns the port you're about
+     to curl before trusting it's your code.** Multiple `tsx watch
+     src/server.ts` processes can be running simultaneously across
+     different worktrees/checkouts, all pointed at the same
+     `devdigest-postgres` container (same default `DATABASE_URL`) — curling
+     `localhost:3001` can silently hit a DIFFERENT worktree's server if one
+     got there first. Booting your own instance on an alternate `API_PORT`
+     (env var, defaults to 3001) against the same shared DB is a safe,
+     supported way to live-verify a fix without disturbing whatever else is
+     running — schema changes and data are shared, code is not.
+  All three findings fixed; `pnpm typecheck`/`arch:check` clean;
+  findings 1 and 2 re-verified live (a throwaway `ci_installations` row +
+  `curl` for finding 1's 401/201 cases and `agent_runs.workspace_id`
+  tenancy; a throwaway tsx script exercising `CiService.install()` directly
+  against real Postgres, with only `container.github()` mocked, for
+  finding 2's fresh-install → replace-conflict → re-export sequence) —
+  all test data deleted afterward. No test authorship this session either
+  (same explicit user instruction as the original SPEC-04 pass).
+
+- **2026-08-23 (SPEC-05 — multi-agent CI per repo, `docs/plans/spec-05-multi-agent-ci-per-repo.md`).**
+  Implementer pass over `modules/ci/**` + both vendored `eval-ci.ts` copies +
+  a nullable `ci_installations.namespace` migration. Three things worth
+  keeping in mind next time this module (or any multi-worktree session) is
+  touched:
+  1. **When cleaning up a background dev server you started against a
+     shared multi-worktree Postgres, RE-RUN `netstat -ano` immediately
+     before `taskkill` — never reuse a PID value captured earlier in the
+     session.** This session's own item-4 gotcha above (2026-08-23, SPEC-04
+     Phase C) already warns to check the port's actual PID before CURLING
+     it; the same discipline is needed before KILLING one too, and this
+     session didn't apply it symmetrically — it `taskkill /F`'d a PID
+     captured from an EARLIER `netstat` call (believing it was the test
+     server just started on this worktree's `API_PORT`), which by then
+     was actually a DIFFERENT worktree's (`D:\htdocs\devDigest`) `tsx watch`
+     server on port 3001, unrelated to this task. The correct instance
+     (this worktree's, on its own `API_PORT`) was still running under a
+     DIFFERENT PID at that point. Always re-check immediately before a
+     destructive action on a PID, not just before a read.
+  2. **`disambiguate()`'s suffix counting and a "pick an unused slug from a
+     taken set" derivation LOOK like the same problem but aren't —
+     `disambiguate` counts occurrences WITHIN one list it's handed, so
+     `disambiguate([...taken, candidate])` reuses the count of `candidate`'s
+     occurrences in that COMBINED list, which can collide with a suffix
+     ALREADY present in `taken` (e.g. `taken = ['sec', 'sec-2']`, candidate
+     `'sec'` → `disambiguate` yields `'sec-2'` again, since it only sees one
+     prior `'sec'` in the list it was given).** `deriveNamespace`
+     (`helpers.ts`) instead increments a numeric suffix and tests EACH
+     candidate against the taken SET directly (`while (taken.has(...)) n++`)
+     — same `-2`/`-3` suffix SHAPE, different algorithm. Don't reach for
+     "just call the existing disambiguate helper with the taken list
+     prepended" as a shortcut for a taken-SET-membership problem; skim the
+     existing helper's actual counting semantics first.
+  3. **A directory-containment check for a security guard (`path` under
+     `dir`) must compare `path === dir || path.startsWith(dir + '/')`, never
+     a bare `path.startsWith(dir)` or `.includes(dir)`.** Without the
+     trailing-separator boundary, a directory literally named
+     `.devdigest/agents` would appear to "contain" a sibling that merely
+     shares the prefix TEXT (a hypothetical `.devdigest/agents-legacy/...`),
+     which is a different directory entirely. This was the AC-8
+     path-collision guard in `modules/ci/service.ts`'s `isPathInsideDir` —
+     worth the explicit boundary check even though no current namespace
+     value happens to trigger the bug, since namespaces are user-influenced
+     (derived from an agent's display name) and the guard exists precisely
+     to be safe against adversarial-shaped inputs.
+  Manual sanity check (no test authorship — `test-writer` owns that
+  separately): two throwaway tsx scripts against the real dev Postgres, both
+  deleted after use — one exercising `CiService.install()` twice for two
+  DIFFERENT agents on ONE repo (asserting distinct namespaces, no deletion,
+  namespace/token stability across a re-export, and AC-24's refusal of a
+  workflow override aimed at the other installation's namespace), the other
+  hand-inserting a legacy (`namespace: null`) row and confirming it stays
+  byte-identical to the unnamespaced SPEC-04 layout across a re-export while
+  a NEW agent exported to the same repo lands namespaced with zero path
+  collision. All assertions passed; all test rows deleted afterward.
+  `pnpm typecheck`/`arch:check` clean in both `server/` and `client/`.
+
+- **2026-08-23, SPEC-05 fix-loop iteration 1 (`modules/ci/workflow-validate.ts`,
+  `plan-verifier`'s two Major AC-24 findings):**
+  1. **A `run:`-body string check that only greps for a specific expression
+     (`${{ secrets.* }}`, `${{ github.event.* }}`) has a blind spot GitHub
+     Actions itself provides: `$GITHUB_ENV`.** Any step's `run:` can append
+     `KEY=value` lines to the file at `$GITHUB_ENV`, which the runner then
+     injects into every LATER step's environment — a side channel this
+     module's `env:`-map checks (workflow/job/step, inheritance-aware)
+     never watched, because it isn't `env:` at all. A step BEFORE the
+     trusted step can plant `DEVDIGEST_DIR=<foreign namespace>` this way and
+     the DEVDIGEST_DIR-mismatch guard on the trusted step never fires — the
+     value never appears in that step's own `env:` map, only in its
+     resolved process environment at runtime, which a static YAML check
+     can't see. Fixed by refusing the bare token `GITHUB_ENV` anywhere in
+     ANY step's `run:` body (not just a `DEVDIGEST_DIR=`-shaped write) —
+     since this module's own generated scripts never reference it, there is
+     no legitimate case to preserve, and banning the token (not a narrower
+     `>> $GITHUB_ENV` pattern) closes off indirection (`X=GITHUB_ENV; ...
+     >> "$X"`) a narrower regex would miss. General lesson: when a
+     generator's threat model is "nothing we control may write into a
+     shared mutable channel," audit for EVERY channel that mutates that
+     scope (`env:` inheritance, `$GITHUB_ENV`, `$GITHUB_PATH`, outputs
+     feeding a later `if:`), not just the one the spec named first.
+  2. **A "pinned action" check that validates SHAPE (`owner/repo@<40-hex>`)
+     is not a check on IDENTITY — `attacker/exfil@<any 40 hex you like>`
+     satisfies a shape regex perfectly.** The fix matches `uses:` against
+     `constants.ts`'s `PINNED_ACTIONS` allowlist by exact string equality
+     instead. Renamed the violated-invariant string too
+     (`unpinned_action` → `action_not_allowlisted`) since the check's
+     meaning genuinely changed (a value can have valid shape and still be
+     refused) — required updating one pre-existing test's expected string,
+     which is a legitimate accuracy fix given the underlying check changed,
+     not a weakening (the refusal is still exact, just under a name that
+     now means what it says).
+  3. **A same-shaped scan (`env:` for a foreign `${{ secrets.X }}`
+     reference) needs to be applied to EVERY sibling mapping an attacker
+     could put the same expression in, not just the one the original spec
+     named.** `with:` (a step's action-input map) is exactly as reachable
+     as `env:` for this purpose and had zero coverage — extended the
+     existing `foreign_secret_reference` scan to `with:` at every level
+     (`env:` is already checked at), reusing the SAME violated name since
+     it's structurally the identical scan on a sibling map, not a new
+     invariant.
+
+- **Fix-loop iteration 2 (2026-08-23, `plan-verifier` re-check of iteration
+  1's own fixes) — a per-JOB check that only ever descends into `job.steps`
+  has an entire second surface it never looked at: the job object itself.**
+  `workflow-validate.ts`'s per-job loop `continue`s immediately when
+  `job.steps` isn't an array (`if (!Array.isArray(steps)) continue;`) — a
+  GitHub Actions **reusable-workflow-call job**
+  (`jobs.exfil: { uses: 'attacker/repo/.github/workflows/x.yml@<sha>',
+  secrets: inherit }`) has no `steps` at all, so it hits that `continue` and
+  skips EVERY step-level check, including the `uses:` identity allowlist —
+  which, despite living in the same function, only ever ran INSIDE the step
+  loop and so never once looked at `job.uses` itself. `secrets: inherit` on
+  such a job hands the called (attacker-controlled) workflow every
+  repository secret. The review job stays intact in this attack, so
+  `reviewStepFound`/`forkGuardFound` are both satisfied by it and the
+  malicious sibling job validates `ok: true` right alongside it — this
+  passed BOTH of iteration 1's own new unit tests (identity allowlist,
+  `with:` secret scan) because neither test added a second job; every test
+  in the file up to that point mutated the existing single `review` job.
+  **Fix:** two unconditional refusals added right after the existing
+  `'permissions' in job` guard (same position, same "no allowlist, just
+  refuse — this module's generator never emits this key at the job level"
+  shape): `'uses' in job` → `action_not_allowlisted` (reuses the step-level
+  check's name — same invariant, a channel it didn't cover), `'secrets' in
+  job` → `foreign_secret_reference` (reuses the existing name for the same
+  reason). **General lesson for this file's shape specifically:** every
+  future per-job invariant needs to ask "does this apply to the JOB object
+  itself, or only to jobs that happen to have `steps`?" — a reusable-
+  workflow-call job is a legitimate, spec-compliant GitHub Actions job
+  shape that satisfies `isPlainObject(job)` and nothing else this validator
+  assumes about "a job" (namely, that it has `steps`). Also resolved
+  alongside (verifier's own Minor/Nit, not the Major): dropped a dead
+  `mapHasForeignSecretRef(doc.with, ...)` scan at workflow level — `with:`
+  isn't a valid workflow-level Actions key at all — and renamed
+  `containsGithubEnvWrite` → `mentionsGithubEnv` (the `github_env_write`
+  violated NAME is unchanged; only the predicate's name, which mismatched
+  what it actually checks — any mention of the token, not just a
+  `>>`-shaped write — was renamed).
+
+## SPEC-05's original "one shared branch/PR per repo" decision (D-2) was reversed after real-world use — reported as a bug, not a cosmetic cost
+
+SPEC-05 shipped every installation on a repository — however many agents —
+committing to the SAME `devdigest/ci` branch and reusing the SAME single open
+pull request, on purpose (D-2, ADR-adjacent, `docs/features/export-to-ci.md`'s
+"Multi-agent CI" section, `specs/SPEC-05-multi-agent-ci-per-repo.md`'s E-3).
+The reasoning at the time: retitling a human's already-open PR out from under
+them is worse than a stale title, and the PR body/diff make each agent's
+files legible regardless.
+
+In actual use this was NOT experienced as a cosmetic annoyance — a user
+debugging "why can't I add a second CI workflow" spent an entire session
+convinced the app was corrupting/overwriting data, because a second agent's
+own file changes (e.g. fixing its `INGEST_URL`) landed inside a PR titled
+after a completely different, earlier-installed agent. Confirmed via the
+user's actual GitHub repo history (`gh api repos/.../pulls`, `.../commits`):
+DB rows were always correct (distinct namespaces, distinct token hashes) —
+the confusion was 100% about which PR a given agent's files appeared in and
+under what title, compounded by the user closing PRs without merging when
+this looked broken, which (via GitHub's additive-only `commitFiles` — see
+ADR 0008) silently dropped whatever hadn't been merged yet.
+
+**Fix:** `constants.ts`'s `ciBranchFor(namespace)` — `null` (legacy) still
+returns the bare `CI_BRANCH` (`devdigest/ci`), since AC-14 only ever allows
+one legacy installation per repo; a namespaced installation gets
+`${CI_BRANCH}-${namespace}`. `service.ts`'s `install()` now commits to and
+opens/reuses THAT branch's own PR — `findOpenPr`'s existing branch-scoped
+lookup already did the right thing once the branch itself stopped being
+shared; no change needed there. **Lesson:** a "known limitation" documented
+as accepted-not-fixed is a hypothesis about user tolerance, not a settled
+fact — when a real user's actual behavior (repeatedly closing PRs unmerged,
+describing correct-but-confusing state as "conflict"/"overwritten") shows the
+tolerance assumption was wrong, revisit the decision instead of defending it.
+Also: when debugging a live "it's broken" report against a real external
+system (GitHub here), read the actual system's history (`gh api`) before
+trusting the local DB or the code's own comments — the DB was right the
+whole time; only the human-facing GitHub state was confusing.
 
 - **Two independently-built features can both register the SAME route with
   no compile-time warning — Fastify only catches it at boot (2026-08-23,

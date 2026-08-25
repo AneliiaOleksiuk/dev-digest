@@ -84,6 +84,24 @@ export type {
   EvalDashboard,
 } from "@devdigest/shared";
 
+/* Export to CI (SPEC-04, docs/plans/spec-04-export-to-ci.md WI18) — the
+   eval-ci contract's CI-specific types, re-exported per this file's own
+   header convention (add here rather than redefine locally).
+   `hooks/ci.ts` imports from "../types" the same way `hooks/eval.ts` does. */
+export type {
+  CiTarget,
+  CiRunStatus,
+  CiFile,
+  CiExportPreview,
+  AgentManifest,
+  CiExportInput,
+  CiExportInputBody,
+  CiInstallation,
+  CiExport,
+  CiRun,
+  CiRunFilters,
+} from "@devdigest/shared";
+
 /** What a findings-deep-link click should focus: a run, a severity, a
  *  single finding, or any combination — driven from the PR list hover
  *  preview, the Timeline, a Review-runs header badge, or a diff-line tag. */

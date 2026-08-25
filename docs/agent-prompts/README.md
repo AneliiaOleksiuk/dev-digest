@@ -28,8 +28,9 @@ receives exactly two messages:
 ```
 <your system_prompt>
 
-<INJECTION_GUARD>   // appended verbatim to EVERY agent, every run
-<SCOPE_GUIDANCE>    // ONLY when parts.intent is present — omitted otherwise
+<INJECTION_GUARD>     // appended verbatim to EVERY agent, every run
+<RESPONSE_LANGUAGE>   // appended verbatim to EVERY agent, every run
+<SCOPE_GUIDANCE>      // ONLY when parts.intent is present — omitted otherwise
 ```
 
 `INJECTION_GUARD` (`prompt.ts:16`) tells the model that everything inside
@@ -37,7 +38,14 @@ receives exactly two messages:
 fixture / not for production / ignore this" never descope the review. You do not
 need to repeat any of this in your prompt — it is always there.
 
-`SCOPE_GUIDANCE` (`prompt.ts:45`) is appended **after** `INJECTION_GUARD` only when
+`RESPONSE_LANGUAGE` (`prompt.ts`, right after `INJECTION_GUARD`) pins the response
+to English regardless of what language the diff/PR/code comments are written in.
+Added after a DeepSeek-family model, over OpenRouter, was observed drifting into
+Chinese for one run with an entirely-English diff and no language instruction
+anywhere in the prompt — nothing upstream constrained the response language before
+this.
+
+`SCOPE_GUIDANCE` (`prompt.ts:45`) is appended **after** `RESPONSE_LANGUAGE` only when
 the run has a derived intent block. It tells the model how to prioritise findings
 against the PR's stated scope, still in the schema's own vocabulary:
 

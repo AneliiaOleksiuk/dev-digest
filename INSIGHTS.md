@@ -598,3 +598,17 @@ _(to be filled in)_
   found. WI16 (the validation experiment) is untouched by design — it is
   human-run, spends real provider money, and needs a browser; the same
   precedent as SPEC-01 WI13 (2026-08-13 entry above) applies.
+
+- 2026-08-23: Phase A of `docs/plans/spec-04-export-to-ci.md` (WI1-WI4:
+  extend + hand-mirror the CI contracts, `ci_installations`/`agent_runs`
+  schema additions + generated migration `0021_wide_cerebro.sql`, add
+  `yaml`+`jszip` to `server`, fix the root `.gitignore`'s inert
+  `agent-runner/dist` negation) — contracts/schema/deps only, zero runtime
+  behavior, per the plan's own no-test-writer-this-pass callout. Verified via
+  `tsc --noEmit` (both packages), `git diff --no-index` on the two vendored
+  `eval-ci.ts` copies (empty), and a real `pnpm db:migrate` against the live
+  `devdigest-postgres` container (Docker was up; confirmed `ci_installations`
+  had zero rows before applying the two new `NOT NULL`-without-default
+  columns). See `server/INSIGHTS.md`'s matching 2026-08-23 entry for the
+  package-level gotchas (Zod const-ordering TDZ trap, fresh-worktree
+  `node_modules`, the shared-Postgres-container sanity check).

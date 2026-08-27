@@ -177,6 +177,13 @@ export const AgentPerf = z.object({
     total_cost_usd: z.number().nullable(),
     avg_accept_rate: z.number().nullable(),
     most_active_agent: z.string().nullable(),
+    /** True when at least one counted run has a NULL cost_usd, so
+     *  total_cost_usd is an under-count rather than a complete sum (AC-27,
+     *  D-14) — mirrors MultiAgentRun.total_cost_partial. */
+    total_cost_partial: z.boolean().default(false),
+    /** D-5/E-5 — resolves the "most active" tile by id, never by name:
+     *  agents.name has no unique constraint. */
+    most_active_agent_id: z.string().nullable(),
   }),
   agents: z.array(AgentPerfRow),
   /** cost split by agent and by model (for the two cost-breakdown donuts). */

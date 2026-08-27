@@ -1,7 +1,9 @@
 import type { Container } from '../../platform/container.js';
 import type {
   Agent,
+  AgentPerf,
   AgentSkillLink,
+  AgentStats,
   AgentVersion,
   CiFailOn,
   ModelInfo,
@@ -9,7 +11,8 @@ import type {
   ReviewStrategy,
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
-import { toAgentDto, toAgentVersionDto, type AgentCostEstimate } from './helpers.js';
+import { toAgentDto, toAgentVersionDto, resolveRange, type AgentCostEstimate, type RangeQueryInput } from './helpers.js';
+import { toAgentStats, toAgentPerf } from './performance.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -232,6 +235,68 @@ export class AgentsService {
         sample_size: row?.sampleSize ?? 0,
       };
     });
+  }
+
+  /**
+   * SPEC-06 WI4 — one agent's range-scoped quality/cost stats
+   * (GET /agents/:id/stats). Workspace-scoped lookup first (NFR-1): a
+   * missing-or-foreign-workspace agent returns undefined so the route 404s
+   * WITHOUT ever computing (and leaking) that agent's cost/quality data.
+   * Delegates to the SAME `perfStatsForAgents` query WI7's `performance()`
+   * below calls, via `container.reviewRepo` — the sanctioned cross-cutting DI
+   * accessor `stats()` above already uses, never a raw `db`/schema import.
+   */
+  async agentStats(
+    workspaceId: string,
+    agentId: string,
+    query: RangeQueryInput,
+  ): Promise<AgentStats | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const range = resolveRange(query);
+    const data = await this.container.reviewRepo.perfStatsForAgents(workspaceId, [agent.id], range);
+    return toAgentStats(
+      { id: agent.id, name: agent.name, provider: agent.provider, model: agent.model },
+      data,
+      range,
+    );
+  }
+
+  /**
+   * SPEC-06 WI7 — the workspace-wide performance dashboard
+   * (GET /agents/performance). Same WI2 aggregation and WI3 shaping as
+   * `agentStats` above, just over every workspace agent instead of one
+   * (AC-7/AC-18: identical per-agent numbers on both surfaces). One row per
+   * workspace agent, including agents with zero runs in range (AC-28).
+   */
+  async performance(workspaceId: string, query: RangeQueryInput): Promise<AgentPerf> {
+    const agents = await this.repo.list(workspaceId);
+    const range = resolveRange(query);
+    if (agents.length === 0) {
+      return {
+        summary: {
+          runs: 0,
+          total_cost_usd: null,
+          avg_accept_rate: null,
+          most_active_agent: null,
+          most_active_agent_id: null,
+          total_cost_partial: false,
+        },
+        agents: [],
+        cost_by_agent: [],
+        cost_by_model: [],
+      };
+    }
+    const data = await this.container.reviewRepo.perfStatsForAgents(
+      workspaceId,
+      agents.map((a) => a.id),
+      range,
+    );
+    return toAgentPerf(
+      agents.map((a) => ({ id: a.id, name: a.name, provider: a.provider, model: a.model })),
+      data,
+      range,
+    );
   }
 
   /**

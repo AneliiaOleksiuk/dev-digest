@@ -1,4 +1,4 @@
-import { and, avg, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, avg, count, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
@@ -269,6 +269,136 @@ export async function avgStatsForAgents(
     avgCostUsd: r.sampleSize > 0 && r.avgCostUsd != null ? Number(r.avgCostUsd) : null,
     sampleSize: r.sampleSize,
   }));
+}
+
+// ---- SPEC-06: the shared counted-run-set aggregation ----------------------
+
+/** One counted run's raw fields — the finest granularity the WI3 pure
+ *  shaping helpers need (trend bucketing needs per-run `ranAt`, not a
+ *  pre-aggregated bucket). */
+export interface PerfRunRow {
+  agentId: string;
+  model: string | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  findingsCount: number | null;
+  ranAt: Date;
+}
+
+/** Findings rolled up in SQL by `(agent_id, severity)` — never loaded into
+ *  Node as raw finding rows (NFR-3). */
+export interface PerfFindingAggRow {
+  agentId: string;
+  severity: string;
+  total: number;
+  accepted: number;
+  dismissed: number;
+}
+
+export interface PerfRangeResult {
+  runs: PerfRunRow[];
+  findings: PerfFindingAggRow[];
+}
+
+/**
+ * WI2 (SPEC-06) — the ONE counted-run-set aggregation shared by
+ * `GET /agents/:id/stats` (called with one agent id) and
+ * `GET /agents/performance` (called with the workspace's agent ids) —
+ * AC-7/AC-8/AC-18: a per-agent number is identical on both surfaces because
+ * both call THIS function, never a second formula.
+ *
+ * Two queries total, independent of `agentIds.length` (NFR-3/NFR-4, no
+ * per-agent round trips):
+ *   1. Raw `agent_runs` rows for the counted set — `workspace_id` = caller's
+ *      workspace, `ran_at` within the half-open `[range.start, range.end)`
+ *      (AC-2/AC-3), `status = 'done'`, `agent_id IS NOT NULL` (AC-8/AC-9,
+ *      D-12/D-17). No `source` filter — CI runs count alongside local runs
+ *      (D-16), matching `avgStatsForAgents` above. Used for run counts, cost
+ *      sums (with null-cost tracking, D-14/E-9), per-model cost split,
+ *      avg duration, `last_run_at`, and the findings-per-run trend (bucketed
+ *      in `modules/agents/performance.ts`, pure — this is the one query that
+ *      needs per-run granularity, not a second one per bucket).
+ *   2. `findings` → `reviews` GROUP BY `(reviews.agent_id, findings.severity)`
+ *      with conditional accepted/dismissed counts, scoped to the SAME
+ *      counted run ids (`reviews.runId` has no FK — E-15 — so a stale run_id
+ *      simply drops out) and `reviews.kind = 'review'` (E-16, stops
+ *      `kind:'summary'` rows inflating counts). Aggregated in SQL via
+ *      GROUP BY — never by loading raw finding rows into Node (NFR-3).
+ * Severity is read ONLY via this findings join — never
+ * `agent_runs.critical/.warning/.suggestion` (CI-ingest-only columns,
+ * AC-11/D-6, NULL for every local run).
+ */
+export async function perfStatsForAgents(
+  db: Db,
+  workspaceId: string,
+  agentIds: string[],
+  range: { start: Date; end: Date },
+): Promise<PerfRangeResult> {
+  if (agentIds.length === 0) return { runs: [], findings: [] };
+
+  const countedFilter = and(
+    eq(t.agentRuns.workspaceId, workspaceId),
+    inArray(t.agentRuns.agentId, agentIds),
+    eq(t.agentRuns.status, 'done'),
+    isNotNull(t.agentRuns.agentId),
+    gte(t.agentRuns.ranAt, range.start),
+    lt(t.agentRuns.ranAt, range.end),
+  );
+
+  const runRows = await db
+    .select({
+      id: t.agentRuns.id,
+      agentId: t.agentRuns.agentId,
+      model: t.agentRuns.model,
+      costUsd: t.agentRuns.costUsd,
+      durationMs: t.agentRuns.durationMs,
+      findingsCount: t.agentRuns.findingsCount,
+      ranAt: t.agentRuns.ranAt,
+    })
+    .from(t.agentRuns)
+    .where(countedFilter);
+
+  const runs: PerfRunRow[] = runRows.map((r) => ({
+    agentId: r.agentId!,
+    model: r.model,
+    costUsd: r.costUsd,
+    durationMs: r.durationMs,
+    findingsCount: r.findingsCount,
+    ranAt: r.ranAt,
+  }));
+
+  const runIds = runRows.map((r) => r.id);
+  if (runIds.length === 0) return { runs, findings: [] };
+
+  const findingRows = await db
+    .select({
+      agentId: t.reviews.agentId,
+      severity: t.findings.severity,
+      total: count(),
+      accepted: sql<number>`count(*) filter (where ${t.findings.acceptedAt} is not null)::int`,
+      dismissed: sql<number>`count(*) filter (where ${t.findings.dismissedAt} is not null)::int`,
+    })
+    .from(t.findings)
+    .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+    .where(
+      and(
+        inArray(t.reviews.runId, runIds),
+        eq(t.reviews.kind, 'review'),
+        isNotNull(t.reviews.agentId),
+        inArray(t.reviews.agentId, agentIds),
+      ),
+    )
+    .groupBy(t.reviews.agentId, t.findings.severity);
+
+  const findings: PerfFindingAggRow[] = findingRows.map((r) => ({
+    agentId: r.agentId!,
+    severity: r.severity,
+    total: r.total,
+    accepted: Number(r.accepted),
+    dismissed: Number(r.dismissed),
+  }));
+
+  return { runs, findings };
 }
 
 export async function completeAgentRun(

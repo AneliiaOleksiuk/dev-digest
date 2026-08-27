@@ -3,7 +3,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, AgentSkillLink, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentSkillLink, AgentStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import { rangeQueryKey, rangeQueryString, type RangeQuery } from "./range";
 
 export function useAgents() {
   return useQuery({
@@ -77,6 +78,29 @@ export function useDeleteAgent() {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.removeQueries({ queryKey: ["agent", id] });
     },
+  });
+}
+
+/**
+ * SPEC-06 WI8 — `GET /agents/:id/stats`, range-scoped per-agent quality/cost
+ * stats for the Agent Editor's Stats tab. Typed against `AgentStats` from
+ * `@devdigest/shared` — traces to `server/src/modules/agents/service.ts`'s
+ * `agentStats()` handler (registered by `routes.ts`'s
+ * `GET /agents/:id/stats`), the ONLY server function that returns this exact
+ * shape (E-1 / client/INSIGHTS.md's field-name-mismatch lesson: check this
+ * comment against the real handler before assuming this type is still
+ * accurate).
+ *
+ * Deliberately NOT named `useAgentStats` — that name is already exported by
+ * `lib/hooks/multi-agent.ts` for the DIFFERENT `GET /agents/stats` endpoint
+ * (no `:id`), and `hooks/index.ts` re-exports every hook file with
+ * `export *`, so reusing the name would be a barrel collision.
+ */
+export function useAgentDetailStats(agentId: string | null | undefined, range: RangeQuery) {
+  return useQuery({
+    queryKey: ["agent-detail-stats", agentId, rangeQueryKey(range)],
+    queryFn: () => api.get<AgentStats>(`/agents/${agentId}/stats${rangeQueryString(range)}`),
+    enabled: !!agentId,
   });
 }
 

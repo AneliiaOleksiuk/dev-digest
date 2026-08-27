@@ -97,6 +97,33 @@
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
   },
+  "stats": {
+    "title": "Stats",
+    "subtitle": "Per-agent quality and cost, over the selected range.",
+    "range": {
+      "1d": "1 day",
+      "30d": "30 days",
+      "custom": "Custom",
+      "customFrom": "From",
+      "customTo": "To"
+    },
+    "runs": "Runs",
+    "cost": "Avg cost (estimate)",
+    "costNote": "Cost is an estimate from model pricing, not a billed amount.",
+    "avgLatency": "Avg latency",
+    "acceptRate": "Accept rate",
+    "acceptRateDenominator": "{accepted} of {decided} decided",
+    "acceptRateLive": "A live snapshot of currently-decided findings, not frozen history.",
+    "severity": {
+      "title": "Findings by severity"
+    },
+    "trend": "Findings per run",
+    "loadError": "Could not load this agent's stats.",
+    "empty": {
+      "title": "No runs in this range",
+      "body": "Run this agent (manually) to populate its stats, or widen the range."
+    }
+  },
   "context": {
     "title": "Attached documents",
     "noRepo": "Select a repo to manage attached documents.",

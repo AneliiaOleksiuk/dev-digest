@@ -1,12 +1,21 @@
 {
   "title": "Agent Performance",
-  "subtitle": "Accept-rate is the headline quality signal · cost shown as a breakdown",
+  "subtitle": "Accept-rate is the headline quality signal · cost shown as a breakdown, estimated from model pricing — not a billed amount",
   "loadError": "Could not load agent performance.",
+  "range": {
+    "1d": "1 day",
+    "30d": "30 days",
+    "custom": "Custom",
+    "customFrom": "From",
+    "customTo": "To"
+  },
   "summary": {
     "totalRuns": "Total runs",
     "avgAcceptRate": "Avg accept-rate",
-    "totalCost": "Total cost",
-    "mostActive": "Most active"
+    "totalCost": "Total cost (estimate)",
+    "partialCost": "Partial — some runs have no cost data",
+    "mostActive": "Most active",
+    "mostActiveDetail": "{runs} runs · {acceptRate} accept-rate"
   },
   "costByAgent": "Cost by agent",
   "costByModel": "Cost by model",
@@ -22,8 +31,15 @@
     "runs": "Runs",
     "findings": "Findings",
     "cost": "Cost",
+    "avgCost": "Avg cost",
+    "avgDuration": "Avg duration",
+    "lastRun": "Last run",
     "trend": "Trend"
   },
+  "view": "View →",
+  "lowConfidenceGroup": "Not enough decisions to rank (fewer than 5)",
+  "notRankable": "No agent has enough decided findings yet to rank by accept-rate.",
+  "zeroRuns": "no runs in range",
   "empty": {
     "title": "No agent runs yet",
     "body": "Run a review (manually) to populate per-agent performance."

@@ -90,6 +90,54 @@ describe("NAV registry — evals entry (AC-36)", () => {
 });
 
 /**
+ * NAV registry — the Agent Performance entry (SPEC-06 WI13/AC-40).
+ *
+ * `helpers.ts`'s `activeKeyFor` already had `if (pathname.startsWith(
+ * "/agent-performance")) return "agent-performance";` pre-wired ahead of
+ * this entry (same pattern documented in client/INSIGHTS.md for
+ * /context, /conventions and /evals) — verified below rather than assumed.
+ * `nav.ts` is do-not-touch (`client/src/vendor/ui/**`), so — same
+ * discipline as every other block in this file — this only imports it
+ * through the `@devdigest/ui` barrel.
+ */
+describe("NAV registry — agent-performance entry (AC-40)", () => {
+  it("exists exactly once, in the GLOBAL group, with a plain (non-templated) href and no gKey/icon/href collision", () => {
+    const global = NAV.find((g) => g.section === "GLOBAL");
+    expect(global).toBeDefined();
+    const matches = global!.items.filter((i) => i.key === "agent-performance");
+    expect(matches).toHaveLength(1);
+    const item = matches[0]!;
+    expect(item.href).toBe("/agent-performance");
+    expect(item.href).not.toContain(":repoId");
+    expect(item.icon).toBe("BarChart");
+    expect(item.gKey).toBe("f");
+
+    // no collision with any other item's gKey/icon/href
+    const allItems = NAV.flatMap((g) => g.items);
+    const others = allItems.filter((i) => i.key !== "agent-performance");
+    expect(others.some((i) => i.gKey === "f")).toBe(false);
+    expect(others.some((i) => i.href === "/agent-performance")).toBe(false);
+  });
+
+  it("is NOT present in any other group", () => {
+    const nonGlobal = NAV.filter((g) => g.section !== "GLOBAL");
+    for (const group of nonGlobal) {
+      expect(group.items.some((i) => i.key === "agent-performance")).toBe(false);
+    }
+  });
+
+  it("has a matching 'g f' entry in the SHORTCUTS registry", () => {
+    expect(SHORTCUTS.some((s) => s.keys === "g f" && s.group === "Navigation")).toBe(true);
+  });
+
+  it("activeKeyFor highlights this entry on /agent-performance, and /agents/:id still highlights agents (no collision)", () => {
+    const item = NAV.flatMap((g) => g.items).find((i) => i.key === "agent-performance")!;
+    expect(activeKeyFor(item.href)).toBe(item.key);
+    expect(activeKeyFor("/agents/some-id")).toBe("agents");
+  });
+});
+
+/**
  * NAV registry ↔ shell.json i18n coupling.
  *
  * `useShellCommands.ts` builds one command-palette label per NAV item via

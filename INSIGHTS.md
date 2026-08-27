@@ -210,6 +210,50 @@ _(to be filled in)_
   `Get-NetTCPConnection -State Listen`, and browse to that port — never
   assume 3000/3001 in a worktree session.
 
+- **The shared `devdigest-postgres` container's migration state can drift
+  ahead of a given branch/worktree's own migration folder, blocking `pnpm
+  db:migrate` with a misleading "column already exists" error unrelated to
+  the migration you're actually trying to apply (2026-08-27, SPEC-06 WI5).**
+  Generated a purely-additive migration (`0023_...sql`, one `CREATE INDEX`)
+  on `feat/agent-performance-dashboard`; running it failed with `column
+  "token_hash" of relation "ci_installations" already exists` — a column
+  this session's migration never touches. Diagnosis: `SELECT id FROM
+  drizzle.__drizzle_migrations ORDER BY id DESC` showed the container had
+  migrations applied up to id=26, while this checkout's `migrations/`
+  folder only went up to this session's own 0023 (24 files total, ids
+  0-23) — some OTHER branch/worktree had applied newer migrations directly
+  to this SAME shared container, so drizzle's replay-by-hash logic hit a
+  migration (0022, `ci_installations.token_hash`) whose column already
+  exists from that other work, well before ever reaching the new 0023.
+  **Do not attempt to fix this by hand-editing `__drizzle_migrations` or
+  force-applying** — that risks corrupting migration state another
+  session/worktree still depends on. This is a DIFFERENT failure mode than
+  the port-collision entry above (that one is about which process answers
+  `curl`; this one is about the shared container's actual schema/migration
+  history outrunning your checkout) — if `pnpm db:migrate` fails on a
+  column/table that your own migration doesn't touch, suspect this pattern
+  first and diagnose via the migrations-count comparison above before
+  assuming your own migration is broken. Testcontainers-backed
+  `*.it.test.ts` files are unaffected — each spins up its own ephemeral
+  container and migrates fresh from the checkout's files only (see
+  `server/INSIGHTS.md`'s "Testcontainers-backed ... are fully
+  self-contained" entry).
+- **A `pnpm <script>` failure with `Cannot find module '<pkg>'` (Vite/tsx
+  "Failed to load url ...") can be a plain missing install, not the
+  documented `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` abort — check
+  which one before reaching for the `.bin` shim workaround (2026-08-27).**
+  `server/package.json` declared `yaml`/`jszip` as dependencies but neither
+  existed under `node_modules/` in this session's environment (pre-existing,
+  unrelated to any change made this session) — `tsc --noEmit` and `vitest
+  run` both failed on `ci/manifest.ts`/`ci/service.ts` etc. importing them.
+  A plain `pnpm install` (not `pnpm <script>`) resolved it in ~4s with zero
+  TTY prompt (`+jszip +yaml`, `Done in 4.3s`) — the NO_TTY abort documented
+  above specifically fires when pnpm detects lockfile/`node_modules` drift
+  and wants to REMOVE-then-reinstall; a lockfile that's already up to date
+  but has packages simply absent from `node_modules` installs cleanly
+  without hitting that path. Try a plain `pnpm install` first; only fall
+  back to the `.bin` shim workaround if that itself hits the NO_TTY abort.
+
 ## Session Notes
 
 - 2026-08-02: Built the Skills feature end to end (spec at

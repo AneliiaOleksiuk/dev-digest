@@ -1410,6 +1410,65 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   untouched via `git status` before concluding they're pre-existing, not
   caused by this session.
 
+- 2026-08-27: SPEC-06 Agent Performance dashboard, Phases A+B (server) —
+  built the shared range-parameterized aggregation
+  (`modules/reviews/repository/run.repo.ts`'s `perfStatsForAgents`) behind
+  BOTH `GET /agents/:id/stats` (never registered before this session, per
+  the spec's own framing) and the new `GET /agents/performance`, plus the
+  pure shaping layer (`modules/agents/performance.ts`, `toAgentStats`/
+  `toAgentPerf`) and the range resolver (`modules/agents/helpers.ts`'s
+  `resolveRange`/`validateRangeQuery`). Two queries total regardless of
+  agent count: one raw `agent_runs` row fetch (used for cost/duration/trend
+  in JS, since NFR-3's "never load findings into Node" concern is about
+  `findings`, not the already-small, range-bounded `agent_runs` set) and one
+  SQL `GROUP BY (reviews.agent_id, findings.severity)` with `FILTER (WHERE
+  ...)` conditional counts for accepted/dismissed (never loads raw finding
+  rows). Verified live end-to-end against the real `pnpm dev` server (not
+  just typecheck): `GET /agents/:id/stats` and `GET /agents/performance` for
+  the SAME agent+range returned byte-identical `runs`/`avg_cost_usd`/
+  `avg_latency_ms` (AC-7/AC-18 confirmed live, not just by code inspection);
+  a foreign/missing agent id 404'd; `start > end` and a 578-day custom span
+  both 422'd with the expected message, before the handler ran.
+  **`EXPLAIN` at this environment's actual row count (172 `agent_runs` rows)
+  cannot validate a structural index argument — it just picks whatever's
+  cheapest at that tiny scale, which is a seq scan regardless.** WI5's E-12
+  claim (the existing `(workspace_id, source, ran_at)` index can't serve a
+  range scan that doesn't constrain `source`) only became visible by adding
+  `SET enable_seqscan = off;` before the `EXPLAIN` — this forces the planner
+  to use the composite index, and the resulting plan shows exactly the
+  predicted problem: a `Bitmap Index Scan` that has to walk EVERY row for
+  the workspace (`rows=172` scanned to find 156 matches) rather than a true
+  `ran_at`-bounded range, because `source` sits between `workspace_id` and
+  `ran_at` in the index and isn't constrained. Added a plain covering index
+  `agent_runs_workspace_ran_at_idx` on `(workspace_id, ran_at)`
+  (`db/schema/runs.ts`, migration `0023_small_carmella_unuscione.sql`,
+  generated cleanly — single `CREATE INDEX`, no rename ambiguity). **Applying
+  it to the shared `devdigest-postgres` dev container failed** with `column
+  "token_hash" of relation "ci_installations" already exists` — NOT caused by
+  this session's migration (which never touches `ci_installations`); the
+  container's `__drizzle_migrations` table already had entries up to id=26
+  while this checkout's migration folder only went up to this session's new
+  0023 (24 files, ids 0-23), meaning some other branch/worktree applied
+  migrations directly to this SAME shared container that aren't present as
+  files here. Did not attempt to force through or hand-edit
+  `__drizzle_migrations` — that risks corrupting migration state another
+  session/worktree depends on. The Testcontainers-backed `.it.test.ts` suite
+  is unaffected (each spins up its own ephemeral container and migrates
+  fresh from this checkout's files only — confirmed by the entry above this
+  one, "Testcontainers-backed `*.it.test.ts` files ... are fully
+  self-contained"). See root `INSIGHTS.md`'s new Recurring Errors entry for
+  the general lesson.
+  Verified: `tsc --noEmit` clean (after `pnpm install` restored `yaml`/
+  `jszip`, missing from `node_modules` despite being in `package.json` —
+  pre-existing, unrelated to this session, see root `INSIGHTS.md`);
+  `arch:check` clean; full unit suite 47 files / 496 tests, all green;
+  `.it.test.ts` suite has 6 pre-existing failing files (confirmed via `git
+  stash -u` re-run: identical failures with this session's changes fully
+  stashed) — none touch `agents`/`reviews`/`performance`, all in
+  `ci-export-preview`/`ci-ingest`/`ci-multi-agent-install`/`findings-learn`/
+  `onboarding`/`project-context-run`, pre-existing and out of this session's
+  scope.
+
 ## Open Questions
 
 - Why does `depgraph.buildEdges` leave `file_edges` empty for the demo

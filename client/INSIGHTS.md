@@ -1793,3 +1793,58 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   env usage, one asserting `service.ts` itself has zero such reads) —
   not actual code, and pre-existing from Phases C/D, not from this
   session's changes.
+
+- **Correction to the 2026-08-22/23 "Multi-Agent Review" entry above: the
+  `multi-agent` NAV entry landed in the GLOBAL group, not WORKSPACE
+  (confirmed 2026-08-27, SPEC-06 WI13).** That entry's own text says "added a
+  `multi-agent` entry to `vendor/ui/nav.ts`'s WORKSPACE group (5th use...)" —
+  reading `src/vendor/ui/nav.ts` directly (lines ~70-81 as of this session)
+  shows it's actually in the `GLOBAL` section, alongside nothing else until
+  this session added `agent-performance` as its second member. Per this
+  file's append-only rule the original entry is left as written, not edited
+  — code is ground truth over a prior session's own narrative when the two
+  disagree (this was also the SPEC-06 Development Plan's own flagged risk,
+  now resolved). If a future session needs "which group is the multi-agent
+  nav item in" for a similar do-not-touch-exception precedent, trust
+  `nav.ts` itself, not this file's 2026-08-22/23 wording.
+
+- 2026-08-27: SPEC-06 Agent Performance dashboard, Phases C+D (client) —
+  the per-agent Stats tab (`AgentEditor/_components/StatsTab/`, new
+  `useAgentDetailStats` hook in `lib/hooks/agents.ts`) and the workspace-wide
+  `/agent-performance` dashboard (`AgentPerformanceView/`, new `useAgentPerf`
+  hook in the new `lib/hooks/agent-performance.ts`) — both range-scoped via
+  a new shared `lib/hooks/range.ts` (`RangeQuery` type, query-key/query-string
+  builders, and `rangeFromSearchParams` for reading `?range=&start=&end=`
+  off the URL) and a new shared `components/range-selector/RangeSelector.tsx`
+  (1d/30d/custom picker — a new reusable primitive, so per this file's
+  existing convention it lives in `components/`, not `src/vendor/ui/**`).
+  **Named the new hook `useAgentDetailStats`, deliberately NOT
+  `useAgentStats`** — that name was already taken by `lib/hooks/multi-agent.ts`
+  for the different `GET /agents/stats` endpoint (see the 2026-08-23 entry
+  above, "`GET /agents/stats` field-name mismatch") — reusing it would have
+  been a barrel collision AND exactly that entry's own trap in hook-name
+  form, now with a THIRD similarly-shaped type live at once
+  (`AgentCostEstimate`/`AgentStats`/`AgentPerfRow`). Both new hooks carry an
+  explicit comment tracing their response type to the exact server handler
+  that produces it, per that same lesson.
+  Nav: added `agent-performance` to `nav.ts`'s `GLOBAL` group (see the
+  correction entry above) with `gKey: "f"`, icon `BarChart`, no `:repoId`
+  token — both were confirmed unused via grep before use, and
+  `activeKeyFor`/`shell.json`'s `nav["agent-performance"]` label were
+  ALREADY pre-wired before this session (same "pre-authored code anticipates
+  the UX" pattern this file documents repeatedly) — only the `NAV` array
+  entry and `nav.test.ts` coverage were actually missing. Extended
+  `nav.test.ts` with a dedicated describe block (group/href/gKey/icon
+  collision checks + `activeKeyFor` highlighting `/agents/:id` as `"agents"`,
+  not `"agent-performance"` — confirmed the two prefixes never collide since
+  the 7th character differs, `s` vs `-`).
+  Verified: `tsc --noEmit` clean; full Vitest 63 files / 368 tests, all
+  green, including `nav.test.ts`'s new block (13/13) and `smoke.test.tsx`
+  (`/showcase` mounts fine — no broken component export). Also did a live
+  end-to-end check against the real `pnpm dev` server this session (see
+  `server/INSIGHTS.md`'s matching entry) — confirmed `GET
+  /agents/:id/stats`/`GET /agents/performance` actually return the shapes
+  these hooks assume, not just that they typecheck against the vendored
+  contract (the exact E-1 gap this file's 2026-08-23 entry warns "nothing in
+  this plan changes" — still true generally, but this session's specific
+  hooks were checked against a live response at least once).

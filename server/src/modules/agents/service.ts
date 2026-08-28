@@ -12,7 +12,7 @@ import type {
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
 import { toAgentDto, toAgentVersionDto, resolveRange, type AgentCostEstimate, type RangeQueryInput } from './helpers.js';
-import { toAgentStats, toAgentPerf } from './performance.js';
+import { toAgentStats, toAgentPerf, BUCKET_COUNT } from './performance.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -254,7 +254,7 @@ export class AgentsService {
     const agent = await this.repo.getById(workspaceId, agentId);
     if (!agent) return undefined;
     const range = resolveRange(query);
-    const data = await this.container.reviewRepo.perfStatsForAgents(workspaceId, [agent.id], range);
+    const data = await this.container.reviewRepo.perfStatsForAgents(workspaceId, [agent.id], range, BUCKET_COUNT);
     return toAgentStats(
       { id: agent.id, name: agent.name, provider: agent.provider, model: agent.model },
       data,
@@ -281,6 +281,7 @@ export class AgentsService {
           most_active_agent: null,
           most_active_agent_id: null,
           total_cost_partial: false,
+          runs_trend: [],
         },
         agents: [],
         cost_by_agent: [],
@@ -291,6 +292,7 @@ export class AgentsService {
       workspaceId,
       agents.map((a) => a.id),
       range,
+      BUCKET_COUNT,
     );
     return toAgentPerf(
       agents.map((a) => ({ id: a.id, name: a.name, provider: a.provider, model: a.model })),

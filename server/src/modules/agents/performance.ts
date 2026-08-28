@@ -1,5 +1,10 @@
 import type { AgentPerf, AgentPerfRow, AgentStats, PerfCostSegment, StatPoint } from '@devdigest/shared';
-import type { PerfFindingAggRow, PerfRangeResult, PerfRunRow } from '../reviews/repository/run.repo.js';
+// fix-loop (Major finding B) — imported through the reviews module's
+// FACADE (`modules/reviews/repository.ts`), never its internal
+// `repository/run.repo.ts` file directly (onion-architecture boundary: the
+// agents module reaches the reviews domain only via `container.reviewRepo` /
+// its exported types, never a repository-internals import).
+import type { PerfFindingAggRow, PerfRangeResult, PerfRunAggRow, PerfTrendRow } from '../reviews/repository.js';
 
 /**
  * WI3 (SPEC-06) — pure shaping, no I/O (same contract as `helpers.ts`'s
@@ -9,9 +14,18 @@ import type { PerfFindingAggRow, PerfRangeResult, PerfRunRow } from '../reviews/
  * There is no second accept-rate or cost formula anywhere in this file —
  * both projections read from the same per-agent aggregate helpers below
  * (AC-7/AC-18).
+ *
+ * fix-loop (A3) — `PerfRangeResult` now carries PRE-AGGREGATED SQL rows
+ * (`runAgg`/`trend`), never a raw per-run row set — WI2's query does every
+ * sum/count/GROUP BY in Postgres. This file only FOLDS those already-summed
+ * rows across models/buckets into one map per agent; it does not compute a
+ * cost/duration/run-count total from raw rows itself.
  */
 
-const BUCKET_COUNT = 12;
+/** Exported so `service.ts` passes the SAME bucket count into WI2's query
+ *  (`perfStatsForAgents`'s `bucketCount` param) that this file expects back —
+ *  one source of truth for how many trend buckets exist. */
+export const BUCKET_COUNT = 12;
 const UNKNOWN_MODEL = 'unknown';
 
 export interface AgentMeta {
@@ -51,46 +65,59 @@ function emptyRunAgg(): PerAgentRunAgg {
   };
 }
 
-/** Which of `BUCKET_COUNT` equal-width slices of `range` a run's `ranAt`
- *  falls into — clamped so a boundary-exact timestamp never overflows. */
-function bucketIndex(ranAt: Date, range: { start: Date; end: Date }): number {
-  const span = range.end.getTime() - range.start.getTime();
-  if (span <= 0) return 0;
-  const pos = (ranAt.getTime() - range.start.getTime()) / span;
-  return Math.min(BUCKET_COUNT - 1, Math.max(0, Math.floor(pos * BUCKET_COUNT)));
-}
-
-/** Group the WI2 raw run rows by agent — the shared aggregate both
- *  projections read cost/duration/trend numbers from. */
-function aggregateRuns(
-  runs: PerfRunRow[],
-  range: { start: Date; end: Date },
-): Map<string, PerAgentRunAgg> {
+/** Fold WI2's per-(agent,model) SQL aggregate rows into one running total
+ *  per agent (combining across models), plus the per-model cost split.
+ *  Every field read here is already a SQL sum/count — no raw run row is
+ *  read past this point (NFR-3/NFR-4, fix-loop A3). */
+function foldRunAggRows(rows: PerfRunAggRow[]): Map<string, PerAgentRunAgg> {
   const byAgent = new Map<string, PerAgentRunAgg>();
-  for (const run of runs) {
-    let agg = byAgent.get(run.agentId);
+  for (const row of rows) {
+    let agg = byAgent.get(row.agentId);
     if (!agg) {
       agg = emptyRunAgg();
-      byAgent.set(run.agentId, agg);
+      byAgent.set(row.agentId, agg);
     }
-    agg.runs += 1;
-    if (run.costUsd == null) {
-      agg.hasNullCost = true;
-    } else {
-      agg.costSum += run.costUsd;
-      agg.costCount += 1;
-      const modelKey = run.model ?? UNKNOWN_MODEL;
-      agg.costByModel.set(modelKey, (agg.costByModel.get(modelKey) ?? 0) + run.costUsd);
+    agg.runs += row.runs;
+    if (row.hasNullCost) agg.hasNullCost = true;
+    if (row.costSum != null && row.costCount > 0) {
+      agg.costSum += row.costSum;
+      agg.costCount += row.costCount;
+      const modelKey = row.model ?? UNKNOWN_MODEL;
+      agg.costByModel.set(modelKey, (agg.costByModel.get(modelKey) ?? 0) + row.costSum);
     }
-    if (run.durationMs != null) {
-      agg.durationSum += run.durationMs;
-      agg.durationCount += 1;
+    if (row.durationSum != null && row.durationCount > 0) {
+      agg.durationSum += row.durationSum;
+      agg.durationCount += row.durationCount;
     }
-    if (!agg.lastRunAt || run.ranAt > agg.lastRunAt) agg.lastRunAt = run.ranAt;
-    const idx = bucketIndex(run.ranAt, range);
-    agg.bucketFindingsSum[idx] = (agg.bucketFindingsSum[idx] ?? 0) + (run.findingsCount ?? 0);
-    agg.bucketRunCount[idx] = (agg.bucketRunCount[idx] ?? 0) + 1;
+    if (!agg.lastRunAt || row.lastRunAt > agg.lastRunAt) agg.lastRunAt = row.lastRunAt;
   }
+  return byAgent;
+}
+
+/** Fold WI2's per-(agent,bucket) SQL trend rows into each agent's bucket
+ *  arrays — `bucket` already comes 0-indexed and clamped from `width_bucket()`
+ *  in SQL (fix-loop A3), so this is a pure regroup, not a bucketing
+ *  computation. */
+function foldTrendRows(byAgent: Map<string, PerAgentRunAgg>, rows: PerfTrendRow[]): void {
+  for (const row of rows) {
+    let agg = byAgent.get(row.agentId);
+    if (!agg) {
+      agg = emptyRunAgg();
+      byAgent.set(row.agentId, agg);
+    }
+    const idx = Math.min(BUCKET_COUNT - 1, Math.max(0, row.bucket));
+    agg.bucketFindingsSum[idx] = (agg.bucketFindingsSum[idx] ?? 0) + row.findingsSum;
+    agg.bucketRunCount[idx] = (agg.bucketRunCount[idx] ?? 0) + row.runCount;
+  }
+}
+
+/** Group WI2's pre-aggregated rows by agent — the shared aggregate both
+ *  projections read cost/duration/trend numbers from. `data.runAgg`/
+ *  `data.trend` are already SQL sums/counts (fix-loop A3); this function
+ *  never reads a raw per-run row. */
+function aggregateRuns(data: PerfRangeResult): Map<string, PerAgentRunAgg> {
+  const byAgent = foldRunAggRows(data.runAgg);
+  foldTrendRows(byAgent, data.trend);
   return byAgent;
 }
 
@@ -149,7 +176,7 @@ function bucketLabel(i: number, range: { start: Date; end: Date }): string {
  *  adopted UNCHANGED. `data` must already be scoped to just this agent
  *  (the caller passes `[agent.id]` into `perfStatsForAgents`). */
 export function toAgentStats(agent: AgentMeta, data: PerfRangeResult, range: { start: Date; end: Date }): AgentStats {
-  const runAgg = aggregateRuns(data.runs, range).get(agent.id);
+  const runAgg = aggregateRuns(data).get(agent.id);
   const findingAgg = aggregateFindings(data.findings).get(agent.id) ?? emptyFindingTotals();
 
   const runs = runAgg?.runs ?? 0;
@@ -186,7 +213,7 @@ export function toAgentPerf(
   data: PerfRangeResult,
   range: { start: Date; end: Date },
 ): AgentPerf {
-  const runsByAgent = aggregateRuns(data.runs, range);
+  const runsByAgent = aggregateRuns(data);
   const findingsByAgent = aggregateFindings(data.findings);
 
   const costByAgentMap = new Map<string, number>();
@@ -201,6 +228,13 @@ export function toAgentPerf(
   let mostActiveName: string | null = null;
   let mostActiveRuns = 0;
   let mostActiveLastRunAt: Date | null = null;
+
+  // fix-loop (C2) — workspace-wide run-count trend for the Total Runs tile's
+  // sparkline: sum of every scored agent's bucketRunCount at each bucket
+  // index. Distinct from AgentPerfRow.trend (per-agent findings-per-run) —
+  // this is a total RUN COUNT series, computed once here, not re-derived
+  // client-side from the per-agent series.
+  const runsTrend = new Array(BUCKET_COUNT).fill(0) as number[];
 
   const rows: AgentPerfRow[] = [];
   for (const agent of agents) {
@@ -224,6 +258,12 @@ export function toAgentPerf(
         costByModelMap.set(model, (costByModelMap.get(model) ?? 0) + sum);
       }
     }
+    if (runAgg) {
+      for (let i = 0; i < BUCKET_COUNT; i++) {
+        runsTrend[i] = (runsTrend[i] ?? 0) + (runAgg.bucketRunCount[i] ?? 0);
+      }
+    }
+
     // D-5/E-5: most-active resolved by run count (tie-break: most recent
     // last_run_at), tracked by id — `agents.name` has no unique constraint.
     if (runs > 0) {
@@ -287,6 +327,7 @@ export function toAgentPerf(
       // total_cost_usd is flagged as an under-count rather than presented
       // as complete.
       total_cost_partial: anyNullCost,
+      runs_trend: runsTrend,
     },
     agents: rows,
     cost_by_agent: costByAgent,

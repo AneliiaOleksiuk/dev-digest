@@ -24,9 +24,24 @@ import * as runRepo from './repository/run.repo.js';
 import * as pullRepo from './repository/pull.repo.js';
 import * as knowledgeRepo from './repository/knowledge.repo.js';
 import type { MemoryKind, MemoryScope, MemorySource } from '@devdigest/shared';
-import type { MultiAgentRunRow, AgentRunRow, PerfRangeResult } from './repository/run.repo.js';
+import type {
+  MultiAgentRunRow,
+  AgentRunRow,
+  PerfRangeResult,
+  PerfRunAggRow,
+  PerfTrendRow,
+  PerfFindingAggRow,
+} from './repository/run.repo.js';
 import type { MemoryRow } from './repository/knowledge.repo.js';
-export type { MultiAgentRunRow, AgentRunRow, MemoryRow, PerfRangeResult };
+export type {
+  MultiAgentRunRow,
+  AgentRunRow,
+  MemoryRow,
+  PerfRangeResult,
+  PerfRunAggRow,
+  PerfTrendRow,
+  PerfFindingAggRow,
+};
 
 export class ReviewRepository {
   constructor(private db: Db) {}
@@ -200,13 +215,16 @@ export class ReviewRepository {
 
   /** SPEC-06 WI2 — the shared counted-run-set aggregation behind both
    *  `GET /agents/:id/stats` and `GET /agents/performance` (AC-7/AC-18). See
-   *  `run.repo.ts`'s `perfStatsForAgents` doc comment for the full contract. */
+   *  `run.repo.ts`'s `perfStatsForAgents` doc comment for the full contract.
+   *  `bucketCount` is the caller's (WI3's) number of equal-width trend
+   *  buckets — this repository stays agnostic of that presentation choice. */
   perfStatsForAgents(
     workspaceId: string,
     agentIds: string[],
     range: { start: Date; end: Date },
+    bucketCount: number,
   ): Promise<PerfRangeResult> {
-    return runRepo.perfStatsForAgents(this.db, workspaceId, agentIds, range);
+    return runRepo.perfStatsForAgents(this.db, workspaceId, agentIds, range, bucketCount);
   }
 
   // ---- Learn → memory / Turn into eval case (L07, SPEC-04) ---------------

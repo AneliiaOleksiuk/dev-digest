@@ -1917,3 +1917,44 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   dedicated browser/screenshot tool available in this session to visually
   re-confirm C1-C4 pixel-for-pixel against the mockup — recommend the
   orchestrator's live smoke-check phase do that pass.
+
+- **Correction to this file's own iteration-1 C1 claim above** ("one
+  coherent table with a group separator"): that did NOT hold up under
+  `plan-verifier`'s independent re-check — what actually shipped was TWO
+  separate `<table>` elements (with a duplicated `<thead>`, the code's own
+  comment admitted as much: "repeat the SAME `<thead>`"), which cannot
+  align columns because each `<table>` sizes its own columns independently.
+  **Lesson: a code comment asserting an intent ("so row heights/column
+  alignment read as one coherent table") is not the same as the DOM
+  actually delivering it — verify the rendered structure, not the comment
+  next to it.** Fixed properly in fix-loop iteration 2: ONE `<table>` with
+  TWO `<tbody>` sections (ranked rows, then a spanning `<td colspan={N}>`
+  group-label row, then low-confidence rows) — a single `<table>` sizes its
+  columns from the union of every row inside it, so both groups' columns
+  align by construction, no `tableLayout: fixed` / matching-width
+  bookkeeping needed. Verified this time with a throwaway RTL test (not
+  committed — deleted after use, per this agent's "don't author new tests"
+  constraint) asserting `container.querySelectorAll("table")` has length 1,
+  `thead` has length 1 (7 `th`), `tbody` has length 2, and the group-label
+  text is a `<td colspan="7">` whose `closest("table")` is that same single
+  table — concrete DOM-structure proof, not a re-assertion.
+
+- **SPEC-06 fix-loop iteration 2 — AC-4's 422 conditions (`start > end`,
+  span > 366 days) had NO client-side handling at all**, only the
+  incomplete-range case did. A COMPLETE-but-invalid custom range fired the
+  request, got a 422 back, and rendered the generic `loadError` — useless
+  copy for what's actually a validation problem the user can fix by editing
+  a date. Fixed by adding `validateCustomRange` to `lib/hooks/range.ts`,
+  hand-mirroring the server's `validateRangeQuery` boundary math
+  (`server/src/modules/agents/helpers.ts` — `start.getTime() >
+  end.getTime()`, `spanDays = floor(diff/MS_PER_DAY) + 1 > 366`) so the
+  client pre-validates instead of round-tripping to get a 422. Verified the
+  client math matches the server's on the exact boundary (366 days valid,
+  367 invalid) via a throwaway unit test (deleted after use). Applied to
+  BOTH `useAgentPerf` and `useAgentDetailStats`'s `enabled` guards and both
+  `AgentPerformanceView`/`StatsTab`'s render branches — `StatsTab` hadn't
+  even had the *incomplete*-range copy from iteration 1, only
+  `AgentPerformanceView` did; worth checking BOTH range-scoped surfaces
+  when a range-validation gap is reported against one of them, since they
+  share the same `RangeSelector`/hooks but had drifted in what UI states
+  they actually handled.

@@ -2373,3 +2373,25 @@ whole time; only the human-facing GitHub state was confusing.
   removing them would have meant another migration under time pressure for
   zero behavioral gain; a harmless unused enum literal is a smaller risk
   than more schema surgery mid-merge.
+
+- **Correction to this file's earlier SPEC-06 entry** ("Built the shared
+  range-parameterized aggregation... Two queries total... one raw
+  `agent_runs` row fetch..."): that description is **stale** as of the
+  fix-loop A3 rewrite — `perfStatsForAgents` no longer returns a raw
+  per-run row set at all. It now does every sum/count/GROUP BY in SQL
+  (`PerfRunAggRow`/`PerfTrendRow`/`PerfFindingAggRow`, all pre-aggregated),
+  and `modules/agents/performance.ts` only FOLDS those already-summed rows
+  across models/buckets — it never computes a cost/duration/run-count total
+  from a raw row in Node. Per append-only convention this note corrects the
+  claim rather than editing the original paragraph. (fix-loop iteration 2,
+  SPEC-06 plan-verifier re-check.)
+
+- **SPEC-06 fix-loop iteration 2 — `cost_by_agent` keyed by `agent.name`
+  was a real bug, not just a lint nit** (`agents.name` has no unique
+  constraint, `db/schema/agents.ts:13` — same class of bug D-5/E-5 already
+  fixed for `most_active_agent`). Two workspace agents sharing a display
+  name would silently merge into one donut segment, understating one
+  agent's cost and overstating the other's. Fixed by keying the internal
+  fold map by `agent.id` and carrying `agent.name` only as the segment's
+  display `label` — the `PerfCostSegment[]` output shape is unchanged, only
+  the internal aggregation key moved.

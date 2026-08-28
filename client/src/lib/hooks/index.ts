@@ -15,3 +15,5 @@ export * from "./brief";
 export * from "./multi-agent";
 export * from "./eval";
 export * from "./ci";
+export * from "./range";
+export * from "./agent-performance";

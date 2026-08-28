@@ -130,6 +130,17 @@ summary but don't block merge yet — see evals/README.md's flakiness notes.
 - [docs/adr/0009-per-agent-workflow-file-not-matrix.md](docs/adr/0009-per-agent-workflow-file-not-matrix.md)
   — why each agent gets its own GitHub Actions workflow file instead of one
   shared matrix job.
+- [docs/features/agent-performance.md](docs/features/agent-performance.md) —
+  Agent Performance dashboard + per-agent Stats tab (one shared, range-scoped
+  aggregation → per-agent Stats tab and workspace-wide dashboard, reconciled
+  by construction), the cost-estimate-vs-billed distinction, and the
+  accept-rate low-confidence ranking group.
+- [docs/reference/agent-performance-api.md](docs/reference/agent-performance-api.md)
+  — Agent Performance HTTP + contract lookup, including the
+  `GET /agents/stats` vs `GET /agents/:id/stats` disambiguation.
+- [docs/adr/0011-shared-sql-aggregation-for-agent-performance.md](docs/adr/0011-shared-sql-aggregation-for-agent-performance.md)
+  — why the dashboard and the Stats tab compute from one shared, SQL-side
+  aggregation instead of two independently-derived formulas.
 - [evals/README.md](evals/README.md) — self-check harness (skills/agents/workflow
   evals), routing table above, backends, stats tools.
 - [INSIGHTS.md](INSIGHTS.md) — the "why" behind the decisions above.

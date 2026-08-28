@@ -77,6 +77,13 @@ export const NAV: NavGroup[] = [
         href: "/repos/:repoId/multi-agent",
         gKey: "m",
       },
+      {
+        key: "agent-performance",
+        label: "Agent Performance",
+        icon: "BarChart",
+        href: "/agent-performance",
+        gKey: "f",
+      },
     ],
   },
 ];
@@ -113,6 +120,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g x", label: "Go to Project Context", group: "Navigation" },
   { keys: "g o", label: "Go to Onboarding Tour", group: "Navigation" },
   { keys: "g m", label: "Go to Multi-Agent Review", group: "Navigation" },
+  { keys: "g f", label: "Go to Agent Performance", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
   { keys: "a", label: "Accept finding", group: "Findings" },
   { keys: "d", label: "Dismiss finding", group: "Findings" },

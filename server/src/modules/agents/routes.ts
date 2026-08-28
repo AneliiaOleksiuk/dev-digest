@@ -6,6 +6,7 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { AgentsService } from './service.js';
+import { validateRangeQuery } from './helpers.js';
 
 /** `/providers/:id` addresses a provider by name, not a uuid. */
 const ProviderParams = z.object({ id: Provider });
@@ -17,10 +18,31 @@ const VersionParams = z.object({
 });
 
 /**
+ * SPEC-06 WI1 — shared range querystring for `GET /agents/:id/stats` and
+ * `GET /agents/performance` (AC-1/AC-18: both endpoints resolve `?range=`
+ * identically). `superRefine` runs during Fastify's schema validation,
+ * BEFORE either handler body executes, so `start > end` and a span over 366
+ * days both 422 (AC-4, NFR-2) without a hand-rolled `.parse()` call inside
+ * the handler (server/AGENTS.md's querystring-schema convention).
+ */
+const RangeQuery = z
+  .object({
+    range: z.enum(['1d', '30d', 'custom']).optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    const error = validateRangeQuery(val);
+    if (error) ctx.addIssue({ code: z.ZodIssueCode.custom, message: error });
+  });
+
+/**
  * A2 — agents module (owner A2).
  *   GET    /agents                  → list (workspace-scoped)
  *   GET    /agents/:id              → one agent
  *   GET    /agents/stats            → L07: per-agent cost/duration estimate (batched)
+ *   GET    /agents/:id/stats        → SPEC-06: per-agent quality/cost stats (range-scoped)
+ *   GET    /agents/performance      → SPEC-06: workspace-wide performance dashboard (range-scoped)
  *   POST   /agents                  → create
  *   PUT    /agents/:id              → update / toggle enabled (versions config)
  *   GET    /agents/:id/versions     → config history (newest first)
@@ -84,6 +106,23 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     return agent;
   });
 
+  // SPEC-06 WI4 — per-agent quality/cost stats (range-scoped). Not a routing
+  // conflict with `/agents/:id` above or `/agents/stats` below — Fastify's
+  // radix router matches by full segment shape, and `/agents/:id/stats` is a
+  // 3-segment route distinct from both.
+  app.get(
+    '/agents/:id/stats',
+    { schema: { params: IdParams, querystring: RangeQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const stats = await service.agentStats(workspaceId, req.params.id, req.query);
+      // NFR-1: a missing-or-foreign-workspace agent 404s — never leaks that
+      // agent's cost/quality data across tenants.
+      if (!stats) throw new NotFoundError('Agent not found');
+      return stats;
+    },
+  );
+
   // L07 (SPEC-04): one batched cost/duration estimate per workspace agent.
   // `/agents/stats` vs `/agents/:id` is NOT a routing conflict — Fastify's
   // radix router prefers the static segment over the `:id` param regardless
@@ -91,6 +130,14 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
   app.get('/agents/stats', async (req) => {
     const { workspaceId } = await getContext(app.container, req);
     return service.stats(workspaceId);
+  });
+
+  // SPEC-06 WI7 — workspace-wide performance dashboard (range-scoped). Same
+  // shared aggregation as `/agents/:id/stats` above (AC-7/AC-18): a
+  // per-agent number is identical on both surfaces, never re-derived.
+  app.get('/agents/performance', { schema: { querystring: RangeQuery } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.performance(workspaceId, req.query);
   });
 
   app.post('/agents', { schema: { body: CreateAgentBody } }, async (req, reply) => {

@@ -1041,6 +1041,56 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `server/src/db/rows.ts`'s `PrBriefRow` (the real type, used freely by
   `repository.ts`/`repository.drizzle.ts`/`service.ts`, none of which match
   the helpers-only rule).
+- **Reusing the SAME raw `sql\`...\`` fragment object in both a SELECT list
+  and `GROUP BY` 42803s with a misleading error (2026-08-28,
+  SPEC-06 fix-loop A3).** `run.repo.ts`'s trend query computed a bucket index
+  via `width_bucket(...)` in one `sql<number>` template, then referenced that
+  SAME object in both `.select({ bucket: bucketExpr })` and
+  `.groupBy(t.agentRuns.agentId, bucketExpr)`. Postgres rejected it with
+  `column "agent_runs.ran_at" must appear in the GROUP BY clause or be used
+  in an aggregate function` — NOT a complaint about the bucket expression
+  itself, which made the real cause non-obvious from the error text alone.
+  Root cause: repeating a raw computed SQL fragment across clauses is not the
+  same as GROUP BY seeing a real column; Postgres needs the GROUP BY target
+  to be a genuine column reference. **Fix:** compute the expression in a
+  derived subquery first (`db.select({...}).from(t).where(...).as('name')`),
+  then `GROUP BY` the subquery's own column (`subquery.bucket`) in an outer
+  query — see `perfStatsForAgents`'s `bucketedRuns` subquery. Caught via a
+  live repro script against the real dev DB (`tsx` + `perfStatsForAgents`
+  directly), not by typecheck or the unit suite — `sql<T>()`'s generic only
+  types the TS *shape*, it does not validate the query will actually run.
+- **A raw `sql<Date>\`max(...)\`` fragment returns a plain STRING at runtime,
+  not a `Date`, even though selecting the same column directly
+  (`t.agentRuns.ranAt`) returns a real `Date` (2026-08-28, SPEC-06 fix-loop
+  A3).** `perfStatsForAgents`'s `max(${t.agentRuns.ranAt})` for `last_run_at`
+  compiled fine (`sql<Date>` satisfies the TS type checker) but crashed at
+  request time with `runAgg.lastRunAt.toISOString is not a function` — a
+  500 on `GET /agents/performance` whenever more than one agent existed in
+  the workspace. Drizzle applies its OWN column-type decoder (Date parsing,
+  etc.) only to schema-declared columns selected directly; a raw `sql`
+  fragment has no such declared type, so whatever the driver hands back
+  (here, a `postgres.js` timestamptz-as-string) passes through unconverted —
+  the `sql<T>` generic is compile-time-only, never a runtime coercion. Fix:
+  explicitly `new Date(r.lastRunAt as unknown as string)` when mapping any
+  raw-`sql` timestamp aggregate. Generalizes: any `sql<T>()` aggregate on a
+  `timestamp`/`timestamptz` column needs the same explicit parse; `sum()`/
+  `count()` were fine here since `Number(...)` already handled both the
+  string-or-number cases postgres.js can return for numeric aggregates.
+- **This environment's `server/node_modules` can be silently broken —
+  present, `pnpm install` reports "Already up to date", but missing
+  `node_modules/.bin` and every devDependency (2026-08-28).** Neither
+  `pnpm install` nor `pnpm install --force` fixed it (both exited clean in
+  under 1s, doing nothing) — the state file `.pnpm-workspace-state-v1.json`
+  apparently believed the install was current while the actual
+  `node_modules/` only had prod deps symlinked plus a populated `.pnpm/`
+  store. **Fix:** `rm -rf node_modules && pnpm install` (a full reinstall
+  from the existing lockfile/store, ~10s, no `ERR_PNPM_ABORTED_...` prompt
+  since nothing needed re-resolving) restored `.bin` and every
+  devDependency (`typescript`, `vitest`, `tsx`, …) correctly. Distinct from
+  the documented `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` failure mode
+  (that one aborts loudly; this one succeeds silently while leaving
+  `node_modules` half-populated) — check `ls node_modules/.bin` before
+  trusting a "no output = fine" `pnpm install`.
 
 ## Session Notes
 
@@ -1409,6 +1459,97 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   AC-22/AC-26 `trace-builder.ts` gap) — both failure sets confirmed
   untouched via `git status` before concluding they're pre-existing, not
   caused by this session.
+
+- 2026-08-27: SPEC-06 Agent Performance dashboard, Phases A+B (server) —
+  built the shared range-parameterized aggregation
+  (`modules/reviews/repository/run.repo.ts`'s `perfStatsForAgents`) behind
+  BOTH `GET /agents/:id/stats` (never registered before this session, per
+  the spec's own framing) and the new `GET /agents/performance`, plus the
+  pure shaping layer (`modules/agents/performance.ts`, `toAgentStats`/
+  `toAgentPerf`) and the range resolver (`modules/agents/helpers.ts`'s
+  `resolveRange`/`validateRangeQuery`). Two queries total regardless of
+  agent count: one raw `agent_runs` row fetch (used for cost/duration/trend
+  in JS, since NFR-3's "never load findings into Node" concern is about
+  `findings`, not the already-small, range-bounded `agent_runs` set) and one
+  SQL `GROUP BY (reviews.agent_id, findings.severity)` with `FILTER (WHERE
+  ...)` conditional counts for accepted/dismissed (never loads raw finding
+  rows). Verified live end-to-end against the real `pnpm dev` server (not
+  just typecheck): `GET /agents/:id/stats` and `GET /agents/performance` for
+  the SAME agent+range returned byte-identical `runs`/`avg_cost_usd`/
+  `avg_latency_ms` (AC-7/AC-18 confirmed live, not just by code inspection);
+  a foreign/missing agent id 404'd; `start > end` and a 578-day custom span
+  both 422'd with the expected message, before the handler ran.
+  **`EXPLAIN` at this environment's actual row count (172 `agent_runs` rows)
+  cannot validate a structural index argument — it just picks whatever's
+  cheapest at that tiny scale, which is a seq scan regardless.** WI5's E-12
+  claim (the existing `(workspace_id, source, ran_at)` index can't serve a
+  range scan that doesn't constrain `source`) only became visible by adding
+  `SET enable_seqscan = off;` before the `EXPLAIN` — this forces the planner
+  to use the composite index, and the resulting plan shows exactly the
+  predicted problem: a `Bitmap Index Scan` that has to walk EVERY row for
+  the workspace (`rows=172` scanned to find 156 matches) rather than a true
+  `ran_at`-bounded range, because `source` sits between `workspace_id` and
+  `ran_at` in the index and isn't constrained. Added a plain covering index
+  `agent_runs_workspace_ran_at_idx` on `(workspace_id, ran_at)`
+  (`db/schema/runs.ts`, migration `0023_small_carmella_unuscione.sql`,
+  generated cleanly — single `CREATE INDEX`, no rename ambiguity). **Applying
+  it to the shared `devdigest-postgres` dev container failed** with `column
+  "token_hash" of relation "ci_installations" already exists` — NOT caused by
+  this session's migration (which never touches `ci_installations`); the
+  container's `__drizzle_migrations` table already had entries up to id=26
+  while this checkout's migration folder only went up to this session's new
+  0023 (24 files, ids 0-23), meaning some other branch/worktree applied
+  migrations directly to this SAME shared container that aren't present as
+  files here. Did not attempt to force through or hand-edit
+  `__drizzle_migrations` — that risks corrupting migration state another
+  session/worktree depends on. The Testcontainers-backed `.it.test.ts` suite
+  is unaffected (each spins up its own ephemeral container and migrates
+  fresh from this checkout's files only — confirmed by the entry above this
+  one, "Testcontainers-backed `*.it.test.ts` files ... are fully
+  self-contained"). See root `INSIGHTS.md`'s new Recurring Errors entry for
+  the general lesson.
+  Verified: `tsc --noEmit` clean (after `pnpm install` restored `yaml`/
+  `jszip`, missing from `node_modules` despite being in `package.json` —
+  pre-existing, unrelated to this session, see root `INSIGHTS.md`);
+  `arch:check` clean; full unit suite 47 files / 496 tests, all green;
+  `.it.test.ts` suite has 6 pre-existing failing files (confirmed via `git
+  stash -u` re-run: identical failures with this session's changes fully
+  stashed) — none touch `agents`/`reviews`/`performance`, all in
+  `ci-export-preview`/`ci-ingest`/`ci-multi-agent-install`/`findings-learn`/
+  `onboarding`/`project-context-run`, pre-existing and out of this session's
+  scope.
+
+- 2026-08-28: SPEC-06 fix-loop iteration 1 (`docs/plans/spec-06-agent-performance-dashboard.md`)
+  — addressed plan-verifier's 4 required Phase-1 fixes + 1 Major architecture
+  finding. Biggest change: `perfStatsForAgents` (`run.repo.ts`) rewritten from
+  "load the raw counted run set into Node, sum it there" to THREE SQL
+  `GROUP BY` queries (`(agent_id, model)` for cost/duration/run-count,
+  `(agent_id, width_bucket(ran_at))` for the trend, plus the existing
+  findings rollup now joined via `agent_runs` directly instead of an
+  unbounded `inArray(reviews.runId, runIds)`) — see the two new Recurring
+  Errors & Fixes entries above for the two runtime bugs this surfaced (both
+  caught only via a live repro against the real dev DB, not by typecheck or
+  the unit suite: a GROUP BY 42803 needing a subquery, and a raw
+  `sql<Date>` aggregate silently returning a string). `modules/agents/performance.ts`
+  now imports its `PerfRunAggRow`/`PerfTrendRow`/`PerfFindingAggRow` types
+  through the `ReviewRepository` facade (`modules/reviews/repository.ts`),
+  never `repository/run.repo.ts` directly (the other required fix — an
+  onion-architecture boundary violation). Also added
+  `AgentPerf.summary.runs_trend` (additive, hand-mirrored both vendored
+  copies) for the dashboard's Total Runs tile sparkline. **Known,
+  intentionally-left breakage:** `test/agent-performance-shaping.test.ts`
+  (test-writer's file) still constructs `PerfRangeResult` fixtures in the
+  OLD raw-per-run shape (`{runs: PerfRunRow[], findings}`) — the pure
+  shaping functions now consume pre-aggregated rows
+  (`{runAgg: PerfRunAggRow[], trend: PerfTrendRow[], findings}`), so that
+  file needs test-writer to re-author its fixtures against the new shape;
+  not fixed here per this repo's test-authorship boundary. All other server
+  suites pass (typecheck, arch:check, `agent-performance.it.test.ts` 11/11).
+  Also re-confirmed the pre-existing `.it.test.ts` flakiness the entry above
+  this one already documents (`findings-learn`/`onboarding`/
+  `project-context-run`) via a fresh `git stash`/`git stash pop` round-trip —
+  identical failures with this session's changes fully stashed, so unrelated
+  to SPEC-06.
 
 ## Open Questions
 
@@ -2232,3 +2373,25 @@ whole time; only the human-facing GitHub state was confusing.
   removing them would have meant another migration under time pressure for
   zero behavioral gain; a harmless unused enum literal is a smaller risk
   than more schema surgery mid-merge.
+
+- **Correction to this file's earlier SPEC-06 entry** ("Built the shared
+  range-parameterized aggregation... Two queries total... one raw
+  `agent_runs` row fetch..."): that description is **stale** as of the
+  fix-loop A3 rewrite — `perfStatsForAgents` no longer returns a raw
+  per-run row set at all. It now does every sum/count/GROUP BY in SQL
+  (`PerfRunAggRow`/`PerfTrendRow`/`PerfFindingAggRow`, all pre-aggregated),
+  and `modules/agents/performance.ts` only FOLDS those already-summed rows
+  across models/buckets — it never computes a cost/duration/run-count total
+  from a raw row in Node. Per append-only convention this note corrects the
+  claim rather than editing the original paragraph. (fix-loop iteration 2,
+  SPEC-06 plan-verifier re-check.)
+
+- **SPEC-06 fix-loop iteration 2 — `cost_by_agent` keyed by `agent.name`
+  was a real bug, not just a lint nit** (`agents.name` has no unique
+  constraint, `db/schema/agents.ts:13` — same class of bug D-5/E-5 already
+  fixed for `most_active_agent`). Two workspace agents sharing a display
+  name would silently merge into one donut segment, understating one
+  agent's cost and overstating the other's. Fixed by keying the internal
+  fold map by `agent.id` and carrying `agent.name` only as the segment's
+  display `label` — the `PerfCostSegment[]` output shape is unchanged, only
+  the internal aggregation key moved.

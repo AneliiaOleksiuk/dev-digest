@@ -79,6 +79,17 @@ export const agentRuns = pgTable(
       t.ranAt,
     ),
     multiAgentRunIdx: index('agent_runs_multi_agent_run_id_idx').on(t.multiAgentRunId),
+    // SPEC-06 WI5 — the Agent Performance / Stats range scan filters
+    // (workspace_id, ran_at) with NO `source` predicate (D-16: CI runs count
+    // alongside local runs), so it can't use the composite index above as a
+    // true range scan — `source` sits between the two columns this query
+    // needs, and EXPLAIN against the live dev DB confirmed the planner can
+    // only use that index by scanning every row for the workspace (Bitmap
+    // Index Scan `rows=172` when only 156 matched the ran_at range),
+    // not a genuine ran_at-bounded range. This index gives that query a real
+    // range scan as the table grows past the current dev-scale row count
+    // (verdict recorded in server/INSIGHTS.md and the WI5 report).
+    workspaceRanAtIdx: index('agent_runs_workspace_ran_at_idx').on(t.workspaceId, t.ranAt),
   }),
 );
 

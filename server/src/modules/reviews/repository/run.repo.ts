@@ -1,4 +1,4 @@
-import { and, avg, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, avg, count, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
@@ -269,6 +269,225 @@ export async function avgStatsForAgents(
     avgCostUsd: r.sampleSize > 0 && r.avgCostUsd != null ? Number(r.avgCostUsd) : null,
     sampleSize: r.sampleSize,
   }));
+}
+
+// ---- SPEC-06: the shared counted-run-set aggregation ----------------------
+
+/**
+ * Per-`(agent_id, model)` run/cost/duration aggregate — computed ENTIRELY in
+ * SQL via `GROUP BY` (fix-loop A3: previously the raw, unaggregated counted
+ * run set was materialized into Node and summed there; every run-level
+ * number — not just the trend — is now a SQL aggregate, and the raw row set
+ * is never read into Node at all). `costSum`/`durationSum` are sums of
+ * NON-NULL values only; `hasNullCost` flags when at least one counted run in
+ * this `(agent, model)` group has a NULL `cost_usd` (E-9), so the caller
+ * never coerces NULL to 0.
+ */
+export interface PerfRunAggRow {
+  agentId: string;
+  model: string | null;
+  runs: number;
+  costSum: number | null;
+  costCount: number;
+  hasNullCost: boolean;
+  durationSum: number | null;
+  durationCount: number;
+  lastRunAt: Date;
+}
+
+/**
+ * Per-`(agent_id, bucket)` trend point — `bucket` is 0-indexed into
+ * `bucketCount` equal-width slices of `range`, computed in SQL via
+ * `width_bucket()` (fix-loop A3) so bucketing the trend never requires
+ * reading a raw per-run row into Node either.
+ */
+export interface PerfTrendRow {
+  agentId: string;
+  bucket: number;
+  findingsSum: number;
+  runCount: number;
+}
+
+/** Findings rolled up in SQL by `(agent_id, severity)` — never loaded into
+ *  Node as raw finding rows (NFR-3). */
+export interface PerfFindingAggRow {
+  agentId: string;
+  severity: string;
+  total: number;
+  accepted: number;
+  dismissed: number;
+}
+
+export interface PerfRangeResult {
+  runAgg: PerfRunAggRow[];
+  trend: PerfTrendRow[];
+  findings: PerfFindingAggRow[];
+}
+
+/**
+ * WI2 (SPEC-06) — the ONE counted-run-set aggregation shared by
+ * `GET /agents/:id/stats` (called with one agent id) and
+ * `GET /agents/performance` (called with the workspace's agent ids) —
+ * AC-7/AC-8/AC-18: a per-agent number is identical on both surfaces because
+ * both call THIS function, never a second formula.
+ *
+ * THREE queries total, independent of `agentIds.length` AND of how many rows
+ * are in the counted set (NFR-3/NFR-4 — no per-agent round trips, and no
+ * per-run Node materialization either, fix-loop A3):
+ *   1. `agent_runs` GROUP BY `(agent_id, model)` — run counts, cost sums
+ *      (with null-cost tracking, D-14/E-9), per-model cost split, avg
+ *      duration, `last_run_at`. `countedFilter` below is `workspace_id` =
+ *      caller's workspace, `ran_at` within the half-open
+ *      `[range.start, range.end)` (AC-2/AC-3), `status = 'done'`,
+ *      `agent_id IS NOT NULL` (AC-8/AC-9, D-12/D-17). No `source` filter —
+ *      CI runs count alongside local runs (D-16), matching `avgStatsForAgents`
+ *      above.
+ *   2. `agent_runs` GROUP BY `(agent_id, width_bucket(ran_at))` — the
+ *      findings-per-run trend (bucketed further in
+ *      `modules/agents/performance.ts`, pure), same `countedFilter`.
+ *      `width_bucket` slices `[range.start, range.end)` into `bucketCount`
+ *      equal-width buckets entirely in SQL.
+ *   3. `findings` ⋈ `reviews` GROUP BY `(reviews.agent_id, findings.severity)`
+ *      with conditional accepted/dismissed counts, scoped to the SAME
+ *      counted run set via an INNER JOIN on `agent_runs` using
+ *      `countedFilter` directly (fix-loop A3: replaces an unbounded
+ *      `inArray(reviews.runId, runIds)` — one bind parameter per counted run,
+ *      with no cap, which could exceed Postgres's 65535-parameter protocol
+ *      limit on a busy workspace's max-span range). `reviews.runId` has no
+ *      FK (E-15), so a stale run_id simply drops out; `reviews.kind = 'review'`
+ *      (E-16) stops `kind:'summary'` rows inflating counts.
+ * Severity is read ONLY via this findings join — never
+ * `agent_runs.critical/.warning/.suggestion` (CI-ingest-only columns,
+ * AC-11/D-6, NULL for every local run).
+ */
+export async function perfStatsForAgents(
+  db: Db,
+  workspaceId: string,
+  agentIds: string[],
+  range: { start: Date; end: Date },
+  bucketCount: number,
+): Promise<PerfRangeResult> {
+  if (agentIds.length === 0) return { runAgg: [], trend: [], findings: [] };
+
+  const countedFilter = and(
+    eq(t.agentRuns.workspaceId, workspaceId),
+    inArray(t.agentRuns.agentId, agentIds),
+    eq(t.agentRuns.status, 'done'),
+    isNotNull(t.agentRuns.agentId),
+    gte(t.agentRuns.ranAt, range.start),
+    lt(t.agentRuns.ranAt, range.end),
+  );
+
+  // 1) Per-(agent, model) run/cost/duration aggregate — SQL GROUP BY.
+  const runAggRows = await db
+    .select({
+      agentId: t.agentRuns.agentId,
+      model: t.agentRuns.model,
+      runs: count(),
+      costSum: sql<string | null>`sum(${t.agentRuns.costUsd}) filter (where ${t.agentRuns.costUsd} is not null)`,
+      costCount: sql<number>`count(*) filter (where ${t.agentRuns.costUsd} is not null)::int`,
+      hasNullCost: sql<boolean>`bool_or(${t.agentRuns.costUsd} is null)`,
+      durationSum: sql<string | null>`sum(${t.agentRuns.durationMs}) filter (where ${t.agentRuns.durationMs} is not null)`,
+      durationCount: sql<number>`count(*) filter (where ${t.agentRuns.durationMs} is not null)::int`,
+      lastRunAt: sql<Date>`max(${t.agentRuns.ranAt})`,
+    })
+    .from(t.agentRuns)
+    .where(countedFilter)
+    .groupBy(t.agentRuns.agentId, t.agentRuns.model);
+
+  const runAgg: PerfRunAggRow[] = runAggRows.map((r) => ({
+    agentId: r.agentId!,
+    model: r.model,
+    runs: r.runs,
+    costSum: r.costSum == null ? null : Number(r.costSum),
+    costCount: r.costCount,
+    hasNullCost: r.hasNullCost,
+    durationSum: r.durationSum == null ? null : Number(r.durationSum),
+    durationCount: r.durationCount,
+    // A raw `sql<Date>` fragment (no declared column type for drizzle to
+    // decode) comes back from the driver as a plain timestamptz STRING, not
+    // a Date — unlike `t.agentRuns.ranAt` selected directly, which drizzle's
+    // own column decoder converts. Parse explicitly; `.toISOString()`
+    // downstream (performance.ts) would otherwise throw at runtime (fix-loop:
+    // caught via a live repro, not by typecheck — the `sql<Date>` annotation
+    // only affects the TS type, never the runtime value).
+    lastRunAt: new Date(r.lastRunAt as unknown as string),
+  }));
+
+  if (runAgg.length === 0) return { runAgg, trend: [], findings: [] };
+
+  // 2) Per-(agent, bucket) trend — width_bucket() slices `range` into
+  //    `bucketCount` equal-width buckets in SQL; clamped defensively even
+  //    though `countedFilter` already restricts ran_at to [start, end).
+  //    Computed as a derived subquery first (`bucketedRuns`), THEN grouped —
+  //    Postgres requires GROUP BY to reference a real column, not a repeated
+  //    raw expression fragment; re-emitting the same `width_bucket(...)` SQL
+  //    text in both the SELECT list and GROUP BY (without a subquery) 42803s
+  //    with "column agent_runs.ran_at must appear in the GROUP BY clause".
+  const startEpoch = range.start.getTime() / 1000;
+  const endEpoch = range.end.getTime() / 1000;
+  const bucketedRuns = db
+    .select({
+      agentId: t.agentRuns.agentId,
+      bucket: sql<number>`least(${bucketCount - 1}, greatest(0, width_bucket(extract(epoch from ${t.agentRuns.ranAt}), ${startEpoch}, ${endEpoch}, ${bucketCount}) - 1))`.as(
+        'bucket',
+      ),
+      findingsCount: t.agentRuns.findingsCount,
+    })
+    .from(t.agentRuns)
+    .where(countedFilter)
+    .as('bucketed_runs');
+
+  const trendRows = await db
+    .select({
+      agentId: bucketedRuns.agentId,
+      bucket: bucketedRuns.bucket,
+      findingsSum: sql<number>`coalesce(sum(${bucketedRuns.findingsCount}), 0)::int`,
+      runCount: count(),
+    })
+    .from(bucketedRuns)
+    .groupBy(bucketedRuns.agentId, bucketedRuns.bucket);
+
+  const trend: PerfTrendRow[] = trendRows.map((r) => ({
+    agentId: r.agentId!,
+    bucket: r.bucket,
+    findingsSum: r.findingsSum,
+    runCount: r.runCount,
+  }));
+
+  // 3) findings ⋈ reviews GROUP BY (agent_id, severity), scoped to the SAME
+  //    counted run set via an INNER JOIN on agent_runs — never an unbounded
+  //    inArray(reviews.runId, runIds) bind list.
+  const findingRows = await db
+    .select({
+      agentId: t.reviews.agentId,
+      severity: t.findings.severity,
+      total: count(),
+      accepted: sql<number>`count(*) filter (where ${t.findings.acceptedAt} is not null)::int`,
+      dismissed: sql<number>`count(*) filter (where ${t.findings.dismissedAt} is not null)::int`,
+    })
+    .from(t.findings)
+    .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+    .innerJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId))
+    .where(
+      and(
+        countedFilter,
+        eq(t.reviews.kind, 'review'),
+        isNotNull(t.reviews.agentId),
+        inArray(t.reviews.agentId, agentIds),
+      ),
+    )
+    .groupBy(t.reviews.agentId, t.findings.severity);
+
+  const findings: PerfFindingAggRow[] = findingRows.map((r) => ({
+    agentId: r.agentId!,
+    severity: r.severity,
+    total: r.total,
+    accepted: Number(r.accepted),
+    dismissed: Number(r.dismissed),
+  }));
+
+  return { runAgg, trend, findings };
 }
 
 export async function completeAgentRun(

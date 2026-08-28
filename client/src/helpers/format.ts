@@ -34,3 +34,30 @@ export function formatCost(amount: number | null | undefined, currency = DEFAULT
   if (amount == null) return "—";
   return currencyFormatter(currency).format(Number(amount.toPrecision(2)));
 }
+
+/**
+ * Duration in ms → a compact human string ("420ms", "3.2s", "2m 5s"). `null`
+ * (no data yet) renders as "—". De-duplicated (pr-self-review HIGH finding)
+ * from byte-identical copies in AgentPerformanceView/helpers.ts and
+ * AgentEditor/_components/StatsTab/helpers.ts — both re-export it from here
+ * for their own call sites/tests.
+ */
+export function formatDurationMs(ms: number | null): string {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}m ${remainder}s`;
+}
+
+/**
+ * Fractional rate (0..1) → a rounded percent string. `null` (no decided
+ * findings yet — AC-12/E-10) renders as "—", never coerced to "0%". Same
+ * de-duplication history as `formatDurationMs` above.
+ */
+export function formatPercent(rate: number | null): string {
+  if (rate == null) return "—";
+  return `${Math.round(rate * 100)}%`;
+}

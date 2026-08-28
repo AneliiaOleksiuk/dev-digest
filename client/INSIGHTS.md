@@ -589,6 +589,42 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   healthy just because it responded 200 earlier in the session — delete
   `.next`, and start a fresh `next dev` before trusting any `curl` result
   against it.
+- **A controlled `<input type="date">` whose `value` is bound directly to a
+  URL-derived prop, with `onChange` synchronously round-tripping through
+  `router.replace()` on every event, breaks the native date picker — both
+  "calendar icon does nothing" AND "can't finish typing a full date, one
+  segment never sticks" (2026-08-28, SPEC-06 fix-loop).**
+  `components/range-selector/RangeSelector.tsx`'s custom-range inputs did
+  `value={value.start ?? ""}` / `onChange={(e) => onChange({...,
+  start: e.target.value})}`, where `onChange` immediately called
+  `router.replace()` to push the new value into the URL. The browser's own
+  `<input type="date">` reports a transitional/incomplete value while a
+  segment is still being edited; round-tripping THAT straight back down as
+  this component's controlled `value` prop forces React to reset the DOM
+  node's value out from under the user mid-edit, which also interrupts the
+  native picker popup (some engines close/reset it when the controlling
+  input's value is programmatically touched while open). **Fix:** keep the
+  input controlled by LOCAL component state (`useState`), and only call the
+  parent's `onChange` (which triggers the URL/fetch round trip) once the
+  browser reports a genuinely COMPLETE date — i.e. guard on
+  `if (e.target.value) { ... }`, since a native date input only reports a
+  non-empty value once every segment is valid. Re-sync local state from the
+  prop via `useEffect` for genuinely external changes (browser back/forward)
+  — never on the component's own commits, which already match by the time
+  they round-trip back down. This is a general pattern for ANY controlled
+  input feeding a router-synced/URL-synced value, not specific to dates.
+- **A range-scoped React Query hook (`useAgentPerf`/`useAgentDetailStats`)
+  with no `enabled` guard fires a request on a half-entered custom range,
+  which the server correctly 422s — but the UI had no state for that,
+  landing on either the generic error state or (once the request was gated
+  off) a silent blank page (2026-08-28, SPEC-06 fix-loop A2).** Fix applied
+  both ways together: gate the hook itself
+  (`enabled: range.range !== "custom" || (!!range.start && !!range.end)`)
+  AND add an explicit "enter both dates" validation message in the view,
+  keyed off the same completeness check (`isIncompleteCustomRange`,
+  `lib/hooks/range.ts`) — gating the hook alone just trades a 422/error
+  state for an unexplained blank one; the view-level copy is what actually
+  tells the user what to do.
 
 ## Session Notes
 
@@ -1793,3 +1829,132 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   env usage, one asserting `service.ts` itself has zero such reads) —
   not actual code, and pre-existing from Phases C/D, not from this
   session's changes.
+
+- **Correction to the 2026-08-22/23 "Multi-Agent Review" entry above: the
+  `multi-agent` NAV entry landed in the GLOBAL group, not WORKSPACE
+  (confirmed 2026-08-27, SPEC-06 WI13).** That entry's own text says "added a
+  `multi-agent` entry to `vendor/ui/nav.ts`'s WORKSPACE group (5th use...)" —
+  reading `src/vendor/ui/nav.ts` directly (lines ~70-81 as of this session)
+  shows it's actually in the `GLOBAL` section, alongside nothing else until
+  this session added `agent-performance` as its second member. Per this
+  file's append-only rule the original entry is left as written, not edited
+  — code is ground truth over a prior session's own narrative when the two
+  disagree (this was also the SPEC-06 Development Plan's own flagged risk,
+  now resolved). If a future session needs "which group is the multi-agent
+  nav item in" for a similar do-not-touch-exception precedent, trust
+  `nav.ts` itself, not this file's 2026-08-22/23 wording.
+
+- 2026-08-27: SPEC-06 Agent Performance dashboard, Phases C+D (client) —
+  the per-agent Stats tab (`AgentEditor/_components/StatsTab/`, new
+  `useAgentDetailStats` hook in `lib/hooks/agents.ts`) and the workspace-wide
+  `/agent-performance` dashboard (`AgentPerformanceView/`, new `useAgentPerf`
+  hook in the new `lib/hooks/agent-performance.ts`) — both range-scoped via
+  a new shared `lib/hooks/range.ts` (`RangeQuery` type, query-key/query-string
+  builders, and `rangeFromSearchParams` for reading `?range=&start=&end=`
+  off the URL) and a new shared `components/range-selector/RangeSelector.tsx`
+  (1d/30d/custom picker — a new reusable primitive, so per this file's
+  existing convention it lives in `components/`, not `src/vendor/ui/**`).
+  **Named the new hook `useAgentDetailStats`, deliberately NOT
+  `useAgentStats`** — that name was already taken by `lib/hooks/multi-agent.ts`
+  for the different `GET /agents/stats` endpoint (see the 2026-08-23 entry
+  above, "`GET /agents/stats` field-name mismatch") — reusing it would have
+  been a barrel collision AND exactly that entry's own trap in hook-name
+  form, now with a THIRD similarly-shaped type live at once
+  (`AgentCostEstimate`/`AgentStats`/`AgentPerfRow`). Both new hooks carry an
+  explicit comment tracing their response type to the exact server handler
+  that produces it, per that same lesson.
+  Nav: added `agent-performance` to `nav.ts`'s `GLOBAL` group (see the
+  correction entry above) with `gKey: "f"`, icon `BarChart`, no `:repoId`
+  token — both were confirmed unused via grep before use, and
+  `activeKeyFor`/`shell.json`'s `nav["agent-performance"]` label were
+  ALREADY pre-wired before this session (same "pre-authored code anticipates
+  the UX" pattern this file documents repeatedly) — only the `NAV` array
+  entry and `nav.test.ts` coverage were actually missing. Extended
+  `nav.test.ts` with a dedicated describe block (group/href/gKey/icon
+  collision checks + `activeKeyFor` highlighting `/agents/:id` as `"agents"`,
+  not `"agent-performance"` — confirmed the two prefixes never collide since
+  the 7th character differs, `s` vs `-`).
+  Verified: `tsc --noEmit` clean; full Vitest 63 files / 368 tests, all
+  green, including `nav.test.ts`'s new block (13/13) and `smoke.test.tsx`
+  (`/showcase` mounts fine — no broken component export). Also did a live
+  end-to-end check against the real `pnpm dev` server this session (see
+  `server/INSIGHTS.md`'s matching entry) — confirmed `GET
+  /agents/:id/stats`/`GET /agents/performance` actually return the shapes
+  these hooks assume, not just that they typecheck against the vendored
+  contract (the exact E-1 gap this file's 2026-08-23 entry warns "nothing in
+  this plan changes" — still true generally, but this session's specific
+  hooks were checked against a live response at least once).
+
+- 2026-08-28: SPEC-06 fix-loop iteration 1 — addressed plan-verifier's A2
+  (custom-range validation UX) and 4 live design-fidelity gaps the user found
+  by using the running app (C1-C4): the low-confidence group's table now
+  repeats the SAME `<thead>` as the ranked table above it (one coherent
+  table with a group separator, not two visually different ones); the Total
+  Runs tile gets a `Sparkline` fed by a new `AgentPerf.summary.runs_trend`
+  field (server-computed total run count per bucket — deliberately NOT
+  derived from `AgentPerfRow.trend`, which is findings-per-run, a different
+  metric); the per-agent table's Agent column reuses `AgentCard`'s own
+  icon-box pattern (`Icon.Cpu` in a small colored badge) rather than
+  inventing a new per-agent icon system (the mockup's shield/lightning/pin
+  icons have no precedent anywhere in this codebase, including in
+  `AgentCard` itself — confirmed by reading it); the Accept column is now
+  color-coded by threshold (`var(--ok)`/`var(--warn)`/`var(--crit)` — the
+  same tokens `MetricCard`'s delta indicator already uses) — the mockup's
+  ↑/↓ trend arrow was scoped OUT: `AgentPerfRow` carries no accept-rate-
+  over-time series (only a findings-per-run `trend`), so a real directional
+  arrow would need a new field; threshold-only coloring was treated as an
+  acceptable partial fix per the fix-loop's own instruction. Also fixed a
+  real, user-reported RangeSelector bug (both new Tool & Library Notes
+  entries above) discovered to be the root cause of BOTH a "calendar icon
+  does nothing" report AND a "can't finish typing a full date" report — one
+  fix (local input state, decoupled from the router-synced prop) resolved
+  both. Verified: `tsc --noEmit` clean; full Vitest 66 files / 382 tests, all
+  green (including `AgentPerformanceView.test.tsx`, `StatsTab.test.tsx`,
+  `nav.test.ts`, `smoke.test.tsx`); live-checked against the real `pnpm dev`
+  server (already running, picked up every change via file-watch/HMR) —
+  `GET /agents/performance` returns a real `runs_trend` array and the
+  correct 422 for an incomplete custom range against actual dev-DB data. No
+  dedicated browser/screenshot tool available in this session to visually
+  re-confirm C1-C4 pixel-for-pixel against the mockup — recommend the
+  orchestrator's live smoke-check phase do that pass.
+
+- **Correction to this file's own iteration-1 C1 claim above** ("one
+  coherent table with a group separator"): that did NOT hold up under
+  `plan-verifier`'s independent re-check — what actually shipped was TWO
+  separate `<table>` elements (with a duplicated `<thead>`, the code's own
+  comment admitted as much: "repeat the SAME `<thead>`"), which cannot
+  align columns because each `<table>` sizes its own columns independently.
+  **Lesson: a code comment asserting an intent ("so row heights/column
+  alignment read as one coherent table") is not the same as the DOM
+  actually delivering it — verify the rendered structure, not the comment
+  next to it.** Fixed properly in fix-loop iteration 2: ONE `<table>` with
+  TWO `<tbody>` sections (ranked rows, then a spanning `<td colspan={N}>`
+  group-label row, then low-confidence rows) — a single `<table>` sizes its
+  columns from the union of every row inside it, so both groups' columns
+  align by construction, no `tableLayout: fixed` / matching-width
+  bookkeeping needed. Verified this time with a throwaway RTL test (not
+  committed — deleted after use, per this agent's "don't author new tests"
+  constraint) asserting `container.querySelectorAll("table")` has length 1,
+  `thead` has length 1 (7 `th`), `tbody` has length 2, and the group-label
+  text is a `<td colspan="7">` whose `closest("table")` is that same single
+  table — concrete DOM-structure proof, not a re-assertion.
+
+- **SPEC-06 fix-loop iteration 2 — AC-4's 422 conditions (`start > end`,
+  span > 366 days) had NO client-side handling at all**, only the
+  incomplete-range case did. A COMPLETE-but-invalid custom range fired the
+  request, got a 422 back, and rendered the generic `loadError` — useless
+  copy for what's actually a validation problem the user can fix by editing
+  a date. Fixed by adding `validateCustomRange` to `lib/hooks/range.ts`,
+  hand-mirroring the server's `validateRangeQuery` boundary math
+  (`server/src/modules/agents/helpers.ts` — `start.getTime() >
+  end.getTime()`, `spanDays = floor(diff/MS_PER_DAY) + 1 > 366`) so the
+  client pre-validates instead of round-tripping to get a 422. Verified the
+  client math matches the server's on the exact boundary (366 days valid,
+  367 invalid) via a throwaway unit test (deleted after use). Applied to
+  BOTH `useAgentPerf` and `useAgentDetailStats`'s `enabled` guards and both
+  `AgentPerformanceView`/`StatsTab`'s render branches — `StatsTab` hadn't
+  even had the *incomplete*-range copy from iteration 1, only
+  `AgentPerformanceView` did; worth checking BOTH range-scoped surfaces
+  when a range-validation gap is reported against one of them, since they
+  share the same `RangeSelector`/hooks but had drifted in what UI states
+  they actually handled.

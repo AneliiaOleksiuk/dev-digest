@@ -7,9 +7,8 @@ import { EmptyState, ErrorState, MetricCard, Sparkline, SeverityBadge, Skeleton 
 import type { Agent } from "@devdigest/shared";
 import { useAgentDetailStats } from "@/lib/hooks/agents";
 import { isIncompleteCustomRange, rangeFromSearchParams, rangeToSearchParams, validateCustomRange } from "@/lib/hooks/range";
-import { formatCost } from "@/helpers/format";
+import { formatCost, formatDurationMs, formatPercent } from "@/helpers/format";
 import { RangeSelector } from "@/components/range-selector";
-import { formatDurationMs, formatPercent } from "./helpers";
 import { s } from "./styles";
 
 /**

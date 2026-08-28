@@ -3,24 +3,15 @@
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { Badge, Donut, EmptyState, ErrorState, Icon, MetricCard, Skeleton } from "@devdigest/ui";
+import { EmptyState, ErrorState, Skeleton } from "@devdigest/ui";
 import { AppShell } from "@/components/app-shell";
 import { useAgentPerf } from "@/lib/hooks/agent-performance";
 import { isIncompleteCustomRange, rangeFromSearchParams, rangeToSearchParams, validateCustomRange } from "@/lib/hooks/range";
-import { formatCost } from "@/helpers/format";
 import { RangeSelector } from "@/components/range-selector";
-import {
-  acceptRateColor,
-  agentDetailHref,
-  findAgentById,
-  formatDurationMs,
-  formatLastRunAt,
-  formatPercent,
-  pooledDecided,
-  rankByAcceptRate,
-  withDonutColors,
-} from "./helpers";
+import { findAgentById, pooledDecided, rankByAcceptRate } from "./helpers";
+import { SummaryTiles } from "./_components/SummaryTiles";
+import { CostDonuts } from "./_components/CostDonuts";
+import { AgentTable } from "./_components/AgentTable";
 import { s } from "./styles";
 
 /**
@@ -31,6 +22,12 @@ import { s } from "./styles";
  * and a whole-workspace empty range (AC-36) is visually distinct from a
  * populated table with a zero-run agent row (AC-37). No write action
  * anywhere on this page (AC-39).
+ *
+ * Orchestrator only — loading/error/incomplete-range/invalid-range/empty/
+ * populated branch logic lives here; the populated branch's own markup is
+ * composed from `_components/SummaryTiles`, `_components/CostDonuts`, and
+ * `_components/AgentTable` (pr-self-review CRITICAL split, no behavior
+ * change — see those files' own doc comments).
  */
 export function AgentPerformanceView() {
   const t = useTranslations("agentPerformance");
@@ -114,157 +111,14 @@ export function AgentPerformanceView() {
 
         {!isLoading && !rangeIncomplete && !rangeError && !isError && data && !wholeWorkspaceEmpty && grouped && pooled && (
           <>
-            <div style={s.tiles}>
-              <MetricCard
-                label={t("summary.totalRuns")}
-                value={data.summary.runs}
-                trend={data.summary.runs_trend}
-              />
-              <div>
-                <MetricCard label={t("summary.totalCost")} value={formatCost(data.summary.total_cost_usd)} />
-                <div style={s.tileSubtitle}>{t("summary.totalCostSubtitle")}</div>
-                {data.summary.total_cost_partial && (
-                  <div style={s.partialBadge}>{t("summary.partialCost")}</div>
-                )}
-              </div>
-              <div>
-                <MetricCard label={t("summary.avgAcceptRate")} value={formatPercent(data.summary.avg_accept_rate)} />
-                {/* A1/AC-25/US-5 — the decided-findings denominator, summed
-                    client-side from AgentPerfRow.accepted/.dismissed (no
-                    contract change needed). */}
-                {pooled.decided > 0 && (
-                  <div style={s.tileSubtitle}>
-                    {t("summary.avgAcceptRateDenominator", {
-                      accepted: pooled.accepted,
-                      decided: pooled.decided,
-                    })}
-                  </div>
-                )}
-              </div>
-              <div>
-                <MetricCard label={t("summary.mostActive")} value={data.summary.most_active_agent ?? "—"} />
-                {mostActiveRow && (
-                  <div style={s.mostActiveSub}>
-                    {t("summary.mostActiveDetail", {
-                      runs: mostActiveRow.runs,
-                      acceptRate: formatPercent(mostActiveRow.accept_rate),
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div style={s.donutRow}>
-              <div style={s.donutCard}>
-                <div style={s.donutTitle}>{t("costByAgent")}</div>
-                {data.cost_by_agent.length > 0 ? (
-                  <Donut segments={withDonutColors(data.cost_by_agent)} />
-                ) : (
-                  <div style={s.noCost}>{t("noCost")}</div>
-                )}
-              </div>
-              <div style={s.donutCard}>
-                <div style={s.donutTitle}>{t("costByModel")}</div>
-                {data.cost_by_model.length > 0 ? (
-                  <Donut segments={withDonutColors(data.cost_by_model)} />
-                ) : (
-                  <div style={s.noCost}>{t("noCost")}</div>
-                )}
-              </div>
-            </div>
-
-            <div style={s.section}>
-              <div style={s.sectionTitle}>{t("perAgent")}</div>
-              {/* C1 fix-loop — ONE <table> with two <tbody> sections (ranked,
-                  then low-confidence behind a spanning group-label row),
-                  instead of two separate <table> elements that can't share
-                  column sizing. A single table sizes its columns from the
-                  UNION of every row in it, so the ranked and low-confidence
-                  sections' columns align by construction — no
-                  `tableLayout: fixed` / matching-width bookkeeping needed. */}
-              <div style={s.tableWrap}>
-                <table style={s.table}>
-                  <thead>
-                    <tr>
-                      <th style={s.th}>{t("table.agent")}</th>
-                      <th style={s.th}>{t("table.runs")}</th>
-                      <th style={s.th}>{t("table.avgCost")}</th>
-                      <th style={s.th}>{t("table.avgDuration")}</th>
-                      <th style={s.th}>{t("table.accept")}</th>
-                      <th style={s.th}>{t("table.lastRun")}</th>
-                      <th style={s.th} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {grouped.ranked.map((row) => (
-                      <tr key={row.agent_id}>
-                        <td style={s.td}>
-                          <span style={s.agentCell}>
-                            <span style={s.agentIcon}>
-                              <Icon.Cpu size={12} />
-                            </span>
-                            {row.agent_name}
-                          </span>
-                        </td>
-                        <td style={s.td}>{row.runs}</td>
-                        <td style={s.td}>{formatCost(row.avg_cost_usd)}</td>
-                        <td style={s.td}>{formatDurationMs(row.avg_latency_ms)}</td>
-                        <td style={s.td}>
-                          <span style={{ color: acceptRateColor(row.accept_rate) }}>
-                            {formatPercent(row.accept_rate)}
-                          </span>
-                        </td>
-                        <td style={s.td}>{formatLastRunAt(row.last_run_at)}</td>
-                        <td style={s.td}>
-                          <Link href={agentDetailHref(row.agent_id, range)}>{t("view")}</Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-
-                  {grouped.lowConfidence.length > 0 && (
-                    <tbody>
-                      <tr>
-                        <td style={s.groupLabelCell} colSpan={7}>
-                          {t("lowConfidenceGroup")}
-                        </td>
-                      </tr>
-                      {grouped.lowConfidence.map((row) => (
-                        <tr key={row.agent_id}>
-                          <td style={s.td}>
-                            <span style={s.agentCell}>
-                              <span style={s.agentIcon}>
-                                <Icon.Cpu size={12} />
-                              </span>
-                              {row.agent_name}
-                              {row.runs === 0 && (
-                                <Badge color="var(--text-muted)">{t("zeroRuns")}</Badge>
-                              )}
-                            </span>
-                          </td>
-                          <td style={s.td}>{row.runs}</td>
-                          <td style={s.td}>{formatCost(row.avg_cost_usd)}</td>
-                          <td style={s.td}>{formatDurationMs(row.avg_latency_ms)}</td>
-                          <td style={s.td}>
-                            <span style={{ color: acceptRateColor(row.accept_rate) }}>
-                              {formatPercent(row.accept_rate)}
-                            </span>
-                          </td>
-                          <td style={s.td}>{formatLastRunAt(row.last_run_at)}</td>
-                          <td style={s.td}>
-                            <Link href={agentDetailHref(row.agent_id, range)}>{t("view")}</Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  )}
-                </table>
-              </div>
-
-              {grouped.allLowConfidence && grouped.lowConfidence.length > 0 && (
-                <p style={s.muted}>{t("notRankable")}</p>
-              )}
-            </div>
+            <SummaryTiles summary={data.summary} pooled={pooled} mostActiveRow={mostActiveRow} />
+            <CostDonuts costByAgent={data.cost_by_agent} costByModel={data.cost_by_model} />
+            <AgentTable
+              ranked={grouped.ranked}
+              lowConfidence={grouped.lowConfidence}
+              allLowConfidence={grouped.allLowConfidence}
+              range={range}
+            />
           </>
         )}
       </div>

@@ -85,21 +85,6 @@ export function agentDetailHref(agentId: string, range: RangeQuery): string {
   return `/agents/${agentId}?tab=stats&${rangePart}`;
 }
 
-export function formatDurationMs(ms: number | null): string {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60);
-  return `${minutes}m ${remainder}s`;
-}
-
-export function formatPercent(rate: number | null): string {
-  if (rate == null) return "—";
-  return `${Math.round(rate * 100)}%`;
-}
-
 /** C4 — quality-based color for the Accept column: green at/above 70%,
  *  amber in the middle, red below 40%; muted when there's no rate yet
  *  (null, not "0%" — AC-12/E-10). Thresholds mirror the values a reviewer

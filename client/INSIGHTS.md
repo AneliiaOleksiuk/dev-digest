@@ -589,6 +589,42 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   healthy just because it responded 200 earlier in the session — delete
   `.next`, and start a fresh `next dev` before trusting any `curl` result
   against it.
+- **A controlled `<input type="date">` whose `value` is bound directly to a
+  URL-derived prop, with `onChange` synchronously round-tripping through
+  `router.replace()` on every event, breaks the native date picker — both
+  "calendar icon does nothing" AND "can't finish typing a full date, one
+  segment never sticks" (2026-08-28, SPEC-06 fix-loop).**
+  `components/range-selector/RangeSelector.tsx`'s custom-range inputs did
+  `value={value.start ?? ""}` / `onChange={(e) => onChange({...,
+  start: e.target.value})}`, where `onChange` immediately called
+  `router.replace()` to push the new value into the URL. The browser's own
+  `<input type="date">` reports a transitional/incomplete value while a
+  segment is still being edited; round-tripping THAT straight back down as
+  this component's controlled `value` prop forces React to reset the DOM
+  node's value out from under the user mid-edit, which also interrupts the
+  native picker popup (some engines close/reset it when the controlling
+  input's value is programmatically touched while open). **Fix:** keep the
+  input controlled by LOCAL component state (`useState`), and only call the
+  parent's `onChange` (which triggers the URL/fetch round trip) once the
+  browser reports a genuinely COMPLETE date — i.e. guard on
+  `if (e.target.value) { ... }`, since a native date input only reports a
+  non-empty value once every segment is valid. Re-sync local state from the
+  prop via `useEffect` for genuinely external changes (browser back/forward)
+  — never on the component's own commits, which already match by the time
+  they round-trip back down. This is a general pattern for ANY controlled
+  input feeding a router-synced/URL-synced value, not specific to dates.
+- **A range-scoped React Query hook (`useAgentPerf`/`useAgentDetailStats`)
+  with no `enabled` guard fires a request on a half-entered custom range,
+  which the server correctly 422s — but the UI had no state for that,
+  landing on either the generic error state or (once the request was gated
+  off) a silent blank page (2026-08-28, SPEC-06 fix-loop A2).** Fix applied
+  both ways together: gate the hook itself
+  (`enabled: range.range !== "custom" || (!!range.start && !!range.end)`)
+  AND add an explicit "enter both dates" validation message in the view,
+  keyed off the same completeness check (`isIncompleteCustomRange`,
+  `lib/hooks/range.ts`) — gating the hook alone just trades a 422/error
+  state for an unexplained blank one; the view-level copy is what actually
+  tells the user what to do.
 
 ## Session Notes
 
@@ -1848,3 +1884,36 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   contract (the exact E-1 gap this file's 2026-08-23 entry warns "nothing in
   this plan changes" — still true generally, but this session's specific
   hooks were checked against a live response at least once).
+
+- 2026-08-28: SPEC-06 fix-loop iteration 1 — addressed plan-verifier's A2
+  (custom-range validation UX) and 4 live design-fidelity gaps the user found
+  by using the running app (C1-C4): the low-confidence group's table now
+  repeats the SAME `<thead>` as the ranked table above it (one coherent
+  table with a group separator, not two visually different ones); the Total
+  Runs tile gets a `Sparkline` fed by a new `AgentPerf.summary.runs_trend`
+  field (server-computed total run count per bucket — deliberately NOT
+  derived from `AgentPerfRow.trend`, which is findings-per-run, a different
+  metric); the per-agent table's Agent column reuses `AgentCard`'s own
+  icon-box pattern (`Icon.Cpu` in a small colored badge) rather than
+  inventing a new per-agent icon system (the mockup's shield/lightning/pin
+  icons have no precedent anywhere in this codebase, including in
+  `AgentCard` itself — confirmed by reading it); the Accept column is now
+  color-coded by threshold (`var(--ok)`/`var(--warn)`/`var(--crit)` — the
+  same tokens `MetricCard`'s delta indicator already uses) — the mockup's
+  ↑/↓ trend arrow was scoped OUT: `AgentPerfRow` carries no accept-rate-
+  over-time series (only a findings-per-run `trend`), so a real directional
+  arrow would need a new field; threshold-only coloring was treated as an
+  acceptable partial fix per the fix-loop's own instruction. Also fixed a
+  real, user-reported RangeSelector bug (both new Tool & Library Notes
+  entries above) discovered to be the root cause of BOTH a "calendar icon
+  does nothing" report AND a "can't finish typing a full date" report — one
+  fix (local input state, decoupled from the router-synced prop) resolved
+  both. Verified: `tsc --noEmit` clean; full Vitest 66 files / 382 tests, all
+  green (including `AgentPerformanceView.test.tsx`, `StatsTab.test.tsx`,
+  `nav.test.ts`, `smoke.test.tsx`); live-checked against the real `pnpm dev`
+  server (already running, picked up every change via file-watch/HMR) —
+  `GET /agents/performance` returns a real `runs_trend` array and the
+  correct 422 for an incomplete custom range against actual dev-DB data. No
+  dedicated browser/screenshot tool available in this session to visually
+  re-confirm C1-C4 pixel-for-pixel against the mockup — recommend the
+  orchestrator's live smoke-check phase do that pass.

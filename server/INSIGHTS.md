@@ -1041,6 +1041,56 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `server/src/db/rows.ts`'s `PrBriefRow` (the real type, used freely by
   `repository.ts`/`repository.drizzle.ts`/`service.ts`, none of which match
   the helpers-only rule).
+- **Reusing the SAME raw `sql\`...\`` fragment object in both a SELECT list
+  and `GROUP BY` 42803s with a misleading error (2026-08-28,
+  SPEC-06 fix-loop A3).** `run.repo.ts`'s trend query computed a bucket index
+  via `width_bucket(...)` in one `sql<number>` template, then referenced that
+  SAME object in both `.select({ bucket: bucketExpr })` and
+  `.groupBy(t.agentRuns.agentId, bucketExpr)`. Postgres rejected it with
+  `column "agent_runs.ran_at" must appear in the GROUP BY clause or be used
+  in an aggregate function` — NOT a complaint about the bucket expression
+  itself, which made the real cause non-obvious from the error text alone.
+  Root cause: repeating a raw computed SQL fragment across clauses is not the
+  same as GROUP BY seeing a real column; Postgres needs the GROUP BY target
+  to be a genuine column reference. **Fix:** compute the expression in a
+  derived subquery first (`db.select({...}).from(t).where(...).as('name')`),
+  then `GROUP BY` the subquery's own column (`subquery.bucket`) in an outer
+  query — see `perfStatsForAgents`'s `bucketedRuns` subquery. Caught via a
+  live repro script against the real dev DB (`tsx` + `perfStatsForAgents`
+  directly), not by typecheck or the unit suite — `sql<T>()`'s generic only
+  types the TS *shape*, it does not validate the query will actually run.
+- **A raw `sql<Date>\`max(...)\`` fragment returns a plain STRING at runtime,
+  not a `Date`, even though selecting the same column directly
+  (`t.agentRuns.ranAt`) returns a real `Date` (2026-08-28, SPEC-06 fix-loop
+  A3).** `perfStatsForAgents`'s `max(${t.agentRuns.ranAt})` for `last_run_at`
+  compiled fine (`sql<Date>` satisfies the TS type checker) but crashed at
+  request time with `runAgg.lastRunAt.toISOString is not a function` — a
+  500 on `GET /agents/performance` whenever more than one agent existed in
+  the workspace. Drizzle applies its OWN column-type decoder (Date parsing,
+  etc.) only to schema-declared columns selected directly; a raw `sql`
+  fragment has no such declared type, so whatever the driver hands back
+  (here, a `postgres.js` timestamptz-as-string) passes through unconverted —
+  the `sql<T>` generic is compile-time-only, never a runtime coercion. Fix:
+  explicitly `new Date(r.lastRunAt as unknown as string)` when mapping any
+  raw-`sql` timestamp aggregate. Generalizes: any `sql<T>()` aggregate on a
+  `timestamp`/`timestamptz` column needs the same explicit parse; `sum()`/
+  `count()` were fine here since `Number(...)` already handled both the
+  string-or-number cases postgres.js can return for numeric aggregates.
+- **This environment's `server/node_modules` can be silently broken —
+  present, `pnpm install` reports "Already up to date", but missing
+  `node_modules/.bin` and every devDependency (2026-08-28).** Neither
+  `pnpm install` nor `pnpm install --force` fixed it (both exited clean in
+  under 1s, doing nothing) — the state file `.pnpm-workspace-state-v1.json`
+  apparently believed the install was current while the actual
+  `node_modules/` only had prod deps symlinked plus a populated `.pnpm/`
+  store. **Fix:** `rm -rf node_modules && pnpm install` (a full reinstall
+  from the existing lockfile/store, ~10s, no `ERR_PNPM_ABORTED_...` prompt
+  since nothing needed re-resolving) restored `.bin` and every
+  devDependency (`typescript`, `vitest`, `tsx`, …) correctly. Distinct from
+  the documented `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` failure mode
+  (that one aborts loudly; this one succeeds silently while leaving
+  `node_modules` half-populated) — check `ls node_modules/.bin` before
+  trusting a "no output = fine" `pnpm install`.
 
 ## Session Notes
 
@@ -1468,6 +1518,38 @@ guidance unless AGENTS.md says otherwise. Append-only; entries must pass the
   `ci-export-preview`/`ci-ingest`/`ci-multi-agent-install`/`findings-learn`/
   `onboarding`/`project-context-run`, pre-existing and out of this session's
   scope.
+
+- 2026-08-28: SPEC-06 fix-loop iteration 1 (`docs/plans/spec-06-agent-performance-dashboard.md`)
+  — addressed plan-verifier's 4 required Phase-1 fixes + 1 Major architecture
+  finding. Biggest change: `perfStatsForAgents` (`run.repo.ts`) rewritten from
+  "load the raw counted run set into Node, sum it there" to THREE SQL
+  `GROUP BY` queries (`(agent_id, model)` for cost/duration/run-count,
+  `(agent_id, width_bucket(ran_at))` for the trend, plus the existing
+  findings rollup now joined via `agent_runs` directly instead of an
+  unbounded `inArray(reviews.runId, runIds)`) — see the two new Recurring
+  Errors & Fixes entries above for the two runtime bugs this surfaced (both
+  caught only via a live repro against the real dev DB, not by typecheck or
+  the unit suite: a GROUP BY 42803 needing a subquery, and a raw
+  `sql<Date>` aggregate silently returning a string). `modules/agents/performance.ts`
+  now imports its `PerfRunAggRow`/`PerfTrendRow`/`PerfFindingAggRow` types
+  through the `ReviewRepository` facade (`modules/reviews/repository.ts`),
+  never `repository/run.repo.ts` directly (the other required fix — an
+  onion-architecture boundary violation). Also added
+  `AgentPerf.summary.runs_trend` (additive, hand-mirrored both vendored
+  copies) for the dashboard's Total Runs tile sparkline. **Known,
+  intentionally-left breakage:** `test/agent-performance-shaping.test.ts`
+  (test-writer's file) still constructs `PerfRangeResult` fixtures in the
+  OLD raw-per-run shape (`{runs: PerfRunRow[], findings}`) — the pure
+  shaping functions now consume pre-aggregated rows
+  (`{runAgg: PerfRunAggRow[], trend: PerfTrendRow[], findings}`), so that
+  file needs test-writer to re-author its fixtures against the new shape;
+  not fixed here per this repo's test-authorship boundary. All other server
+  suites pass (typecheck, arch:check, `agent-performance.it.test.ts` 11/11).
+  Also re-confirmed the pre-existing `.it.test.ts` flakiness the entry above
+  this one already documents (`findings-learn`/`onboarding`/
+  `project-context-run`) via a fresh `git stash`/`git stash pop` round-trip —
+  identical failures with this session's changes fully stashed, so unrelated
+  to SPEC-06.
 
 ## Open Questions
 

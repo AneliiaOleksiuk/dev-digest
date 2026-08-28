@@ -24,4 +24,13 @@ export const s = {
     background: "var(--bg-elevated)",
   } satisfies CSSProperties,
   skeletons: { display: "flex", flexDirection: "column", gap: 12 } satisfies CSSProperties,
+  // fix-loop (Row 12/AC-4) — same treatment as AgentPerformanceView's
+  // `rangeIncomplete` style, for an incomplete OR invalid custom range.
+  rangeNotice: {
+    fontSize: 13,
+    color: "var(--text-muted)",
+    padding: "12px 16px",
+    border: "1px dashed var(--border)",
+    borderRadius: 8,
+  } satisfies CSSProperties,
 } as const;

@@ -44,6 +44,60 @@ export function isIncompleteCustomRange(range: RangeQuery): boolean {
   return range.range === "custom" && (!range.start || !range.end);
 }
 
+const MS_PER_DAY = 86_400_000;
+/** Mirrors the server's `MAX_RANGE_DAYS`
+ *  (`server/src/modules/agents/helpers.ts`) — hand-kept in sync, same as
+ *  every other client/server contract pair in this repo (no shared
+ *  validation module between the two packages for this). */
+export const MAX_RANGE_DAYS = 366;
+
+export type RangeValidationError = "startAfterEnd" | "tooLong" | null;
+
+/**
+ * fix-loop (Row 12/AC-4) — client-side pre-validation for a COMPLETE custom
+ * range (both dates present), mirroring the server's `validateRangeQuery`
+ * 422 conditions (`start > end`, span > 366 days,
+ * `server/src/modules/agents/helpers.ts`). Both range-scoped hooks
+ * (`useAgentPerf`, `useAgentDetailStats`) gate `enabled` on this returning
+ * null, so an invalid complete range never round-trips to the server just to
+ * get a 422 back — the caller renders specific copy instead of the generic
+ * `loadError`. Returns null for an incomplete range too (that case is
+ * `isIncompleteCustomRange`'s job, kept separate so callers can tell "still
+ * typing" apart from "typed something invalid").
+ */
+export function validateCustomRange(range: RangeQuery): RangeValidationError {
+  if (range.range !== "custom" || !range.start || !range.end) return null;
+  const start = new Date(range.start);
+  const end = new Date(range.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  if (start.getTime() > end.getTime()) return "startAfterEnd";
+  const spanDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  if (spanDays > MAX_RANGE_DAYS) return "tooLong";
+  return null;
+}
+
+/** fix-loop (C bundled #2) — the write-side counterpart to
+ *  `rangeFromSearchParams`: build the next `URLSearchParams` for a range
+ *  change, preserving every other existing query param. Both
+ *  `AgentPerformanceView` and `StatsTab` had duplicated this exact
+ *  13-line `URLSearchParams` construction (differing only in which
+ *  `router.replace` base path the caller then uses) — this is the one place
+ *  it's built now. */
+export function rangeToSearchParams(search: URLSearchParams, next: RangeQuery): URLSearchParams {
+  const sp = new URLSearchParams(search.toString());
+  sp.set("range", next.range ?? "30d");
+  if (next.range === "custom") {
+    if (next.start) sp.set("start", next.start);
+    else sp.delete("start");
+    if (next.end) sp.set("end", next.end);
+    else sp.delete("end");
+  } else {
+    sp.delete("start");
+    sp.delete("end");
+  }
+  return sp;
+}
+
 /** Read `?range=&start=&end=` off the page's own URL (AC-6) — both the
  *  Stats tab and the Agent Performance dashboard call this against
  *  `useSearchParams()`. Falls back to the server's own default (30d) when

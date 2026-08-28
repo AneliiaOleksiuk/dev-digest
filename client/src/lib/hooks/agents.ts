@@ -4,7 +4,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { Agent, AgentSkillLink, AgentStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
-import { rangeQueryKey, rangeQueryString, type RangeQuery } from "./range";
+import { isIncompleteCustomRange, rangeQueryKey, rangeQueryString, validateCustomRange, type RangeQuery } from "./range";
 
 export function useAgents() {
   return useQuery({
@@ -102,7 +102,10 @@ export function useAgentDetailStats(agentId: string | null | undefined, range: R
     queryFn: () => api.get<AgentStats>(`/agents/${agentId}/stats${rangeQueryString(range)}`),
     // fix-loop (A2) — same custom-range completeness guard as useAgentPerf:
     // don't fire on a half-entered custom range (server 422s on it).
-    enabled: !!agentId && (range.range !== "custom" || (!!range.start && !!range.end)),
+    // fix-loop (Row 12/AC-4) — nor on a COMPLETE-but-invalid range (server
+    // 422s on that too); `range.ts`'s own docblock claims both hooks share
+    // this condition — this makes that claim true.
+    enabled: !!agentId && !isIncompleteCustomRange(range) && validateCustomRange(range) === null,
   });
 }
 

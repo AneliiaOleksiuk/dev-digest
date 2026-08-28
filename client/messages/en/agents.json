@@ -105,7 +105,10 @@
       "30d": "30 days",
       "custom": "Custom",
       "customFrom": "From",
-      "customTo": "To"
+      "customTo": "To",
+      "incomplete": "Enter both a start and end date to load a custom range.",
+      "invalidOrder": "End date must be after start date.",
+      "invalidSpan": "Custom range cannot exceed 366 days."
     },
     "runs": "Runs",
     "cost": "Avg cost (estimate)",

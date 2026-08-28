@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { AgentPerf } from "@devdigest/shared";
-import { rangeQueryKey, rangeQueryString, type RangeQuery } from "./range";
+import { isIncompleteCustomRange, rangeQueryKey, rangeQueryString, validateCustomRange, type RangeQuery } from "./range";
 
 /**
  * `GET /agents/performance`, range-scoped. Typed against the EXTENDED
@@ -27,6 +27,10 @@ export function useAgentPerf(range: RangeQuery) {
     // half-entered: the server 422s on a partial `start`/`end` pair, and
     // firing early just surfaces the generic error state for what is really
     // a "still typing" moment, not a failure.
-    enabled: range.range !== "custom" || (!!range.start && !!range.end),
+    // fix-loop (Row 12/AC-4) — nor while a COMPLETE custom range is invalid
+    // (`start > end`, span > 366 days): same reasoning, the server would 422
+    // on it too, and `AgentPerformanceView` renders `validateCustomRange`'s
+    // specific copy instead of firing the request.
+    enabled: !isIncompleteCustomRange(range) && validateCustomRange(range) === null,
   });
 }

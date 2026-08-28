@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { EmptyState, ErrorState, MetricCard, Sparkline, SeverityBadge, Skeleton } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import { useAgentDetailStats } from "@/lib/hooks/agents";
-import { rangeFromSearchParams } from "@/lib/hooks/range";
+import { isIncompleteCustomRange, rangeFromSearchParams, rangeToSearchParams, validateCustomRange } from "@/lib/hooks/range";
 import { formatCost } from "@/helpers/format";
 import { RangeSelector } from "@/components/range-selector";
 import { formatDurationMs, formatPercent } from "./helpers";
@@ -30,19 +30,17 @@ export function StatsTab({ agent }: { agent: Agent }) {
 
   const range = rangeFromSearchParams(search);
   const setRange = (next: typeof range) => {
-    const sp = new URLSearchParams(search.toString());
-    sp.set("range", next.range ?? "30d");
-    if (next.range === "custom") {
-      if (next.start) sp.set("start", next.start);
-      else sp.delete("start");
-      if (next.end) sp.set("end", next.end);
-      else sp.delete("end");
-    } else {
-      sp.delete("start");
-      sp.delete("end");
-    }
-    router.replace(`/agents/${agent.id}?${sp.toString()}`);
+    router.replace(`/agents/${agent.id}?${rangeToSearchParams(search, next).toString()}`);
   };
+
+  // fix-loop (Row 12/AC-4) — same custom-range gating as
+  // AgentPerformanceView: a half-entered range never fires
+  // (`useAgentDetailStats`'s `enabled` guard, `isIncompleteCustomRange`),
+  // and neither does a COMPLETE-but-invalid one (`start > end`, span > 366
+  // days, `validateCustomRange`) — both render specific copy below instead
+  // of the generic `loadError`.
+  const rangeIncomplete = isIncompleteCustomRange(range);
+  const rangeError = validateCustomRange(range);
 
   const { data: stats, isLoading, isError, refetch } = useAgentDetailStats(agent.id, range);
 
@@ -72,15 +70,23 @@ export function StatsTab({ agent }: { agent: Agent }) {
         </div>
       )}
 
-      {!isLoading && isError && (
+      {!isLoading && rangeIncomplete && <p style={s.rangeNotice}>{t("stats.range.incomplete")}</p>}
+
+      {!isLoading && !rangeIncomplete && rangeError && (
+        <p style={s.rangeNotice}>
+          {rangeError === "startAfterEnd" ? t("stats.range.invalidOrder") : t("stats.range.invalidSpan")}
+        </p>
+      )}
+
+      {!isLoading && !rangeIncomplete && !rangeError && isError && (
         <ErrorState body={t("stats.loadError")} onRetry={() => refetch()} />
       )}
 
-      {!isLoading && !isError && stats && stats.runs === 0 && (
+      {!isLoading && !rangeIncomplete && !rangeError && !isError && stats && stats.runs === 0 && (
         <EmptyState icon="BarChart" title={t("stats.empty.title")} body={t("stats.empty.body")} />
       )}
 
-      {!isLoading && !isError && stats && stats.runs > 0 && (
+      {!isLoading && !rangeIncomplete && !rangeError && !isError && stats && stats.runs > 0 && (
         <>
           <div style={s.tiles}>
             <MetricCard label={t("stats.runs")} value={stats.runs} />

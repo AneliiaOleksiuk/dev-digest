@@ -216,7 +216,11 @@ export function toAgentPerf(
   const runsByAgent = aggregateRuns(data);
   const findingsByAgent = aggregateFindings(data.findings);
 
-  const costByAgentMap = new Map<string, number>();
+  // fix-loop (bundled #1) — keyed by agent.id, NOT agent.name (`agents.name`
+  // has no unique constraint, `db/schema/agents.ts:13`) — same reasoning as
+  // most_active_agent's by-id resolution (E-5/D-5). `name` is carried only
+  // as the display label for the donut segment.
+  const costByAgentMap = new Map<string, { name: string; value: number }>();
   const costByModelMap = new Map<string, number>();
   let totalRuns = 0;
   let totalCostSum = 0;
@@ -252,7 +256,8 @@ export function toAgentPerf(
       totalCostCount += runAgg.costCount;
       if (runAgg.hasNullCost) anyNullCost = true;
       if (runAgg.costCount > 0) {
-        costByAgentMap.set(agent.name, (costByAgentMap.get(agent.name) ?? 0) + runAgg.costSum);
+        const existing = costByAgentMap.get(agent.id);
+        costByAgentMap.set(agent.id, { name: agent.name, value: (existing?.value ?? 0) + runAgg.costSum });
       }
       for (const [model, sum] of runAgg.costByModel) {
         costByModelMap.set(model, (costByModelMap.get(model) ?? 0) + sum);
@@ -303,8 +308,8 @@ export function toAgentPerf(
     });
   }
 
-  const costByAgent: PerfCostSegment[] = [...costByAgentMap.entries()].map(([label, value]) => ({
-    label,
+  const costByAgent: PerfCostSegment[] = [...costByAgentMap.values()].map(({ name, value }) => ({
+    label: name,
     value,
   }));
   const costByModel: PerfCostSegment[] = [...costByModelMap.entries()].map(([label, value]) => ({

@@ -43,13 +43,18 @@ export const s = {
   noCost: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
   section: { display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
   sectionTitle: { fontSize: 14, fontWeight: 700 } satisfies CSSProperties,
-  groupLabel: {
+  // C1 fix-loop — a spanning `<td>` row INSIDE the single table (not a div
+  // between two tables), so it reads as a group separator within one
+  // coherent table rather than a heading between two independent ones.
+  groupLabelCell: {
+    padding: "8px 12px",
     fontSize: 11,
     fontWeight: 600,
     color: "var(--text-muted)",
     letterSpacing: "0.04em",
     textTransform: "uppercase",
-    margin: "10px 0 4px",
+    background: "var(--bg-elevated)",
+    borderBottom: "1px solid var(--border)",
   } satisfies CSSProperties,
   tableWrap: { overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 } satisfies CSSProperties,
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 } satisfies CSSProperties,

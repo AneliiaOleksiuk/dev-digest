@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Badge, Donut, EmptyState, ErrorState, Icon, MetricCard, Skeleton } from "@devdigest/ui";
 import { AppShell } from "@/components/app-shell";
 import { useAgentPerf } from "@/lib/hooks/agent-performance";
-import { isIncompleteCustomRange, rangeFromSearchParams } from "@/lib/hooks/range";
+import { isIncompleteCustomRange, rangeFromSearchParams, rangeToSearchParams, validateCustomRange } from "@/lib/hooks/range";
 import { formatCost } from "@/helpers/format";
 import { RangeSelector } from "@/components/range-selector";
 import {
@@ -39,18 +39,7 @@ export function AgentPerformanceView() {
 
   const range = rangeFromSearchParams(search);
   const setRange = (next: typeof range) => {
-    const sp = new URLSearchParams(search.toString());
-    sp.set("range", next.range ?? "30d");
-    if (next.range === "custom") {
-      if (next.start) sp.set("start", next.start);
-      else sp.delete("start");
-      if (next.end) sp.set("end", next.end);
-      else sp.delete("end");
-    } else {
-      sp.delete("start");
-      sp.delete("end");
-    }
-    router.replace(`/agent-performance?${sp.toString()}`);
+    router.replace(`/agent-performance?${rangeToSearchParams(search, next).toString()}`);
   };
 
   const { data, isLoading, isError, refetch } = useAgentPerf(range);
@@ -67,6 +56,11 @@ export function AgentPerformanceView() {
   // the server (useAgentPerf's `enabled` guard) — surface real validation
   // copy instead of the generic error state or a silent blank page.
   const rangeIncomplete = isIncompleteCustomRange(range);
+  // fix-loop (Row 12/AC-4) — a COMPLETE custom range that's invalid
+  // (start > end, span > 366 days) also never reaches the server (same
+  // `enabled` guard, `validateCustomRange`) — without this the generic
+  // `loadError` would render for what is really a validation failure.
+  const rangeError = validateCustomRange(range);
   const wholeWorkspaceEmpty = !!data && data.summary.runs === 0;
   const mostActiveRow = data ? findAgentById(data.agents, data.summary.most_active_agent_id) : undefined;
   const grouped = data ? rankByAcceptRate(data.agents) : null;
@@ -95,7 +89,7 @@ export function AgentPerformanceView() {
           </>
         )}
 
-        {!isLoading && !rangeIncomplete && isError && (
+        {!isLoading && !rangeIncomplete && !rangeError && isError && (
           <ErrorState body={t("loadError")} onRetry={() => refetch()} />
         )}
 
@@ -104,11 +98,21 @@ export function AgentPerformanceView() {
             page (the query stays disabled until both dates are set). */}
         {!isLoading && rangeIncomplete && <p style={s.rangeIncomplete}>{t("range.incomplete")}</p>}
 
-        {!isLoading && !rangeIncomplete && !isError && wholeWorkspaceEmpty && (
+        {/* fix-loop (Row 12/AC-4) — real validation copy for a COMPLETE but
+            invalid range (start > end, or span > 366 days), instead of
+            firing the request and rendering the generic `loadError` when the
+            server 422s. */}
+        {!isLoading && !rangeIncomplete && rangeError && (
+          <p style={s.rangeIncomplete}>
+            {rangeError === "startAfterEnd" ? t("range.invalidOrder") : t("range.invalidSpan")}
+          </p>
+        )}
+
+        {!isLoading && !rangeIncomplete && !rangeError && !isError && wholeWorkspaceEmpty && (
           <EmptyState icon="BarChart" title={t("empty.title")} body={t("empty.body")} />
         )}
 
-        {!isLoading && !rangeIncomplete && !isError && data && !wholeWorkspaceEmpty && grouped && pooled && (
+        {!isLoading && !rangeIncomplete && !rangeError && !isError && data && !wholeWorkspaceEmpty && grouped && pooled && (
           <>
             <div style={s.tiles}>
               <MetricCard
@@ -171,6 +175,13 @@ export function AgentPerformanceView() {
 
             <div style={s.section}>
               <div style={s.sectionTitle}>{t("perAgent")}</div>
+              {/* C1 fix-loop — ONE <table> with two <tbody> sections (ranked,
+                  then low-confidence behind a spanning group-label row),
+                  instead of two separate <table> elements that can't share
+                  column sizing. A single table sizes its columns from the
+                  UNION of every row in it, so the ranked and low-confidence
+                  sections' columns align by construction — no
+                  `tableLayout: fixed` / matching-width bookkeeping needed. */}
               <div style={s.tableWrap}>
                 <table style={s.table}>
                   <thead>
@@ -210,65 +221,48 @@ export function AgentPerformanceView() {
                       </tr>
                     ))}
                   </tbody>
+
+                  {grouped.lowConfidence.length > 0 && (
+                    <tbody>
+                      <tr>
+                        <td style={s.groupLabelCell} colSpan={7}>
+                          {t("lowConfidenceGroup")}
+                        </td>
+                      </tr>
+                      {grouped.lowConfidence.map((row) => (
+                        <tr key={row.agent_id}>
+                          <td style={s.td}>
+                            <span style={s.agentCell}>
+                              <span style={s.agentIcon}>
+                                <Icon.Cpu size={12} />
+                              </span>
+                              {row.agent_name}
+                              {row.runs === 0 && (
+                                <Badge color="var(--text-muted)">{t("zeroRuns")}</Badge>
+                              )}
+                            </span>
+                          </td>
+                          <td style={s.td}>{row.runs}</td>
+                          <td style={s.td}>{formatCost(row.avg_cost_usd)}</td>
+                          <td style={s.td}>{formatDurationMs(row.avg_latency_ms)}</td>
+                          <td style={s.td}>
+                            <span style={{ color: acceptRateColor(row.accept_rate) }}>
+                              {formatPercent(row.accept_rate)}
+                            </span>
+                          </td>
+                          <td style={s.td}>{formatLastRunAt(row.last_run_at)}</td>
+                          <td style={s.td}>
+                            <Link href={agentDetailHref(row.agent_id, range)}>{t("view")}</Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  )}
                 </table>
               </div>
 
               {grouped.allLowConfidence && grouped.lowConfidence.length > 0 && (
                 <p style={s.muted}>{t("notRankable")}</p>
-              )}
-
-              {grouped.lowConfidence.length > 0 && (
-                <>
-                  <div style={s.groupLabel}>{t("lowConfidenceGroup")}</div>
-                  {/* C1 fix-loop — repeat the SAME <thead> as the ranked
-                      table above (not a second, structurally different
-                      table) so row heights/column alignment read as one
-                      coherent table with a group separator, not two. */}
-                  <div style={s.tableWrap}>
-                    <table style={s.table}>
-                      <thead>
-                        <tr>
-                          <th style={s.th}>{t("table.agent")}</th>
-                          <th style={s.th}>{t("table.runs")}</th>
-                          <th style={s.th}>{t("table.avgCost")}</th>
-                          <th style={s.th}>{t("table.avgDuration")}</th>
-                          <th style={s.th}>{t("table.accept")}</th>
-                          <th style={s.th}>{t("table.lastRun")}</th>
-                          <th style={s.th} />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {grouped.lowConfidence.map((row) => (
-                          <tr key={row.agent_id}>
-                            <td style={s.td}>
-                              <span style={s.agentCell}>
-                                <span style={s.agentIcon}>
-                                  <Icon.Cpu size={12} />
-                                </span>
-                                {row.agent_name}
-                                {row.runs === 0 && (
-                                  <Badge color="var(--text-muted)">{t("zeroRuns")}</Badge>
-                                )}
-                              </span>
-                            </td>
-                            <td style={s.td}>{row.runs}</td>
-                            <td style={s.td}>{formatCost(row.avg_cost_usd)}</td>
-                            <td style={s.td}>{formatDurationMs(row.avg_latency_ms)}</td>
-                            <td style={s.td}>
-                              <span style={{ color: acceptRateColor(row.accept_rate) }}>
-                                {formatPercent(row.accept_rate)}
-                              </span>
-                            </td>
-                            <td style={s.td}>{formatLastRunAt(row.last_run_at)}</td>
-                            <td style={s.td}>
-                              <Link href={agentDetailHref(row.agent_id, range)}>{t("view")}</Link>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
               )}
             </div>
           </>

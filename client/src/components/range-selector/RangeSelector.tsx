@@ -45,6 +45,35 @@ export function RangeSelector({
     { value: "custom", label: labels.custom },
   ];
 
+  // fix-loop — LOCAL state for the two date inputs, decoupled from the
+  // `value` prop (which round-trips through the URL on every commit). Root
+  // cause of the reported bugs ("calendar icon does nothing" / "can't finish
+  // typing a full date, year segment never sticks"): this component used to
+  // bind the native <input type="date">'s `value` DIRECTLY to `value.start`/
+  // `value.end` and call the parent's `onChange` (→ router.replace → new
+  // URL → new `value` prop) on EVERY change event, including the browser's
+  // own transitional/incomplete-date events while the user is still
+  // mid-typing a segment. Each such round trip re-rendered this component
+  // with a stale or empty `value.start`/`value.end`, forcing React to reset
+  // the controlled input's DOM value out from under the user — wiping
+  // already-typed segments and interrupting the native date picker.
+  // Fix: keep the input controlled by LOCAL state, and only propagate
+  // upward (which triggers the URL/fetch round trip) once the browser
+  // reports a genuinely complete date (a non-empty `e.target.value` — a
+  // native date input only reports non-empty once every segment is valid).
+  const [localStart, setLocalStart] = React.useState(value.start ?? "");
+  const [localEnd, setLocalEnd] = React.useState(value.end ?? "");
+
+  // Re-sync from an EXTERNAL change only (browser back/forward, or another
+  // surface changing the URL) — safe because our own commits below already
+  // match local state by the time they round-trip back down as props.
+  React.useEffect(() => {
+    setLocalStart(value.start ?? "");
+  }, [value.start]);
+  React.useEffect(() => {
+    setLocalEnd(value.end ?? "");
+  }, [value.end]);
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <div style={{ minWidth: 150 }}>
@@ -62,16 +91,48 @@ export function RangeSelector({
           <input
             type="date"
             aria-label={labels.customFrom}
-            value={value.start ?? ""}
-            onChange={(e) => onChange({ range: "custom", start: e.target.value, end: value.end })}
+            value={localStart}
+            onChange={(e) => {
+              const v = e.target.value;
+              // Only a COMPLETE date is ever non-empty here — ignore the
+              // browser's transitional empty value while segments are still
+              // being typed, so local state (and the controlled DOM value)
+              // never gets forced back to "" mid-edit.
+              if (v) {
+                setLocalStart(v);
+                onChange({ range: "custom", start: v, end: value.end });
+              }
+            }}
+            onBlur={(e) => {
+              // A deliberate clear (native "x" button / select-all-delete,
+              // THEN leaving the field) — propagate it, but never on an
+              // in-progress partial edit (blur only fires once, not per
+              // keystroke).
+              if (!e.target.value && localStart) {
+                setLocalStart("");
+                onChange({ range: "custom", start: undefined, end: value.end });
+              }
+            }}
             style={inputStyle}
           />
           <span style={{ color: "var(--text-muted)" }}>–</span>
           <input
             type="date"
             aria-label={labels.customTo}
-            value={value.end ?? ""}
-            onChange={(e) => onChange({ range: "custom", start: value.start, end: e.target.value })}
+            value={localEnd}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) {
+                setLocalEnd(v);
+                onChange({ range: "custom", start: value.start, end: v });
+              }
+            }}
+            onBlur={(e) => {
+              if (!e.target.value && localEnd) {
+                setLocalEnd("");
+                onChange({ range: "custom", start: value.start, end: undefined });
+              }
+            }}
             style={inputStyle}
           />
         </>

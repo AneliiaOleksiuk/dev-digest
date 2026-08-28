@@ -34,6 +34,16 @@ export function rangeQueryString(range: RangeQuery): string {
   return qs ? `?${qs}` : "";
 }
 
+/** fix-loop (A2) — true when the user picked "Custom" but hasn't entered
+ *  both dates yet. Both `useAgentPerf`/`useAgentDetailStats` gate their
+ *  request on the same condition (`enabled`) — callers use this to render
+ *  validation copy instead of silently showing nothing while the query sits
+ *  disabled, or the generic error state (which used to be what a 422 from
+ *  submitting a half-entered range produced). */
+export function isIncompleteCustomRange(range: RangeQuery): boolean {
+  return range.range === "custom" && (!range.start || !range.end);
+}
+
 /** Read `?range=&start=&end=` off the page's own URL (AC-6) — both the
  *  Stats tab and the Agent Performance dashboard call this against
  *  `useSearchParams()`. Falls back to the server's own default (30d) when

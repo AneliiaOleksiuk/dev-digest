@@ -7,12 +7,15 @@
     "30d": "30 days",
     "custom": "Custom",
     "customFrom": "From",
-    "customTo": "To"
+    "customTo": "To",
+    "incomplete": "Enter both a start and end date to load a custom range."
   },
   "summary": {
     "totalRuns": "Total runs",
     "avgAcceptRate": "Avg accept-rate",
+    "avgAcceptRateDenominator": "{accepted} of {decided} decided",
     "totalCost": "Total cost (estimate)",
+    "totalCostSubtitle": "Attributable spend — excludes deleted-agent and non-completed runs",
     "partialCost": "Partial — some runs have no cost data",
     "mostActive": "Most active",
     "mostActiveDetail": "{runs} runs · {acceptRate} accept-rate"

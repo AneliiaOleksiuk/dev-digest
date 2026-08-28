@@ -23,5 +23,10 @@ export function useAgentPerf(range: RangeQuery) {
   return useQuery({
     queryKey: ["agent-performance", rangeQueryKey(range)],
     queryFn: () => api.get<AgentPerf>(`/agents/performance${rangeQueryString(range)}`),
+    // fix-loop (A2) — don't fire the request while a custom range is only
+    // half-entered: the server 422s on a partial `start`/`end` pair, and
+    // firing early just surfaces the generic error state for what is really
+    // a "still typing" moment, not a failure.
+    enabled: range.range !== "custom" || (!!range.start && !!range.end),
   });
 }

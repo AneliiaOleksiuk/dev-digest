@@ -76,6 +76,11 @@ function perfFixture(overrides: Partial<AgentPerf> = {}): AgentPerf {
       most_active_agent: "Security Reviewer",
       most_active_agent_id: "a1",
       total_cost_partial: false,
+      // fix-loop (C2) — mechanical ripple from AgentPerf.summary.runs_trend
+      // being added with `.default([])` (root INSIGHTS.md's documented
+      // "known ripple" pattern for additive-with-default contract fields);
+      // no assertion in this file changed.
+      runs_trend: [],
     },
     agents: [agentRow({})],
     cost_by_agent: [{ label: "Security Reviewer", value: 1.2 }],
@@ -120,6 +125,7 @@ describe("AC-36/AC-37 — the whole-workspace empty state is visually distinct f
           most_active_agent: null,
           most_active_agent_id: null,
           total_cost_partial: false,
+          runs_trend: [],
         },
         agents: [],
         cost_by_agent: [],
@@ -163,6 +169,7 @@ describe("AC-36/AC-37 — the whole-workspace empty state is visually distinct f
           most_active_agent: "Security Reviewer",
           most_active_agent_id: "a1",
           total_cost_partial: false,
+          runs_trend: [],
         },
         agents: [liveAgent, zeroRunAgent],
       }),

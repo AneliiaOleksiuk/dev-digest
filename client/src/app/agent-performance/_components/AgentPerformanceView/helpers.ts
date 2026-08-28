@@ -12,6 +12,22 @@ export function decidedCount(row: AgentPerfRow): number {
   return row.accepted + row.dismissed;
 }
 
+/** A1/AC-25/US-5 — the Avg accept-rate tile's decided-findings denominator:
+ *  sum `accepted`/`decided` across every scored agent row (no contract
+ *  change needed — `accepted`/`dismissed` are already on every
+ *  `AgentPerfRow`). Matches `summary.avg_accept_rate`'s own POOLED
+ *  definition (D-13: total accepted / total decided), so the tile's number
+ *  and its denominator are read off the SAME set. */
+export function pooledDecided(rows: AgentPerfRow[]): { accepted: number; decided: number } {
+  let accepted = 0;
+  let decided = 0;
+  for (const row of rows) {
+    accepted += row.accepted;
+    decided += decidedCount(row);
+  }
+  return { accepted, decided };
+}
+
 export function isLowConfidence(row: AgentPerfRow): boolean {
   return decidedCount(row) < LOW_CONFIDENCE_THRESHOLD;
 }
@@ -82,6 +98,21 @@ export function formatDurationMs(ms: number | null): string {
 export function formatPercent(rate: number | null): string {
   if (rate == null) return "—";
   return `${Math.round(rate * 100)}%`;
+}
+
+/** C4 — quality-based color for the Accept column: green at/above 70%,
+ *  amber in the middle, red below 40%; muted when there's no rate yet
+ *  (null, not "0%" — AC-12/E-10). Thresholds mirror the values a reviewer
+ *  would call "clearly good"/"clearly bad" for an accept-rate; no directional
+ *  trend arrow is derived here — `AgentPerfRow` carries no accept-rate-over-
+ *  time signal (only `trend`, which is findings-per-run, not accept-rate),
+ *  so this is a threshold-only partial fix (scoped down from the mockup's
+ *  ↑/↓ arrow — noted in the fix-loop report). */
+export function acceptRateColor(rate: number | null): string {
+  if (rate == null) return "var(--text-muted)";
+  if (rate >= 0.7) return "var(--ok)";
+  if (rate >= 0.4) return "var(--warn)";
+  return "var(--crit)";
 }
 
 export function formatLastRunAt(iso: string | null): string {

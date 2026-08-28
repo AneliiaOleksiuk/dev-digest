@@ -100,7 +100,9 @@ export function useAgentDetailStats(agentId: string | null | undefined, range: R
   return useQuery({
     queryKey: ["agent-detail-stats", agentId, rangeQueryKey(range)],
     queryFn: () => api.get<AgentStats>(`/agents/${agentId}/stats${rangeQueryString(range)}`),
-    enabled: !!agentId,
+    // fix-loop (A2) — same custom-range completeness guard as useAgentPerf:
+    // don't fire on a half-entered custom range (server 422s on it).
+    enabled: !!agentId && (range.range !== "custom" || (!!range.start && !!range.end)),
   });
 }
 
